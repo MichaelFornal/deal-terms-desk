@@ -47,3 +47,12 @@ def test_hostile_queries_never_raise(conn, q):
 
 def test_empty_query_returns_no_hits(conn):
     assert search(conn, "?!") == []
+
+
+def test_equal_scores_are_ordered_by_passage_id(tmp_path):
+    twin = "Section 4.{} Indemnity. The Buyer shall indemnify the Seller for all losses.\n\n"
+    db = tmp_path / "twins.db"
+    build_index(db, {"c": "".join(twin.format(i) for i in range(1, 30))})
+    hits = search(sqlite3.connect(db), "buyer indemnify seller losses", contract_id="c", k=5)
+    assert len({round(h.score, 9) for h in hits}) == 1
+    assert [h.passage_id for h in hits] == [1, 2, 3, 4, 5]

@@ -53,3 +53,103 @@ def test_anchors_too_far_apart_are_rejected():
     sq, idx = squash(far)
     piece = "A" * 40 + " x " + "B" * 40
     assert align_piece(piece, sq, idx)[0] == "none"
+
+
+# --- occurrence choice, table of contents, truncation, short pieces ---
+
+from evals.align import align_excerpt, short_pieces  # noqa: E402
+
+HEADING = "Section 4.3 Authority; Non-Contravention; Governmental Consents"
+TOC_CONTRACT = (
+    "TABLE OF CONTENTS\n"
+    f"{HEADING} .......... 12\n"
+    "Section 4.4 Capitalization of the Company .......... 14\n\n"
+    "ARTICLE IV\n\n"
+    f"{HEADING}. The Company has all requisite corporate power and authority to enter into this Agreement.\n"
+)
+TOC_END = TOC_CONTRACT.index("ARTICLE IV")
+BODY_AT = TOC_CONTRACT.index(HEADING, TOC_END)
+
+
+def test_a_match_inside_the_table_of_contents_is_skipped_for_the_body():
+    sq, idx = squash(TOC_CONTRACT)
+    [got] = align_excerpt(HEADING, sq, idx, exclude=[(0, TOC_END)])
+    assert got.status == "exact" and got.start == BODY_AT
+    assert got.toc_rescued and not got.toc_only and got.n_candidates == 1
+
+
+def test_without_exclusions_the_first_occurrence_is_kept():
+    sq, idx = squash(TOC_CONTRACT)
+    [got] = align_excerpt(HEADING, sq, idx)
+    assert got.start == TOC_CONTRACT.index(HEADING) and got.n_candidates == 2 and not got.toc_rescued
+
+
+def test_touching_table_of_contents_spans_are_excluded_as_one():
+    sq, idx = squash(TOC_CONTRACT)
+    split_at = TOC_CONTRACT.index("Section 4.4")
+    [got] = align_excerpt(HEADING + " .......... 12 Section 4.4", sq, idx,
+                          exclude=[(0, split_at), (split_at, TOC_END)])
+    assert got.status == "none" and got.toc_only
+
+
+def test_a_piece_found_only_in_the_table_of_contents_is_unaligned():
+    sq, idx = squash(TOC_CONTRACT)
+    [got] = align_excerpt("Section 4.4 Capitalization of the Company .......... 14", sq, idx, exclude=[(0, TOC_END)])
+    assert (got.status, got.start, got.end) == ("none", -1, -1)
+    assert got.toc_only and not got.toc_rescued
+
+
+REPEATED = "The Company shall not take any action that would reasonably be expected to delay the Closing."
+TWO_SECTIONS = (
+    "Section 5.1 Conduct of Business. " + REPEATED + " Nothing herein limits the Company.\n\n"
+    + "filler text about other matters. " * 40 + "\n\n"
+    "Section 6.2 Efforts of the Parties. Each party shall use reasonable best efforts to obtain approvals. "
+    + REPEATED + "\n"
+)
+
+
+def test_an_ambiguous_piece_takes_the_occurrence_nearest_the_excerpts_other_pieces():
+    sq, idx = squash(TWO_SECTIONS)
+    excerpt = ("Section 6.2 Efforts of the Parties. Each party shall use reasonable best efforts to obtain "
+               "approvals. <omitted> " + REPEATED)
+    unique, repeated = align_excerpt(excerpt, sq, idx)
+    assert unique.n_candidates == 1
+    assert repeated.n_candidates == 2
+    assert repeated.start == TWO_SECTIONS.rindex(REPEATED)
+
+
+def test_an_ambiguous_piece_alone_falls_back_to_the_first_occurrence():
+    sq, idx = squash(TWO_SECTIONS)
+    [got] = align_excerpt(REPEATED, sq, idx)
+    assert got.n_candidates == 2 and got.start == TWO_SECTIONS.index(REPEATED)
+
+
+def test_a_tail_phrase_that_recurs_inside_the_clause_does_not_truncate_the_span():
+    tail = "in accordance with the terms of this Agreement."
+    clause = (
+        "Section 3.01 Effect on Capital Stock. Each share shall be converted " + tail
+        + " Each option shall be cancelled and the holder paid in cash, without interest, " + tail
+        + " Each warrant shall become exercisable for the merger consideration " + tail
+    )
+    text = "Preamble.\n\n" + clause + "\n\nSection 3.02 Exchange of Certificates. Parent shall deposit the fund.\n"
+    sq, idx = squash(text)
+    piece = clause.replace("paid in cash", "paid in immediately available cash")
+    [got] = align_excerpt(piece, sq, idx)
+    assert got.status == "anchored"
+    assert text[got.start:got.end] == clause
+
+
+def test_an_anchored_span_much_shorter_than_the_piece_is_rejected():
+    head = "The Company shall pay the Termination Fee to Parent"
+    tail = "by wire transfer of immediately available funds."
+    text = head + " " + tail
+    sq, idx = squash(text)
+    piece = head + " within two business days after termination, " * 8 + tail
+    [got] = align_excerpt(piece, sq, idx)
+    assert got.status == "none"
+
+
+def test_short_pieces_are_counted_not_silently_dropped():
+    excerpt = "Section 7.2 Conditions. <omitted> " + "x" * 60 + " <omitted> (Page 3) <omitted> ok"
+    assert len(pieces_of(excerpt)) == 1
+    assert short_pieces(excerpt) == 2

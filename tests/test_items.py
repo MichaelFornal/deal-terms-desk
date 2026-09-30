@@ -51,3 +51,48 @@ def test_contract_without_a_file_is_counted_not_raised():
     items, report = build_items(rows, {"contract_1": TEXT})
     assert items == []
     assert report["items_missing_contract"] == 1 and report["items_scored"] == 0
+
+
+def test_overlapping_and_touching_gold_spans_are_merged():
+    first = "Section 2.6 Conversion of Securities. Each Company Share shall be converted"
+    overlapping = "Each Company Share shall be converted into the right to receive cash."
+    rows = [row("contract_1", first + " (Page 9)", "Type of Consideration", "A-Answer"),
+            row("contract_1", overlapping + " (Page 9)", "Type of Consideration", "B-Answer")]
+    items, report = build_items(rows, {"contract_1": TEXT})
+    assert report["pieces_exact"] == 2
+    [(s, e)] = items[0].gold
+    assert TEXT[s:e] == EX_26[: -len(" (Page 9)")]
+
+
+def test_separate_gold_spans_stay_separate():
+    rows = [row("contract_1", EX_26 + " <omitted> " + EX_72, "Mixed", "Mixed-Answer")]
+    items, _ = build_items(rows, {"contract_1": TEXT})
+    assert len(items[0].gold) == 2
+
+
+def test_query_strips_every_answer_suffix_variant():
+    questions = ["Relational language (MAE carveout)-Answer (Y/N)", "Knowledge Definition-Answer (Y/",
+                 "Bringdown Standard Answer", "COR standard-answer", "Knowledge requirement - answer"]
+    rows = [row("contract_1", EX_26, "Type of Consideration", q) for q in questions]
+    items, _ = build_items(rows, {"contract_1": TEXT})
+    assert items[0].query == ("Type of Consideration. Bringdown Standard. COR standard. Knowledge Definition. "
+                              "Knowledge requirement. Relational language (MAE carveout)")
+
+
+def test_table_of_contents_matches_are_skipped_and_counted():
+    toc = "TABLE OF CONTENTS\n" + EX_26.replace(" (Page 9)", "") + "\n\n"
+    text = toc + TEXT
+    rows = [row("contract_1", EX_26, "Type of Consideration", "Type of Consideration-Answer")]
+    items, report = build_items(rows, {"contract_1": text}, toc={"contract_1": [(0, len(toc))]})
+    [(s, e)] = items[0].gold
+    assert s == len(toc)
+    assert report["pieces_toc_rescued"] == 1 and report["pieces_toc_only"] == 0
+    assert report["pieces_ambiguous"] == 0
+
+
+def test_ambiguous_and_short_pieces_are_counted():
+    rows = [row("contract_1", EX_26 + " <omitted> Short bit. <omitted> " + EX_26, "Type of Consideration", "Q-Answer")]
+    doubled = TEXT + "\n" + TEXT
+    _, report = build_items(rows, {"contract_1": doubled})
+    assert report["pieces_short"] == 1
+    assert report["pieces_ambiguous"] == 2

@@ -36,11 +36,21 @@ def _write_json(path: Path, obj: dict) -> None:
     tmp.replace(path)
 
 
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows), encoding="utf-8")
+    tmp.replace(path)
+
+
 def run(db_path: Path, csv_paths: list[Path], contracts_dir: Path, out_dir: Path, n_boot: int = 2000) -> dict:
     conn = sqlite3.connect(db_path)
     contract_ids = [r[0] for r in conn.execute("SELECT contract_id FROM contracts ORDER BY contract_id")]
     texts = {cid: load_contract(Path(contracts_dir) / f"{cid}.txt") for cid in contract_ids}
-    items, alignment = build_items(load_rows(csv_paths), texts)
+    toc: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for cid, s, e in conn.execute("SELECT contract_id, start_char, end_char FROM passages WHERE kind = 'toc'"):
+        toc[cid].append((s, e))
+    items, alignment = build_items(load_rows(csv_paths), texts, toc=dict(toc))
 
     passages: dict[str, list[tuple[int, int]]] = defaultdict(list)
     for cid, s, e in conn.execute("SELECT contract_id, start_char, end_char FROM passages WHERE kind != 'toc'"):
@@ -63,6 +73,8 @@ def run(db_path: Path, csv_paths: list[Path], contracts_dir: Path, out_dir: Path
             "recall@10": recall_at_k(hits, item.gold, 10),
             "mrr@10": mrr(hits, item.gold, K),
             "ndcg@10": ndcg_at_k(hits, item.gold, n_relevant, K),
+            "gold": [list(g) for g in item.gold],
+            "top_passage_ids": [h.passage_id for h in hits],
         })
     if not per_item:
         raise ValueError("no scorable eval items: check that the index and the label CSVs describe the same contracts")
@@ -85,5 +97,6 @@ def run(db_path: Path, csv_paths: list[Path], contracts_dir: Path, out_dir: Path
     }
     out_dir = Path(out_dir)
     _write_json(out_dir / "alignment.json", alignment)
+    _write_jsonl(out_dir / "r1_items.jsonl", sorted(per_item, key=lambda r: r["item_id"]))
     _write_json(out_dir / "r1.json", result)
     return result

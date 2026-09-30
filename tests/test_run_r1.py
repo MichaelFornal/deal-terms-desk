@@ -69,3 +69,27 @@ def test_run_is_deterministic(tmp_path):
     b = run(db, csvs, cdir, out, n_boot=100)
     a.pop("latency_ms"); b.pop("latency_ms")
     assert a == b
+
+
+def test_run_writes_one_result_line_per_item(tmp_path):
+    db, csvs, cdir, out = setup(tmp_path)
+    result = run(db, csvs, cdir, out, n_boot=100)
+    lines = [json.loads(l) for l in (out / "r1_items.jsonl").read_text().splitlines()]
+    assert len(lines) == result["overall"]["recall@5"]["n_items"] == 8
+    assert [l["item_id"] for l in lines] == sorted(l["item_id"] for l in lines)
+    first = lines[0]
+    assert set(first) == {"item_id", "contract_id", "split", "category", "gold", "top_passage_ids", *METRICS}
+    assert first["item_id"] == "contract_0|Termination Fee" and first["contract_id"] == "contract_0"
+    assert 1 <= len(first["top_passage_ids"]) <= 10 and all(isinstance(p, int) for p in first["top_passage_ids"])
+    assert first["recall@5"] == 1.0
+    assert not list(out.glob("*.tmp"))
+
+
+def test_gold_inside_the_indexed_table_of_contents_is_not_used(tmp_path):
+    db, csvs, cdir, out = setup(tmp_path)
+    import sqlite3
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE passages SET kind = 'toc' WHERE contract_id = 'contract_0' AND ordinal = 1")
+    conn.commit(); conn.close()
+    result = run(db, csvs, cdir, out, n_boot=100)
+    assert result["alignment"]["pieces_toc_only"] == 1

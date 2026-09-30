@@ -33,6 +33,6 @@ def search(conn: sqlite3.Connection, query: str, contract_id: str | None = None,
     if contract_id is not None:
         sql += " AND p.contract_id = ?"
         params.append(contract_id)
-    sql += " ORDER BY bm25(passages_fts) LIMIT ?"
+    sql += " ORDER BY bm25(passages_fts), p.passage_id LIMIT ?"
     params.append(k)
     return [Hit(*row) for row in conn.execute(sql, params)]
