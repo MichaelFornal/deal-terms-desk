@@ -42,6 +42,9 @@ so and compares against the published baselines.
   the Method page.
 - As reported by verification on 2026-09-30 (from the Hugging Face API, not recounted here): 152
   agreements, 47,457 annotations, 92 question types. M1 recounts these with a named query.
+- **Correction, measured in M1:** the three label CSVs hold 39,231 label rows, not 47,457
+  (`maud_label_rows_all` in `facts/queries.py`). The 152 agreements and 92 question types
+  recount as stated. Use the facts value, not either figure here, wherever a count is printed.
 - **Correction, measured while planning M1:** at revision `37d5c3b9` only 100 of the 152
   agreements named in the label files have a contract text file; the other 52 return 404. The
   labelled half is therefore 100 agreements unless the missing texts are found elsewhere.
