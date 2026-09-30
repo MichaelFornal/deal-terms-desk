@@ -2,6 +2,9 @@ import hashlib
 import random
 
 TUNE_TENTHS = 3
+# The report says "95%"; tests/test_facts.py pins these so the two cannot drift apart.
+CI_LOW = 0.025
+CI_HIGH = 0.975
 
 
 def split_of(contract_id: str) -> str:
@@ -27,6 +30,6 @@ def cluster_bootstrap(values_by_cluster: dict[str, list[float]], n_boot: int = 2
             n += counts[j]
         stats.append(total / n)
     stats.sort()
-    lo = stats[int(0.025 * n_boot)]
-    hi = stats[min(n_boot - 1, int(0.975 * n_boot))]
+    lo = stats[int(CI_LOW * n_boot)]
+    hi = stats[min(n_boot - 1, int(CI_HIGH * n_boot))]
     return {"mean": mean, "lo": lo, "hi": hi, "n_items": sum(counts), "n_clusters": len(clusters)}

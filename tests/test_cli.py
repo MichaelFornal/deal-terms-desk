@@ -54,3 +54,19 @@ def test_build_without_fetched_contracts_fails_clearly(tmp_path, monkeypatch, ca
     monkeypatch.setattr(cli, "INDEX", tmp_path / "maud.db")
     assert cli.entry(["build"]) == 2
     assert "dtd fetch" in capsys.readouterr().err
+
+
+def test_facts_include_the_label_recount_and_per_category_results(data):
+    cli.entry(["build"]); cli.entry(["eval"])
+    assert cli.entry(["facts"]) == 0
+    facts = json.loads((data / "facts.json").read_text())
+    assert facts["maud_label_rows_all"] == 3 and facts["maud_label_contracts"] == 3
+    assert facts["r1_cat_general_items"] == 3
+
+
+def test_facts_without_label_csvs_fails_clearly(data, capsys):
+    cli.entry(["build"]); cli.entry(["eval"])
+    for p in (data / "raw" / "maud").glob("*.csv"):
+        p.unlink()
+    assert cli.entry(["facts"]) == 2
+    assert "label CSVs" in capsys.readouterr().err

@@ -45,16 +45,18 @@ def _cmd_eval(args) -> int:
 
 def _cmd_facts(args) -> int:
     r1 = OUT / "r1.json"
-    if not INDEX.exists() or not r1.exists():
-        print("index or r1.json missing; run `dtd build` then `dtd eval` first", file=sys.stderr)
+    if not INDEX.exists() or not r1.exists() or not _csv_paths():
+        print("index, r1.json or label CSVs missing; run `dtd fetch`, `dtd build` then `dtd eval` first",
+              file=sys.stderr)
         return 2
     if args.check:
-        stale = check_facts(INDEX, r1, FACTS)
+        stale = check_facts(INDEX, r1, FACTS, _csv_paths())
         if stale:
             print("stale facts: " + ", ".join(stale), file=sys.stderr)
             return 1
         return 0
-    FACTS.write_text(json.dumps(build_facts(INDEX, r1), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    facts = build_facts(INDEX, r1, _csv_paths())
+    FACTS.write_text(json.dumps(facts, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 
 

@@ -34,3 +34,19 @@ def load_rows(csv_paths: list[Path]) -> list[LabelRow]:
                     category=row["category"],
                 )] = None
     return list(seen)
+
+
+def census(csv_paths: list[Path]) -> dict:
+    """Every row of every label CSV, all data types: the raw material for the recount facts."""
+    csv.field_size_limit(10**9)
+    rows = 0
+    contracts: set[str] = set()
+    questions: set[str] = set()
+    for p in csv_paths:
+        with open(p, encoding="utf-8", errors="replace", newline="") as f:
+            for row in csv.DictReader(f):
+                rows += 1
+                questions.add(row["question"])
+                if row["contract_name"] != PSEUDO_CONTRACT:
+                    contracts.add(row["contract_name"])
+    return {"rows": rows, "contracts": contracts, "questions": questions}

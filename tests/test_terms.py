@@ -8,9 +8,14 @@ def test_means_style_with_curly_quotes():
     assert text[terms[0].start:terms[0].end].startswith("“Company Equity Awards” means")
 
 
-def test_shall_mean_and_has_the_meaning_with_straight_quotes():
+def test_shall_mean_is_a_definition_and_has_the_meaning_is_a_cross_reference():
     text = '"Effective Time" shall mean the time of filing. "Parent Board" has the meaning set forth in Section 1.1.'
-    assert [t.term for t in extract_terms(text)] == ["Effective Time", "Parent Board"]
+    assert [(t.term, t.style) for t in extract_terms(text)] == [("Effective Time", "means"), ("Parent Board", "xref")]
+
+
+def test_shall_have_the_meaning_is_a_cross_reference():
+    text = "“Superior Proposal” shall have the meaning set forth in Section 6.2(e)."
+    assert [(t.term, t.style) for t in extract_terms(text)] == [("Superior Proposal", "xref")]
 
 
 def test_parenthetical_definition():

@@ -2,7 +2,9 @@ import re
 from dataclasses import dataclass
 
 _QUOTED = "[“\"]([A-Z][^”\"\n]{1,80})[”\"]"
-MEANS = re.compile(_QUOTED + r"\s+(?:means|shall mean|has the meaning|shall have the meaning)\b")
+MEANS = re.compile(_QUOTED + r"\s+(?:means|shall mean)\b")
+# "has the meaning set forth in ..." points at a definition elsewhere; it defines nothing here.
+XREF = re.compile(_QUOTED + r"\s+(?:has the meaning|shall have the meaning)\b")
 PAREN = re.compile(r"\((?:the|each,? an?|collectively,? the|together,? the)?\s*" + _QUOTED + r"\)")
 
 
@@ -16,5 +18,6 @@ class Term:
 
 def extract_terms(text: str) -> list[Term]:
     out = [Term(m.group(1).strip(), m.start(), m.end(), "means") for m in MEANS.finditer(text)]
+    out += [Term(m.group(1).strip(), m.start(), m.end(), "xref") for m in XREF.finditer(text)]
     out += [Term(m.group(1).strip(), m.start(), m.end(), "paren") for m in PAREN.finditer(text)]
     return sorted(out, key=lambda t: t.start)
