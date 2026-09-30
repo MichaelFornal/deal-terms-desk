@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 
-_QUOTED = "[“\"]([A-Z][^“\"\n]{1,80})[”\"]"
+_QUOTED = "[“\"]([A-Z][^”\"\n]{1,80})[”\"]"
 MEANS = re.compile(_QUOTED + r"\s+(?:means|shall mean|has the meaning|shall have the meaning)\b")
 PAREN = re.compile(r"\((?:the|each,? an?|collectively,? the|together,? the)?\s*" + _QUOTED + r"\)")
 

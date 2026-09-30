@@ -32,3 +32,10 @@ def test_quoted_phrase_that_is_not_a_definition_is_ignored():
 def test_results_are_sorted_by_position():
     text = "(the “B Term”) and later “A Term” means something."
     assert [t.term for t in extract_terms(text)] == ["B Term", "A Term"]
+
+
+def test_non_definition_quote_before_real_definition():
+    """Regression test: character class must exclude closing quote, not opening quote."""
+    text = 'See “Yes” and “No” here, and Foo” means x.'
+    terms = extract_terms(text)
+    assert [t.term for t in terms] == []
