@@ -22,3 +22,18 @@ def test_unterminated_last_line_is_ignored(tmp_path):
     led = Ledger(p)
     assert led.get("u1") is not None
     assert led.get("u2") is None
+
+
+def test_torn_line_truncated_on_load_survives_resume(tmp_path):
+    p = tmp_path / "ledger.jsonl"
+    # Write a complete record and a torn one
+    p.write_text('{"url": "u1", "status": "ok", "bytes": 5}\n{"url": "u2", "sta')
+    # Open ledger (truncates torn line)
+    led = Ledger(p)
+    # Put a new record
+    led.put({"url": "u3", "status": "ok", "bytes": 10})
+    # Reopen and verify all readable records survive
+    led2 = Ledger(p)
+    assert led2.get("u1") == {"url": "u1", "status": "ok", "bytes": 5}
+    assert led2.get("u2") is None
+    assert led2.get("u3") == {"url": "u3", "status": "ok", "bytes": 10}

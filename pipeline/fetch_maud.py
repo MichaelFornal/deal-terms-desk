@@ -36,6 +36,10 @@ def fetch(url: str, dest: Path, ledger: Ledger, opener=urllib.request.urlopen) -
             ledger.put(rec)
             return rec
         raise
+    except Exception:
+        # Clean up .part file on any error (including ConnectionError)
+        part.unlink(missing_ok=True)
+        raise
     os.replace(part, dest)
     rec = {"url": url, "status": "ok", "bytes": size, "sha256": digest.hexdigest()}
     ledger.put(rec)

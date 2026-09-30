@@ -62,6 +62,7 @@ def test_interrupted_download_is_not_treated_as_complete(tmp_path):
     with pytest.raises(ConnectionError):
         fetch("http://x/a.txt", dest, led, lambda req: BrokenResponse(b"hello world"))
     assert not dest.exists()
+    assert not (dest.with_name(dest.name + ".part")).exists()
     assert Ledger(tmp_path / "l.jsonl").get("http://x/a.txt") is None
     rec = fetch("http://x/a.txt", dest, Ledger(tmp_path / "l.jsonl"), opener_for({"http://x/a.txt": b"hello world"}))
     assert rec["status"] == "ok" and dest.read_bytes() == b"hello world"

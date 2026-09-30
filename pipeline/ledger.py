@@ -12,12 +12,17 @@ class Ledger:
         if self.path.exists():
             data = self.path.read_text(encoding="utf-8")
             lines = data.split("\n")
+            torn = False
             if not data.endswith("\n"):
                 lines = lines[:-1]
+                torn = True
             for line in lines:
                 if line.strip():
                     rec = json.loads(line)
                     self._recs[rec["url"]] = rec
+            # Truncate file to remove any torn last line, preventing corruption on next append
+            if torn:
+                self.path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
     def get(self, url: str) -> dict | None:
         return self._recs.get(url)
