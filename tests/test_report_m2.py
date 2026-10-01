@@ -65,3 +65,8 @@ def test_rung_two_names_the_model_from_the_facts():
     f = Every()
     f["m2_vec_model"] = "some-model"
     assert "Dense only (some-model in sqlite-vec)" in render_m2(f)
+
+
+def test_rewriting_section_caveats_the_token_measurement():
+    section = render_m2(Every()).split("## Query rewriting")[1].split("\n## ")[0]
+    assert "measured through `claude -p` (includes the CLI's own prompt and any thinking); a direct API call would cost less" in section
