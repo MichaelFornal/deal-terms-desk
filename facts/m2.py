@@ -8,6 +8,7 @@ from pathlib import Path
 from evals.bootstrap import cluster_bootstrap
 from evals.compare import load_items, paired_bootstrap
 from evals.failures import CLASSES
+from evals.run_rung import _percentile
 from evals.tune import MAX_P95_MS
 from facts.queries import CATEGORIES, REPORT_METRICS
 
@@ -69,12 +70,16 @@ def build_m2(out_dir: Path, index_db: Path, fixed_db: Path, settings_path: Path,
         report = res[r]["by_split"]["report"]
         for name, key in REPORT_METRICS.items():
             _ci(f, f"m2_{r}_report_{name}", report[key])
-        f[f"m2_{r}_latency_ms_p50"] = round(res[r]["latency_ms"]["p50"], 2)
-        f[f"m2_{r}_latency_ms_p95"] = round(res[r]["latency_ms"]["p95"], 2)
+        # Latency and context tokens on the report split, like the headline metrics.
+        rows = [row for row in items[r].values() if row["split"] == "report"]
+        latencies = sorted(row["latency_ms"] for row in rows)
+        f[f"m2_{r}_latency_ms_p50"] = round(_percentile(latencies, 0.50), 2)
+        f[f"m2_{r}_latency_ms_p95"] = round(_percentile(latencies, 0.95), 2)
         f[f"m2_{r}_load_avg"] = round(res[r]["load"]["before"][0], 2)
-        tokens = res[r]["context_tokens"]
-        f[f"m2_{r}_context_tokens_mean"] = round(tokens["mean"], 1) if tokens else None
+        tokens = [row["context_tokens"] for row in rows if row["context_tokens"] is not None]
+        f[f"m2_{r}_context_tokens_mean"] = round(sum(tokens) / len(tokens), 1) if tokens else None
     f["m2_report_items"] = res["r1"]["by_split"]["report"]["recall@5"]["n_items"]
+    f["m2_report_gold_spans"] = sum(len(row["gold"]) for row in items["r1"].values() if row["split"] == "report")
     f["m2_report_contracts"] = res["r1"]["by_split"]["report"]["recall@5"]["n_clusters"]
     f["m2_deal_points"] = len({i.split("|", 1)[1] for i in items["r1"]})
 

@@ -108,3 +108,67 @@ def test_live_path_sentence_names_the_chosen_depth():
     assert "Live path within the limit at the chosen depth (10): yes" in _tuning_section(f)
     f["m2_tuned_live_path_ok"] = False
     assert "chosen depth (10): no" in _tuning_section(f)
+
+
+def _section(text, head):
+    return text.split(head, 1)[1].split("\n## ", 1)[0]
+
+
+def test_rewriting_section_states_replace_versus_append_and_the_lexicon_caveat():
+    section = _section(render_m2(Every()), "## Query rewriting")
+    assert "replaced the query text" in section and "appends contract words to the original query" in section
+    assert "replace-versus-append" in section
+    assert "may know MAUD" in section and "`retrieval/lexicon.json`" in section
+
+
+def test_how_to_read_says_latency_and_tokens_are_on_the_report_split():
+    section = _section(render_m2(Every()), "## How to read this")
+    assert "Latency and context tokens are over the report-split items only" in section
+
+
+def test_misses_section_prints_the_gold_span_denominator():
+    f = Every()
+    f["m2_report_gold_spans"] = 4321
+    assert "out of 4321 gold spans" in _section(render_m2(f), "## Why retrieval misses")
+
+
+def _family_section(f):
+    return _section(render_m2(f), "## Per question family")
+
+
+def test_families_where_r6_hurts_are_listed_from_the_facts():
+    from facts.queries import CATEGORIES
+    f = Every()
+    slugs = list(CATEGORIES)
+    for s in slugs:
+        f[f"m2_cmp_r6_vs_r1_cat_{s}_recall_at_5_hi"] = 0.1
+    assert "No family has an R6 minus R1 interval entirely below zero." in _family_section(f)
+    f[f"m2_cmp_r6_vs_r1_cat_{slugs[0]}_recall_at_5_hi"] = -0.01
+    f[f"m2_cmp_r6_vs_r1_cat_{slugs[1]}_recall_at_5_hi"] = -0.02
+    text = _family_section(f)
+    assert (f"R6 minus R1 is entirely below zero (hurts) for: {CATEGORIES[slugs[0]]}, {CATEGORIES[slugs[1]]}."
+            in text)
+    f[f"m2_cat_{slugs[0]}_items"] = 0
+    assert CATEGORIES[slugs[0]] + "," not in _family_section(f).split("hurts) for:")[1]
+
+
+def test_tuning_says_why_the_reranker_was_kept_when_none_qualified():
+    f = Every()
+    f["m2_tuned_reranker"] = "tiny-model"
+    f["m2_tune_probe_qualified"] = False
+    section = _tuning_section(f)
+    assert "`tiny-model` was kept because it was the fastest there" in section
+    assert "the other rerankers were not tried at smaller depths" in section
+    f["m2_tune_probe_qualified"] = True
+    assert "was kept because" not in _tuning_section(f)
+
+
+def test_committed_m2_report_is_rendered_from_committed_facts():
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    facts, report = root / "facts.json", root / "docs" / "m2" / "REPORT.md"
+    if facts.exists() and report.exists():
+        f = json.loads(facts.read_text(encoding="utf-8"))
+        if any(k.startswith("m2_") for k in f):
+            assert render_m2(f) == report.read_text(encoding="utf-8")

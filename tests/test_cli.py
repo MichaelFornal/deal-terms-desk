@@ -269,7 +269,7 @@ def test_corpus_wide_runs_r1_and_the_best_rung(data):
     assert best["extra"]["rung"] in ("R1", "R2")
 
 
-def test_full_m2_chain_produces_facts_and_both_reports(data, monkeypatch):
+def _m2_chain(data, monkeypatch):
     from pathlib import Path
 
     from evals.bootstrap import split_of
@@ -293,9 +293,82 @@ def test_full_m2_chain_produces_facts_and_both_reports(data, monkeypatch):
               ["facts"], ["facts", "--check"], ["report"]]
     for step in steps:
         assert cli.entry(step) == 0, step
-    facts = json.loads((data / "facts.json").read_text())
+    return json.loads((data / "facts.json").read_text())
+
+
+def test_full_m2_chain_produces_facts_and_both_reports(data, monkeypatch):
+    facts = _m2_chain(data, monkeypatch)
     assert facts["m2_r1_report_recall_at_5"] == facts["r1_report_recall_at_5"]
     assert "machine-built" in (data / "docs" / "m2" / "REPORT.md").read_text()
+
+
+def test_latency_tokens_and_gold_spans_are_on_the_report_split(data, monkeypatch):
+    from evals.run_rung import _percentile
+    facts = _m2_chain(data, monkeypatch)
+    for rung in ("r1", "r4", "r5_llm"):
+        rows = [json.loads(l) for l in (data / "out" / f"{rung}_items.jsonl").read_text().splitlines()]
+        report = [r for r in rows if r["split"] == "report"]
+        assert report and len(report) < len(rows)
+        lat = sorted(r["latency_ms"] for r in report)
+        assert facts[f"m2_{rung}_latency_ms_p50"] == round(_percentile(lat, 0.50), 2)
+        assert facts[f"m2_{rung}_latency_ms_p95"] == round(_percentile(lat, 0.95), 2)
+        tokens = [r["context_tokens"] for r in report]
+        assert facts[f"m2_{rung}_context_tokens_mean"] == round(sum(tokens) / len(tokens), 1)
+        if rung == "r1":
+            assert facts["m2_report_gold_spans"] == sum(len(r["gold"]) for r in report)
+
+
+def test_r5_llm_model_comes_from_the_rewrite_records(data, monkeypatch):
+    from evals.llm_rewrite import REWRITE_MODEL
+    facts = _m2_chain(data, monkeypatch)
+    assert facts["m2_llm_rewrite_model"] == REWRITE_MODEL
+    with pytest.raises(ValueError, match="model"):
+        cli._rewrite_model({"a": {"model": "x"}, "b": {"model": "y"}})
+    assert cli._rewrite_model({"a": {"model": "x"}, "b": {"model": "x"}}) == "x"
+
+
+def test_facts_with_an_unreadable_index_table_exits_2(data, monkeypatch, capsys):
+    import sqlite3
+
+    def boom(*a, **kw):
+        raise sqlite3.OperationalError("no such table: chunking")
+    cli.entry(["build"]); cli.entry(["eval"])
+    monkeypatch.setattr(cli, "m2_present", lambda out: True)
+    monkeypatch.setattr(cli, "build_m2", boom)
+    capsys.readouterr()
+    assert cli.entry(["facts"]) == 2
+    err = capsys.readouterr().err
+    assert "no such table: chunking" in err and "dtd build --fixed" in err
+
+
+def test_atomic_write_keeps_the_old_file_when_the_write_fails(tmp_path, monkeypatch):
+    from pathlib import Path
+    target = tmp_path / "x.json"
+    target.write_text("old", encoding="utf-8")
+    real = Path.write_text
+
+    def torn(self, text, **kw):
+        real(self, text[:2], **kw)
+        raise OSError("disk full")
+    monkeypatch.setattr(Path, "write_text", torn)
+    with pytest.raises(OSError):
+        cli._write_atomic(target, "new content")
+    monkeypatch.setattr(Path, "write_text", real)
+    assert target.read_text(encoding="utf-8") == "old"
+    cli._write_atomic(target, "new content")
+    assert target.read_text(encoding="utf-8") == "new content"
+    assert [p.name for p in tmp_path.iterdir()] == ["x.json"]
+
+
+def test_disputes_and_failures_are_written_atomically(data, monkeypatch):
+    from tests.fakes import fake_claude
+    written = []
+    real = cli._write_atomic
+    monkeypatch.setattr(cli, "_write_atomic", lambda path, text: (written.append(path.name), real(path, text)))
+    monkeypatch.setattr(cli, "run_claude", fake_claude('{"answers": true, "quote": "closing shall occur"}'))
+    cli.entry(["build"]); cli.entry(["embed"]); cli.entry(["eval", "--rung", "R3"])
+    assert cli.entry(["failures"]) == 0 and cli.entry(["disputes"]) == 0
+    assert {"failures_r3.json", "disputes.json"} <= set(written)
 
 
 def test_facts_with_partial_m2_results_name_what_is_missing(data, capsys):

@@ -9,7 +9,7 @@ from evals.bootstrap import split_of
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
-from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
+from evals.llm_rewrite import rewrite_all
 from evals.run_rung import evaluate, load_context, with_passages
 from evals.tune import tune
 from facts.build import build as build_facts
@@ -38,6 +38,23 @@ EXTERNAL = Path("facts/external.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REWRITES = "llm_rewrites.jsonl"
 CHAR_KS = (1, 2, 4, 8, 16, 32, 64)
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Write beside the target, then rename over it, so a kill never leaves a torn file."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _rewrite_model(rewrites: dict[str, dict]) -> str:
+    models = {r["model"] for r in rewrites.values()}
+    if len(models) != 1:
+        raise ValueError(f"LLM rewrites come from more than one model: {sorted(models)}")
+    return models.pop()
 
 
 def _csv_paths() -> list[Path]:
@@ -141,8 +158,13 @@ def _cmd_eval(args) -> int:
             got = ladder.run("R5", q, c, k, rewritten=r["rewrite"])
             return Retrieved(got.hits, got.ms + r["api_ms"], got.context)
         n = len(rewrites)
+        try:
+            model = _rewrite_model(rewrites)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
         result = evaluate(ctx, "R5-llm", retrieve, OUT, count_tokens=ladder.embedder.count_tokens, extra={
-            "settings": asdict(ladder.settings), "model": REWRITE_MODEL, "queries": n,
+            "settings": asdict(ladder.settings), "model": model, "queries": n,
             "input_tokens_mean": sum(r["input_tokens"] for r in rewrites.values()) / n,
             "output_tokens_mean": sum(r["output_tokens"] for r in rewrites.values()) / n})
     elif rung == "R3-fixed":
@@ -226,7 +248,7 @@ def _cmd_disputes(args) -> int:
     share = summarise(judged) if judged else {"mean": 0.0, "lo": 0.0, "hi": 0.0, "n_items": 0, "n_clusters": 0}
     doc = {"rung": rung, "model": DISPUTE_MODEL, "sample": len(judged), "share": share,
            "machine_built": True, "prompt": DISPUTE_PROMPT}
-    (OUT / "disputes.json").write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
+    _write_atomic(OUT / "disputes.json", json.dumps(doc, indent=2, sort_keys=True))
     print(json.dumps({"rung": rung, "share": doc["share"]["mean"]}))
     return 0
 
@@ -261,6 +283,10 @@ def _cmd_facts(args) -> int:
     except (FileNotFoundError, ValueError) as e:
         print(str(e), file=sys.stderr)
         return 2
+    except sqlite3.OperationalError as e:
+        print(f"an index lacks a table the facts read ({e}); rerun `dtd build --fixed` and `dtd embed --fixed` "
+              "(and `dtd build` then `dtd embed` for the section-aware index) before `dtd facts`", file=sys.stderr)
+        return 2
     if args.check:
         stored = json.loads(FACTS.read_text(encoding="utf-8")) if FACTS.exists() else {}
         stale = sorted(n for n in fresh if n not in UNSTABLE and not is_unstable(n) and stored.get(n) != fresh[n])
@@ -282,7 +308,7 @@ def _cmd_failures(args) -> int:
             except ValueError as err:
                 print(f"{rung}: {err}", file=sys.stderr)
                 return 2
-            (OUT / f"failures_{rung.lower()}.json").write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
+            _write_atomic(OUT / f"failures_{rung.lower()}.json", json.dumps(out, indent=2, sort_keys=True))
             done.append(rung)
     if not done:
         print("no rung results; run `dtd eval --rung ...` first", file=sys.stderr)
