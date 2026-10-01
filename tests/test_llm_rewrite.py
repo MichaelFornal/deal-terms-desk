@@ -12,7 +12,8 @@ def test_rewrite_all_calls_once_per_distinct_query_and_resumes(tmp_path):
     cache = tmp_path / "rw.jsonl"
     out = rewrite_all(["fee", "fee", "options"], cache, runner=runner, model="m")
     assert set(out) == {"fee", "options"} and len(runner.calls) == 2
-    assert out["fee"] == {"query": "fee", "rewrite": "Company Termination Fee", "input_tokens": 100,
+    assert out["fee"] == {"key": "m|fee", "model": "m", "query": "fee", "rewrite": "Company Termination Fee",
+                          "input_tokens": 100,
                           "output_tokens": 20, "api_ms": 50,
                           "usage": {"input_tokens": 100, "output_tokens": 20}}
     again = fake_claude("never used")
@@ -37,3 +38,14 @@ def test_missing_usage_keys_count_zero(tmp_path):
         return {"result": "x", "usage": {"output_tokens": 3}}
     out = rewrite_all(["fee"], tmp_path / "rw.jsonl", runner=runner, model="m")
     assert out["fee"]["input_tokens"] == 0 and out["fee"]["usage"] == {"output_tokens": 3}
+
+
+def test_a_different_model_calls_again_and_the_same_model_reuses(tmp_path):
+    cache = tmp_path / "rw.jsonl"
+    first = fake_claude("A")
+    rewrite_all(["fee"], cache, runner=first, model="m1")
+    same = fake_claude("unused")
+    assert rewrite_all(["fee"], cache, runner=same, model="m1")["fee"]["rewrite"] == "A" and same.calls == []
+    other = fake_claude("B")
+    out = rewrite_all(["fee"], cache, runner=other, model="m2")
+    assert len(other.calls) == 1 and out["fee"]["rewrite"] == "B" and out["fee"]["model"] == "m2"

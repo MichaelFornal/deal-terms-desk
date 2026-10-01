@@ -19,14 +19,16 @@ def clean(result_text: str, query: str) -> str:
 
 
 def rewrite_all(queries: list[str], cache_path: Path, runner=run_claude, model: str = REWRITE_MODEL) -> dict[str, dict]:
-    ledger = Ledger(Path(cache_path), key="query")
+    """Rewrites by query; the ledger is keyed by model and query, so another model asks again."""
+    ledger = Ledger(Path(cache_path), key="key")
     out = {}
     for q in dict.fromkeys(queries):
-        rec = ledger.get(q)
+        key = f"{model}|{q}"
+        rec = ledger.get(key)
         if rec is None:
             resp = runner(PROMPT.format(query=q), model)
             usage = resp.get("usage", {})
-            rec = {"query": q, "rewrite": clean(resp["result"], q),
+            rec = {"key": key, "model": model, "query": q, "rewrite": clean(resp["result"], q),
                    "input_tokens": sum(usage.get(k, 0) for k in INPUT_KEYS),
                    "output_tokens": usage.get("output_tokens", 0),
                    "api_ms": resp.get("duration_api_ms", 0), "usage": usage}

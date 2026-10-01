@@ -49,3 +49,22 @@ def test_missing_binary_and_timeout_raise(monkeypatch):
     _patch(monkeypatch, exc=subprocess.TimeoutExpired("claude", 1))
     with pytest.raises(RuntimeError, match="timed out"):
         claude.run_claude("p", "m")
+
+
+def test_runs_without_tools_or_settings_outside_the_repo(monkeypatch):
+    import os
+    from pathlib import Path
+    seen = {}
+
+    def fake(cmd, **kw):
+        seen["cmd"], seen["cwd"] = cmd, kw.get("cwd")
+        seen["cwd_exists"] = os.path.isdir(kw["cwd"]) if kw.get("cwd") else False
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"result": "ok"}), "")
+    monkeypatch.setattr(claude.subprocess, "run", fake)
+    claude.run_claude("p", "m")
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--tools") + 1] == "" and cmd[cmd.index("--setting-sources") + 1] == ""
+    repo = Path(__file__).resolve().parent.parent
+    cwd = Path(seen["cwd"]).resolve()
+    assert seen["cwd_exists"] and repo not in cwd.parents and cwd != repo
+    assert not cwd.exists()

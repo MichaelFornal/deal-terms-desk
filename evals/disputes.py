@@ -64,7 +64,8 @@ def judge(sample: list[dict], texts: dict[str, str], conn: sqlite3.Connection, c
             resp = runner(PROMPT.format(query=row["query"], gold=gold, retrieved=retrieved), model)
             rec = {"key": key, "passage_id": pid, "model": model,
                    "item_id": row["item_id"], "contract_id": row["contract_id"], "category": row["category"],
-                   "disputed": verdict(resp["result"], retrieved), "raw": resp["result"][:2000]}
+                   "disputed": verdict(resp["result"], retrieved), "raw": resp["result"][:2000],
+                   "usage": resp.get("usage", {})}
             ledger.put(rec)
         out.append(rec)
     return out

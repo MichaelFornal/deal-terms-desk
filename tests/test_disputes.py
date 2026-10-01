@@ -60,3 +60,12 @@ def test_cache_is_keyed_on_passage_and_model(tmp_path):
     moved = [{**sample[0], "top_passage_ids": [1, 2]}]
     out = judge(moved, {"c": DOC}, conn, path, runner=runner, model="m")
     assert len(runner.calls) == 3 and out[0]["passage_id"] == 1
+
+
+def test_judged_records_keep_the_usage(tmp_path):
+    db = tmp_path / "i.db"
+    build_index(db, {"c": DOC})
+    runner = fake_claude('{"answers": true, "quote": "Reverse Termination Fee"}', input_tokens=7, output_tokens=3)
+    out = judge(sample_misses(rows(), n=10), {"c": DOC}, sqlite3.connect(db), tmp_path / "d.jsonl",
+                runner=runner, model="m")
+    assert out[0]["usage"] == {"input_tokens": 7, "output_tokens": 3}
