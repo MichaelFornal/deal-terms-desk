@@ -38,3 +38,28 @@ def ndcg_at_k(hits, gold, n_relevant: int, k: int = 10) -> float:
         if is_relevant(h.start, h.end, gold)
     )
     return dcg / ideal
+
+
+def _union(spans) -> list[tuple[int, int]]:
+    out: list[list[int]] = []
+    for s, e in sorted(spans):
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return [(s, e) for s, e in out]
+
+
+def _covered(spans, gold) -> int:
+    return sum(_overlap(s, e, g0, g1) for s, e in _union(spans) for g0, g1 in _union(gold))
+
+
+def char_recall_at_k(hits, gold, k: int) -> float:
+    total = sum(e - s for s, e in _union(gold))
+    return _covered([(h.start, h.end) for h in hits[:k]], gold) / total if total else 0.0
+
+
+def char_precision_at_k(hits, gold, k: int) -> float:
+    spans = _union([(h.start, h.end) for h in hits[:k] if h.end > h.start])
+    total = sum(e - s for s, e in spans)
+    return _covered(spans, gold) / total if total else 0.0
