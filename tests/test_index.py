@@ -37,3 +37,14 @@ def test_rebuild_is_idempotent_and_leaves_no_temp_file(tmp_path):
     second = build_index(db, {"contract_a": DOC_A, "contract_b": DOC_B})
     assert first == second
     assert sorted(p.name for p in tmp_path.iterdir()) == ["maud.db"]
+
+
+def test_index_stores_section_paths(tmp_path):
+    import sqlite3
+    from retrieval.index import build_index
+    doc = "ARTICLE I\nTERMS\n\nSection 1.1 Closing. The closing occurs.\n\nSection 1.2 Merger. The merger occurs.\n"
+    db = tmp_path / "i.db"
+    build_index(db, {"c": doc})
+    paths = [r[0] for r in sqlite3.connect(db).execute(
+        "SELECT section_path FROM passages WHERE kind = 'section' ORDER BY ordinal")]
+    assert paths == ["Article I › 1.1", "Article I › 1.2"]

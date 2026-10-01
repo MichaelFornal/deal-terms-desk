@@ -54,6 +54,7 @@ def test_build_runs_every_named_query(tmp_path):
     assert facts["r1_recall_at_5"] == 0.1235
     assert facts["r1_report_recall_at_5"] == 0.5
     assert 0 < facts["maud_passages_with_section_share"] < 1
+    assert 0 <= facts["maud_passages_with_article_share"] <= 1
 
 
 def test_defined_terms_are_distinct_real_definitions_and_cross_references_are_separate(tmp_path):

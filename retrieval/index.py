@@ -15,7 +15,8 @@ CREATE TABLE passages(
     end_char INTEGER NOT NULL,
     section_id TEXT NOT NULL,
     section_title TEXT NOT NULL,
-    kind TEXT NOT NULL
+    kind TEXT NOT NULL,
+    section_path TEXT NOT NULL
 );
 CREATE INDEX passages_contract ON passages(contract_id);
 CREATE TABLE terms(
@@ -44,9 +45,9 @@ def build_index(db_path: Path, contracts: dict[str, str]) -> dict:
         summary["contracts"] += 1
         for p in segment(contract_id, text):
             cur = conn.execute(
-                "INSERT INTO passages(contract_id, ordinal, start_char, end_char, section_id, section_title, kind)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (p.contract_id, p.ordinal, p.start, p.end, p.section_id, p.section_title, p.kind),
+                "INSERT INTO passages(contract_id, ordinal, start_char, end_char, section_id, section_title, kind,"
+                " section_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (p.contract_id, p.ordinal, p.start, p.end, p.section_id, p.section_title, p.kind, p.section_path),
             )
             summary["passages"] += 1
             if p.kind != "toc":
