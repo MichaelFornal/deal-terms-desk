@@ -27,6 +27,12 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "FACTS", tmp_path / "facts.json")
     monkeypatch.setattr(cli, "REPORT", tmp_path / "docs" / "REPORT.md")
     monkeypatch.setattr(cli, "CSV_NAMES", ("MAUD_dev.csv",))
+    from tests.fakes import FakeEmbedder, FakeReranker
+    monkeypatch.setattr(cli, "INDEX_FIXED", tmp_path / "index" / "maud_fixed.db")
+    monkeypatch.setattr(cli, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(cli, "SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(cli, "LEXICON_PATH", tmp_path / "lexicon.json")
+    monkeypatch.setattr(cli, "_models", lambda: (FakeEmbedder(), lambda name: FakeReranker()))
     return tmp_path
 
 
@@ -70,3 +76,26 @@ def test_facts_without_label_csvs_fails_clearly(data, capsys):
         p.unlink()
     assert cli.entry(["facts"]) == 2
     assert "label CSVs" in capsys.readouterr().err
+
+
+def test_embed_then_every_ladder_rung_evaluates(data):
+    assert cli.entry(["build"]) == 0
+    assert cli.entry(["embed"]) == 0
+    for rung in ("R1", "R2", "R3", "R4"):
+        assert cli.entry(["eval", "--rung", rung]) == 0
+        result = json.loads((data / "out" / f"{rung.lower()}.json").read_text())
+        assert result["rung"] == rung and result["context_tokens"]["mean"] > 0
+
+
+def test_eval_of_a_dense_rung_before_embed_fails_clearly(data, capsys):
+    cli.entry(["build"])
+    assert cli.entry(["eval", "--rung", "R2"]) == 2
+    assert "dtd embed" in capsys.readouterr().err
+
+
+def test_embed_twice_embeds_nothing_the_second_time(data, capsys):
+    cli.entry(["build"])
+    cli.entry(["embed"])
+    capsys.readouterr()
+    assert cli.entry(["embed"]) == 0
+    assert json.loads(capsys.readouterr().out)["embedded"] == 0
