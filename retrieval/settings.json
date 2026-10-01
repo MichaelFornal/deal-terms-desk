@@ -1,0 +1,120 @@
+{
+  "evidence": {
+    "fusion": [
+      {
+        "depth": 20,
+        "n_items": 450,
+        "p95_ms": 282.13,
+        "recall@5": 0.5071,
+        "rrf_k0": 10
+      },
+      {
+        "depth": 20,
+        "n_items": 450,
+        "p95_ms": 275.85,
+        "recall@5": 0.4988,
+        "rrf_k0": 60
+      },
+      {
+        "depth": 50,
+        "n_items": 450,
+        "p95_ms": 272.45,
+        "recall@5": 0.5267,
+        "rrf_k0": 10
+      },
+      {
+        "depth": 50,
+        "n_items": 450,
+        "p95_ms": 290.86,
+        "recall@5": 0.4902,
+        "rrf_k0": 60
+      },
+      {
+        "depth": 100,
+        "n_items": 450,
+        "p95_ms": 276.43,
+        "recall@5": 0.5275,
+        "rrf_k0": 10
+      },
+      {
+        "depth": 100,
+        "n_items": 450,
+        "p95_ms": 276.97,
+        "recall@5": 0.4913,
+        "rrf_k0": 60
+      }
+    ],
+    "probe_qualified": false,
+    "rerank_depth": [
+      {
+        "n_items": 450,
+        "p95_ms": 1596.33,
+        "recall@5": 0.5121,
+        "rerank_depth": 10,
+        "reranker": "jinaai/jina-reranker-v1-tiny-en"
+      },
+      {
+        "n_items": 450,
+        "p95_ms": 3129.51,
+        "recall@5": 0.4594,
+        "rerank_depth": 20,
+        "reranker": "jinaai/jina-reranker-v1-tiny-en"
+      },
+      {
+        "n_items": 450,
+        "p95_ms": 4765.18,
+        "recall@5": 0.431,
+        "rerank_depth": 30,
+        "reranker": "jinaai/jina-reranker-v1-tiny-en"
+      }
+    ],
+    "rerankers": [
+      {
+        "n_items": 450,
+        "p95_ms": 23886.8,
+        "recall@5": 0.4859,
+        "rerank_depth": 20,
+        "reranker": "BAAI/bge-reranker-base"
+      },
+      {
+        "n_items": 450,
+        "p95_ms": 5058.25,
+        "recall@5": 0.4975,
+        "rerank_depth": 20,
+        "reranker": "Xenova/ms-marco-MiniLM-L-6-v2"
+      },
+      {
+        "n_items": 450,
+        "p95_ms": 3174.3,
+        "recall@5": 0.4594,
+        "rerank_depth": 20,
+        "reranker": "jinaai/jina-reranker-v1-tiny-en"
+      }
+    ]
+  },
+  "live_path_ok": true,
+  "load": {
+    "after": [
+      8.40966796875,
+      7.2021484375,
+      7.482421875
+    ],
+    "before": [
+      3.25048828125,
+      3.13525390625,
+      3.64990234375
+    ]
+  },
+  "rule": "Fusion: highest tune recall@5 on R3 (ties: smaller depth, then larger k0). Reranker, then rerank depth: highest tune recall@5 on R4 among settings whose p95 latency on the development machine is at most 3000 ms (ties: faster); if none qualifies, the fastest, with live_path_ok false.",
+  "settings": {
+    "depth": 100,
+    "rerank_depth": 10,
+    "reranker": "jinaai/jina-reranker-v1-tiny-en",
+    "rrf_k0": 10
+  },
+  "tuned_on": {
+    "contracts": 24,
+    "items": 450,
+    "split": "tune"
+  }
+}

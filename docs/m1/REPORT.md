@@ -56,7 +56,7 @@ bootstrapped over agreements.
 | MRR@10 | 0.4025 (0.3844 to 0.4206) | 0.4023 |
 | nDCG@10 | 0.3902 (0.3742 to 0.4065) | 0.3918 |
 
-Latency per query: p50 9.67 ms, p95 49.24 ms.
+Latency per query: p50 9.8 ms, p95 49.73 ms.
 
 ### Per deal-point category (recall@5, all agreements)
 
