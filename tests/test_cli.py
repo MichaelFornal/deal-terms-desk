@@ -267,3 +267,38 @@ def test_corpus_wide_runs_r1_and_the_best_rung(data):
     best = json.loads((data / "out" / "best_corpus.json").read_text())
     assert r1["scope"] == "corpus-wide" and "char_recall@64" in r1["overall"]
     assert best["extra"]["rung"] in ("R1", "R2")
+
+
+def test_full_m2_chain_produces_facts_and_both_reports(data, monkeypatch):
+    from pathlib import Path
+
+    from evals.bootstrap import split_of
+    from tests.fakes import fake_claude
+    raw = data / "raw" / "maud"
+    part = DOC.split(chr(10) * 2)[1].strip()
+    extra = ""
+    for i, cid in enumerate([c for c in (f"contract_t{i}" for i in range(40)) if split_of(c) == "tune"][:2]):
+        (raw / "contracts" / f"{cid}.txt").write_text(DOC, encoding="utf-8")
+        extra += (f'main,{cid},"{part} (Page 9)",All Cash,0,Type of Consideration-Answer,<NONE>,'
+                  f'Type of Consideration,{50 + i},General Information\n')
+    with open(raw / "MAUD_dev.csv", "a", encoding="utf-8") as fh:
+        fh.write(extra)
+    monkeypatch.setattr(cli, "run_claude", fake_claude('{"answers": true, "quote": "Closing"}'))
+    monkeypatch.setattr(cli, "EXTERNAL", Path("facts/external.json").resolve())
+    monkeypatch.setattr(cli, "REPORT_M2", data / "docs" / "m2" / "REPORT.md")
+    steps = [["build"], ["embed"], ["lexicon"], ["tune"]]
+    steps += [["eval", "--rung", r] for r in ("R1", "R2", "R3", "R4", "R5", "R6")]
+    steps += [["rewrite"], ["eval", "--rung", "R5-llm"], ["build", "--fixed"], ["embed", "--fixed"],
+              ["eval", "--rung", "R3-fixed"], ["eval", "--rung", "corpus"], ["failures"], ["disputes"],
+              ["facts"], ["facts", "--check"], ["report"]]
+    for step in steps:
+        assert cli.entry(step) == 0, step
+    facts = json.loads((data / "facts.json").read_text())
+    assert facts["m2_r1_report_recall_at_5"] == facts["r1_report_recall_at_5"]
+    assert "machine-built" in (data / "docs" / "m2" / "REPORT.md").read_text()
+
+
+def test_facts_with_partial_m2_results_name_what_is_missing(data, capsys):
+    cli.entry(["build"]); cli.entry(["embed"]); cli.entry(["eval"]); cli.entry(["eval", "--rung", "R2"])
+    assert cli.entry(["facts"]) == 2
+    assert "r3.json" in capsys.readouterr().err

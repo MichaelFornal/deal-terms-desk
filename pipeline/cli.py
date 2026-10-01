@@ -13,8 +13,11 @@ from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
 from evals.run_rung import evaluate, load_context, with_passages
 from evals.tune import tune
 from facts.build import build as build_facts
-from facts.build import check as check_facts
+from facts.build import UNSTABLE
+from facts.m2 import build_m2, is_unstable
+from facts.m2 import present as m2_present
 from facts.report import render
+from facts.report_m2 import render_m2
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
@@ -31,6 +34,8 @@ from retrieval.result import Retrieved
 
 FACTS = Path("facts.json")
 REPORT = Path("docs/m1/REPORT.md")
+EXTERNAL = Path("facts/external.json")
+REPORT_M2 = Path("docs/m2/REPORT.md")
 REWRITES = "llm_rewrites.jsonl"
 CHAR_KS = (1, 2, 4, 8, 16, 32, 64)
 
@@ -238,20 +243,32 @@ def _cmd_tune(args) -> int:
     return 0
 
 
+def _all_facts() -> dict:
+    facts = build_facts(INDEX, OUT / "r1.json", _csv_paths())
+    if m2_present(OUT):
+        facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
+    return facts
+
+
 def _cmd_facts(args) -> int:
     r1 = OUT / "r1.json"
     if not INDEX.exists() or not r1.exists() or not _csv_paths():
         print("index, r1.json or label CSVs missing; run `dtd fetch`, `dtd build` then `dtd eval` first",
               file=sys.stderr)
         return 2
+    try:
+        fresh = _all_facts()
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     if args.check:
-        stale = check_facts(INDEX, r1, FACTS, _csv_paths())
+        stored = json.loads(FACTS.read_text(encoding="utf-8")) if FACTS.exists() else {}
+        stale = sorted(n for n in fresh if n not in UNSTABLE and not is_unstable(n) and stored.get(n) != fresh[n])
         if stale:
             print("stale facts: " + ", ".join(stale), file=sys.stderr)
             return 1
         return 0
-    facts = build_facts(INDEX, r1, _csv_paths())
-    FACTS.write_text(json.dumps(facts, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    FACTS.write_text(json.dumps(fresh, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 
 
@@ -278,8 +295,12 @@ def _cmd_report(args) -> int:
     if not FACTS.exists():
         print("facts.json missing; run `dtd facts` first", file=sys.stderr)
         return 2
+    facts = json.loads(FACTS.read_text(encoding="utf-8"))
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(render(json.loads(FACTS.read_text(encoding="utf-8"))), encoding="utf-8")
+    REPORT.write_text(render(facts), encoding="utf-8")
+    if "m2_r1_report_recall_at_5" in facts:
+        REPORT_M2.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M2.write_text(render_m2(facts), encoding="utf-8")
     return 0
 
 
