@@ -39,6 +39,23 @@ def load_context(db_path: Path, csv_paths: list[Path], contracts_dir: Path) -> C
     return Context(items, alignment, texts, dict(passages))
 
 
+def isolate_foreign(hits: list, contract_id: str) -> list:
+    """Move each hit from another agreement to its own negative span of the same length.
+
+    Gold spans are always >= 0 and the moved spans never touch each other, so a foreign hit is never
+    relevant (recall, MRR, nDCG, char recall) yet its characters still count in char precision.
+    """
+    out, cum = [], 0
+    for h in hits:
+        if h.contract_id == contract_id:
+            out.append(h)
+        else:
+            length = h.end - h.start
+            out.append(replace(h, start=-(cum + length), end=-cum))
+            cum += length + 1
+    return out
+
+
 def _summarise(per_item: list[dict], metrics: tuple[str, ...], n_boot: int) -> dict:
     out = {}
     for metric in metrics:
@@ -75,8 +92,7 @@ def evaluate(ctx: Context, rung: str, retrieve: Retriever, out_dir: Path, n_boot
     per_item = []
     for item in ctx.items:
         got = retrieve(item.query, item.contract_id if scope == "within-agreement" else None, k)
-        # A hit from another agreement can never be relevant: blank its span before scoring.
-        hits = [h if h.contract_id == item.contract_id else replace(h, start=-1, end=-1) for h in got.hits]
+        hits = isolate_foreign(got.hits, item.contract_id)
         n_relevant = sum(1 for s, e in ctx.passages.get(item.contract_id, []) if is_relevant(s, e, item.gold))
         row = {
             "item_id": item.item_id,

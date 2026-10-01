@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from evals.run_rung import evaluate, load_context
-from retrieval.bm25 import search
+from retrieval.bm25 import Hit, search
 from retrieval.index import build_index
 from retrieval.result import CONTEXT_K, Retrieved
 
@@ -66,14 +68,53 @@ def test_corpus_wide_scope_passes_no_contract_and_never_credits_another_agreemen
 
     def retrieve(query, contract_id, k):
         seen.append(contract_id)
-        r = inner(query, contract_id, k)
-        return Retrieved([h for h in r.hits if h.contract_id == "contract_0"], r.ms, r.context)
+        return inner(query, contract_id, k)
     result = evaluate(ctx, "R1-corpus", retrieve, out, n_boot=50, scope="corpus-wide", k=64, char_ks=(1, 2))
     assert set(seen) == {None}
     rows = {r["contract_id"]: r for r in map(json.loads, (out / "r1_corpus_items.jsonl").read_text().splitlines())}
-    assert rows["contract_0"]["recall@10"] == 1.0
-    assert rows["contract_1"]["recall@10"] == 0.0
+    # Foreign hits (identical offsets in the other agreements) really do come back.
+    assert any(len(r["top_passage_ids"]) > 1 for r in rows.values())
+    assert all(r["recall@10"] == 1.0 for r in rows.values())
     assert "char_recall@2" in rows["contract_0"] and "char_precision@1" in result["overall"]
+
+
+def test_foreign_passage_at_identical_offsets_earns_no_recall_or_precision(tmp_path):
+    db, csvs, cdir, out = setup(tmp_path)
+    ctx = load_context(db, csvs, cdir)
+    inner = bm25_retriever(db, ctx)
+
+    def retrieve(query, contract_id, k):
+        # Everything except contract_0's own hits: only other agreements' passages come back.
+        r = inner(query, None, k)
+        return Retrieved([h for h in r.hits if h.contract_id != "contract_0"], r.ms, r.context)
+    evaluate(ctx, "R1-foreign", retrieve, out, n_boot=50, scope="corpus-wide", k=64, char_ks=(5,))
+    rows = {r["contract_id"]: r for r in map(json.loads, (out / "r1_foreign_items.jsonl").read_text().splitlines())}
+    assert rows["contract_0"]["recall@10"] == 0.0 and rows["contract_0"]["mrr@10"] == 0.0
+    assert rows["contract_0"]["char_recall@5"] == 0.0 and rows["contract_0"]["char_precision@5"] == 0.0
+    assert rows["contract_1"]["recall@10"] == 1.0
+
+
+def test_char_precision_counts_foreign_characters(tmp_path):
+    db, csvs, cdir, out = setup(tmp_path)
+    ctx = load_context(db, csvs, cdir)
+    item = next(i for i in ctx.items if i.contract_id == "contract_0")
+    own = next(h for h in search_all(db, item.query, "contract_0"))
+    foreign = Hit(999, "contract_1", own.start, own.end, 1.0)
+
+    def retrieve(query, contract_id, k):
+        if query != item.query:
+            return Retrieved([], 0.0, [])
+        return Retrieved([own, foreign], 1.0, [])
+    evaluate(ctx, "R1-prec", retrieve, out, n_boot=50, scope="corpus-wide", char_ks=(2,))
+    rows = {r["contract_id"]: r for r in map(json.loads, (out / "r1_prec_items.jsonl").read_text().splitlines())}
+    p1 = rows["contract_0"]["char_precision@2"]
+    covered = rows["contract_0"]["char_recall@2"] * sum(e - s for s, e in item.gold)
+    assert p1 == pytest.approx(covered / (2 * (own.end - own.start)))
+
+
+def search_all(db, query, cid):
+    import sqlite3
+    return search(sqlite3.connect(db), query, contract_id=cid, k=1)
 
 
 def test_run_r1_output_is_unchanged_in_shape(tmp_path):
