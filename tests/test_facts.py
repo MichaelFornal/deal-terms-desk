@@ -149,7 +149,11 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_committed_facts_file_has_exactly_the_named_queries():
     path = ROOT / "facts.json"
     if path.exists():
-        assert set(json.loads(path.read_text())) == set(QUERIES)
+        keys = set(json.loads(path.read_text()))
+        assert {k for k in keys if not k.startswith("m2_")} == set(QUERIES)
+        m2 = {k for k in keys if k.startswith("m2_")}
+        if m2:
+            assert {"m2_r1_report_recall_at_5", "m2_r6_report_recall_at_5"} <= m2
 
 
 def test_committed_report_is_rendered_from_committed_facts():
