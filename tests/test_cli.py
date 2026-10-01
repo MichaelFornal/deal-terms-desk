@@ -99,3 +99,29 @@ def test_embed_twice_embeds_nothing_the_second_time(data, capsys):
     capsys.readouterr()
     assert cli.entry(["embed"]) == 0
     assert json.loads(capsys.readouterr().out)["embedded"] == 0
+
+
+def test_r1_through_the_ladder_matches_the_direct_m1_path(data):
+    from evals.run_r1 import run as run_r1
+    assert cli.entry(["build"]) == 0
+    assert cli.entry(["eval", "--rung", "R1"]) == 0
+    direct = run_r1(cli.INDEX, cli._csv_paths(), cli.RAW / "contracts", data / "direct")
+    via = json.loads((data / "out" / "r1.json").read_text())
+    assert via["overall"] == direct["overall"]
+
+    def rows(d):
+        path = next(d.glob("*_items.jsonl"))
+        drop = {"latency_ms", "context_tokens", "load", "extra"}
+        return [{k: v for k, v in json.loads(line).items() if k not in drop}
+                for line in path.read_text().splitlines()]
+    assert rows(data / "out") == rows(data / "direct") and rows(data / "out")
+
+
+def test_embed_before_build_fails_clearly(data, capsys):
+    assert cli.entry(["embed"]) == 2
+    assert "dtd build" in capsys.readouterr().err
+
+
+def test_unknown_rung_fails(data):
+    cli.entry(["build"])
+    assert cli.entry(["eval", "--rung", "R9"]) == 2
