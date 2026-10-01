@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from evals.bootstrap import split_of
+from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
 from evals.run_rung import evaluate, load_context
 from facts.build import build as build_facts
 from facts.build import check as check_facts
@@ -21,9 +22,11 @@ from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
+from retrieval.result import Retrieved
 
 FACTS = Path("facts.json")
 REPORT = Path("docs/m1/REPORT.md")
+REWRITES = "llm_rewrites.jsonl"
 
 
 def _csv_paths() -> list[Path]:
@@ -90,7 +93,7 @@ def _cmd_eval(args) -> int:
         print("index or label CSVs missing; run `dtd fetch` then `dtd build` first", file=sys.stderr)
         return 2
     rung = args.rung
-    if rung not in RUNGS:
+    if rung not in RUNGS + ("R5-llm",):
         print(f"unknown rung {rung}", file=sys.stderr)
         return 2
     if rung != "R1" and not _has_vectors(INDEX):
@@ -100,8 +103,44 @@ def _cmd_eval(args) -> int:
         print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
         return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
-    result = _eval_rung(rung, INDEX, rung, ctx)
+    if rung == "R5-llm":
+        path = CACHE / REWRITES
+        if not path.exists():
+            print("no LLM rewrites; run `dtd rewrite` first", file=sys.stderr)
+            return 2
+        rewrites = rewrite_all([i.query for i in ctx.items], path, runner=_refuse_new_calls)
+        ladder = _ladder(INDEX, ctx.texts)
+
+        def retrieve(q, c, k):
+            r = rewrites[q]
+            got = ladder.run("R5", q, c, k, rewritten=r["rewrite"])
+            return Retrieved(got.hits, got.ms + r["api_ms"], got.context)
+        n = len(rewrites)
+        result = evaluate(ctx, "R5-llm", retrieve, OUT, count_tokens=ladder.embedder.count_tokens, extra={
+            "settings": asdict(ladder.settings), "model": REWRITE_MODEL, "queries": n,
+            "input_tokens_mean": sum(r["input_tokens"] for r in rewrites.values()) / n,
+            "output_tokens_mean": sum(r["output_tokens"] for r in rewrites.values()) / n})
+    else:
+        result = _eval_rung(rung, INDEX, rung, ctx)
     print(json.dumps(result["overall"], indent=2))
+    return 0
+
+
+def _refuse_new_calls(prompt, model):
+    raise SystemExit("a query has no cached LLM rewrite; run `dtd rewrite` first")
+
+
+def _cmd_rewrite(args) -> int:
+    if not INDEX.exists() or not _csv_paths():
+        print("index or label CSVs missing; run `dtd fetch` then `dtd build` first", file=sys.stderr)
+        return 2
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    try:
+        out = rewrite_all([i.query for i in ctx.items], CACHE / REWRITES, runner=run_claude)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    print(json.dumps({"queries": len(out)}))
     return 0
 
 
@@ -157,6 +196,7 @@ def entry(argv: list[str] | None = None) -> int:
     ev = sub.add_parser("eval")
     ev.add_argument("--rung", default="R1")
     ev.set_defaults(fn=_cmd_eval)
+    sub.add_parser("rewrite").set_defaults(fn=_cmd_rewrite)
     sub.add_parser("lexicon").set_defaults(fn=_cmd_lexicon)
     facts = sub.add_parser("facts")
     facts.add_argument("--check", action="store_true")

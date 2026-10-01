@@ -166,3 +166,24 @@ def test_eval_r5_r6_without_a_lexicon_exit_2(data, capsys, rung):
     capsys.readouterr()
     assert cli.entry(["eval", "--rung", rung]) == 2
     assert "run `dtd lexicon` first" in capsys.readouterr().err
+
+
+def test_r5_llm_runs_after_rewrite(data, monkeypatch):
+    from tests.fakes import fake_claude
+    monkeypatch.setattr(cli, "run_claude", fake_claude("Type of Consideration cash"))
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["eval", "--rung", "R5-llm"]) == 2
+    assert cli.entry(["rewrite"]) == 0
+    assert cli.entry(["eval", "--rung", "R5-llm"]) == 0
+    result = json.loads((data / "out" / "r5_llm.json").read_text())
+    assert result["extra"]["input_tokens_mean"] == 100 and result["latency_ms"]["p50"] >= 50
+
+
+def test_rewrite_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys):
+    def boom(prompt, model):
+        raise RuntimeError("claude exited 1: nope")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    cli.entry(["build"])
+    capsys.readouterr()
+    assert cli.entry(["rewrite"]) == 2
+    assert "claude exited 1" in capsys.readouterr().err

@@ -37,3 +37,10 @@ def test_torn_line_truncated_on_load_survives_resume(tmp_path):
     assert led2.get("u1") == {"url": "u1", "status": "ok", "bytes": 5}
     assert led2.get("u2") is None
     assert led2.get("u3") == {"url": "u3", "status": "ok", "bytes": 10}
+
+
+def test_ledger_key_is_configurable(tmp_path):
+    from pipeline.ledger import Ledger
+    led = Ledger(tmp_path / "l.jsonl", key="query")
+    led.put({"query": "fee", "rewrite": "termination fee"})
+    assert Ledger(tmp_path / "l.jsonl", key="query").get("fee")["rewrite"] == "termination fee"
