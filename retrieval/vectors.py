@@ -56,10 +56,10 @@ def fill_cache(cache: sqlite3.Connection, embedder, texts: list[str], batch: int
 
 
 def build_vectors(conn: sqlite3.Connection, cache: sqlite3.Connection, model: str, dim: int = EMBED_DIM) -> dict:
-    """(Re)create passages_vec from the cache. Refuses, leaving it empty, if any passage is missing."""
-    conn.execute("DROP TABLE IF EXISTS passages_vec")
-    conn.execute(f"CREATE VIRTUAL TABLE passages_vec USING vec0(passage_id integer primary key,"
-                 f" contract_id text partition key, embedding float[{dim}] distance_metric=cosine)")
+    """(Re)create passages_vec from the cache, atomically.
+
+    Refuses, touching nothing, if any passage lacks a cached embedding. Otherwise the drop, create, inserts and
+    vec_meta rewrite happen in one transaction, so a failure or kill leaves the previous table and meta intact."""
     rows, missing, truncated = [], 0, 0
     for pid, cid, text in indexed_passages(conn):
         got = cache.execute("SELECT vec, n_tokens FROM emb WHERE model = ? AND sha1 = ?", (model, sha1(text))).fetchone()
@@ -69,12 +69,20 @@ def build_vectors(conn: sqlite3.Connection, cache: sqlite3.Connection, model: st
         rows.append((pid, cid, got[0]))
         truncated += got[1] > MAX_TOKENS
     if missing:
-        conn.commit()
         raise ValueError(f"{missing} passages have no cached embedding for {model}; run `dtd embed` to finish")
-    conn.executemany("INSERT INTO passages_vec(passage_id, contract_id, embedding) VALUES (?, ?, ?)", rows)
-    conn.execute("CREATE TABLE IF NOT EXISTS vec_meta(model TEXT NOT NULL, vectors INTEGER NOT NULL,"
-                 " truncated INTEGER NOT NULL)")
-    conn.execute("DELETE FROM vec_meta")
-    conn.execute("INSERT INTO vec_meta VALUES (?, ?, ?)", (model, len(rows), truncated))
     conn.commit()
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DROP TABLE IF EXISTS passages_vec")
+        conn.execute(f"CREATE VIRTUAL TABLE passages_vec USING vec0(passage_id integer primary key,"
+                     f" contract_id text partition key, embedding float[{dim}] distance_metric=cosine)")
+        conn.executemany("INSERT INTO passages_vec(passage_id, contract_id, embedding) VALUES (?, ?, ?)", rows)
+        conn.execute("CREATE TABLE IF NOT EXISTS vec_meta(model TEXT NOT NULL, vectors INTEGER NOT NULL,"
+                     " truncated INTEGER NOT NULL)")
+        conn.execute("DELETE FROM vec_meta")
+        conn.execute("INSERT INTO vec_meta VALUES (?, ?, ?)", (model, len(rows), truncated))
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
     return {"vectors": len(rows), "truncated": truncated}
