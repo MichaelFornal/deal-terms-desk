@@ -15,10 +15,10 @@ DOC = ("Section 1.1 Closing. The closing shall occur at the offices of counsel.\
        "Section 8.3 Termination Fee. The Company shall pay Parent a termination fee in cash.\n")
 
 
-def setup(tmp_path):
+def setup(tmp_path, doc=DOC):
     cdir = tmp_path / "contracts"
     cdir.mkdir()
-    texts = {c: DOC for c in TUNE + REPORT}
+    texts = {c: doc for c in TUNE + REPORT}
     for c, t in texts.items():
         (cdir / f"{c}.txt").write_text(t, encoding="utf-8")
     fee = DOC.split("\n\n")[1].strip()
@@ -48,6 +48,37 @@ def test_tune_reads_only_the_tune_split_and_records_its_evidence(tmp_path):
     assert len(doc["evidence"]["fusion"]) == len(GRID_DEPTH) * len(GRID_K0)
     assert [r["rerank_depth"] for r in doc["evidence"]["rerank_depth"]] == list(GRID_RERANK_DEPTH)
     assert doc["live_path_ok"] is True
+    best = doc["settings"]
+    assert (best["depth"], best["rrf_k0"]) == (20, 60)
+    assert set(doc["load"]) == {"before", "after"}
+    assert doc["evidence"]["probe_qualified"] is True
+
+
+def test_progress_reports_every_configuration(tmp_path):
+    ctx, conn, emb = setup(tmp_path)
+    lines = []
+    tune(ctx, conn, emb, lambda name: Named(name, 5.0), tmp_path / "rr.db", tmp_path / "s.json",
+         rerankers=("a", "b"), progress=lines.append)
+    for d in GRID_DEPTH:
+        for k0 in GRID_K0:
+            assert any(f"R3 depth={d} k0={k0}" in x for x in lines)
+    assert any("R4 a depth=20" in x for x in lines) and any("R4 b depth=20" in x for x in lines)
+    assert all(any(f"R4 a depth={d}" in x or f"R4 b depth={d}" in x for x in lines) for d in GRID_RERANK_DEPTH)
+
+
+class PerText(FakeReranker):
+    def score(self, query, texts):
+        scores, _ = super().score(query, texts)
+        return scores, 250.0 * len(texts)
+
+
+def test_final_live_path_flag_reflects_the_final_setting_not_the_probe(tmp_path):
+    big = "".join(f"Section {i}.1 Item{i}. Clause number {i} about matters.\n\n" for i in range(40)) + DOC
+    ctx, conn, emb = setup(tmp_path, big)
+    doc = tune(ctx, conn, emb, lambda name: PerText(), tmp_path / "rr.db", tmp_path / "s.json", rerankers=("only",))
+    assert doc["evidence"]["probe_qualified"] is False
+    assert doc["settings"]["reranker"] == "only"
+    assert doc["settings"]["rerank_depth"] == 10 and doc["live_path_ok"] is True
 
 
 def test_a_reranker_over_the_latency_limit_is_not_chosen_while_another_qualifies(tmp_path):

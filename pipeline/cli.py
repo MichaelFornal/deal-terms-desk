@@ -166,7 +166,8 @@ def _cmd_tune(args) -> int:
         return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
     embedder, make_reranker = _models()
-    doc = tune(ctx, vectors.connect(INDEX), embedder, make_reranker, CACHE / "rerank.db", SETTINGS_PATH)
+    doc = tune(ctx, vectors.connect(INDEX), embedder, make_reranker, CACHE / "rerank.db", SETTINGS_PATH,
+                progress=lambda s: print(s, file=sys.stderr, flush=True))
     print(json.dumps({"settings": doc["settings"], "live_path_ok": doc["live_path_ok"]}))
     return 0
 
