@@ -67,3 +67,40 @@ def test_passages_carry_definitions_of_terms_they_use(tmp_path):
     assert "amount in cash" in x[0]
     assert conn.execute("SELECT COUNT(*) FROM passages_x_fts").fetchone() == conn.execute(
         "SELECT COUNT(*) FROM passages_fts").fetchone()
+
+
+def _defs_by_section(db):
+    import sqlite3
+    return sqlite3.connect(db).execute(
+        "SELECT p.section_id, d.term FROM passage_defs d JOIN passages p USING (passage_id)"
+        " ORDER BY p.ordinal, d.rank").fetchall()
+
+
+def test_ubiquity_cutoff(tmp_path):
+    from retrieval.index import build_index
+    # 10 passages: the definitions one plus 9 others. Alpha used in 2 of 10 (20%): kept. Beta in 3 of 10: dropped.
+    parts = ["Section 1.1 Definitions. “Alpha Term” means a. “Beta Term” means b.\n\n"]
+    for i in range(2, 11):
+        use = ""
+        if i <= 3:
+            use += " Alpha Term applies."
+        if i <= 4:
+            use += " Beta Term applies."
+        parts.append(f"Section {i}.1 Misc.{use} Filler {i}.\n\n")
+    db = tmp_path / "u.db"
+    build_index(db, {"c": "".join(parts)})
+    got = _defs_by_section(db)
+    assert ("2.1", "Alpha Term") in got and ("3.1", "Alpha Term") in got
+    assert not any(t == "Beta Term" for _, t in got)
+
+
+def test_max_defs_caps_at_six_in_first_use_order(tmp_path):
+    from retrieval.index import build_index
+    names = ["Term " + c for c in "ABCDEFGH"]
+    parts = ["Section 1.1 Definitions. " + " ".join(f"“{n}” means x." for n in names) + "\n\n"]
+    parts.append("Section 2.1 Use. " + " ".join(f"{n} applies." for n in reversed(names)) + "\n\n")
+    parts += [f"Section 3.{i} Misc. Filler {i}.\n\n" for i in range(1, 60)]
+    db = tmp_path / "m.db"
+    build_index(db, {"c": "".join(parts)})
+    got = _defs_by_section(db)
+    assert got == [("2.1", f"Term {c}") for c in "HGFEDC"]

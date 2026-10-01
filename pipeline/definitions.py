@@ -1,17 +1,24 @@
 import re
 
-from pipeline.terms import Term
+from pipeline.terms import _QUOTED, Term
 
 MAX_DEF_CHARS = 800
 MAX_DEFS = 6
 UBIQUITY = 0.2
 MEANS_END = re.compile(r"\n\s*\n|\n\s*[“\"][A-Z]")
+NEXT_DEF = re.compile(_QUOTED + r"\s+(?:means|shall mean|has the meaning|shall have the meaning)\b")
 SENTENCE_END = re.compile(r"(?<=[.;])\s|\n\s*\n")
 
 
 def _means_span(text: str, t: Term) -> tuple[int, int]:
-    m = MEANS_END.search(text, t.end)
-    end = m.start() if m else len(text)
+    ends = [len(text)]
+    for pat in (MEANS_END, NEXT_DEF):
+        m = pat.search(text, t.end)
+        if m:
+            ends.append(m.start())
+    end = min(ends)
+    while end > t.end and text[end - 1].isspace():
+        end -= 1
     return t.start, min(end, t.start + MAX_DEF_CHARS)
 
 

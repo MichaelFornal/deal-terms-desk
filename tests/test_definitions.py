@@ -45,3 +45,21 @@ def test_term_matching_is_case_sensitive_and_whole_word():
     pat = term_pattern(["Company"])
     assert terms_used("the company and Companywide policy", pat) == []
     assert term_pattern([]) is None
+
+
+SAME_LINE = ("“Affiliate” means any Person controlling another Person. “SEC” means the Securities and Exchange "
+             "Commission. “Securities Act” means the Securities Act of 1933.")
+
+
+def test_same_line_definitions_end_at_the_next_opener():
+    spans = definition_spans(SAME_LINE, extract_terms(SAME_LINE))
+    s, e = spans["SEC"]
+    assert SAME_LINE[s:e] == "“SEC” means the Securities and Exchange Commission."
+    s, e = spans["Affiliate"]
+    assert SAME_LINE[s:e] == "“Affiliate” means any Person controlling another Person."
+
+
+def test_same_line_has_the_meaning_ends_the_previous_span():
+    text = "“SEC” means the Commission. “Act” has the meaning set forth in Section 1."
+    s, e = definition_spans(text, extract_terms(text))["SEC"]
+    assert text[s:e] == "“SEC” means the Commission."
