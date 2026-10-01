@@ -8,6 +8,7 @@ from pathlib import Path
 from evals.bootstrap import split_of
 from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
 from evals.run_rung import evaluate, load_context
+from evals.tune import tune
 from facts.build import build as build_facts
 from facts.build import check as check_facts
 from facts.report import render
@@ -159,6 +160,17 @@ def _cmd_lexicon(args) -> int:
     return 0
 
 
+def _cmd_tune(args) -> int:
+    if not INDEX.exists() or not _csv_paths() or not _has_vectors(INDEX):
+        print("index, vectors or label CSVs missing; run `dtd build` then `dtd embed` first", file=sys.stderr)
+        return 2
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    embedder, make_reranker = _models()
+    doc = tune(ctx, vectors.connect(INDEX), embedder, make_reranker, CACHE / "rerank.db", SETTINGS_PATH)
+    print(json.dumps({"settings": doc["settings"], "live_path_ok": doc["live_path_ok"]}))
+    return 0
+
+
 def _cmd_facts(args) -> int:
     r1 = OUT / "r1.json"
     if not INDEX.exists() or not r1.exists() or not _csv_paths():
@@ -197,6 +209,7 @@ def entry(argv: list[str] | None = None) -> int:
     ev.add_argument("--rung", default="R1")
     ev.set_defaults(fn=_cmd_eval)
     sub.add_parser("rewrite").set_defaults(fn=_cmd_rewrite)
+    sub.add_parser("tune").set_defaults(fn=_cmd_tune)
     sub.add_parser("lexicon").set_defaults(fn=_cmd_lexicon)
     facts = sub.add_parser("facts")
     facts.add_argument("--check", action="store_true")
