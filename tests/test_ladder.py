@@ -89,3 +89,11 @@ def test_r5_without_a_lexicon_is_refused(ladder):
     ladder.lexicon = None
     with pytest.raises(ValueError, match="dtd lexicon"):
         ladder.run("R5", "fee", "big")
+
+
+def test_r6_shows_definitions_and_matches_through_them(ladder):
+    got = ladder.run("R6", "amount in cash", "big", k=5)
+    fee = [c for c in got.context if c.startswith("Section 8.3")]
+    assert fee and "amount in cash equal to $50,000,000" in fee[0]
+    r5 = ladder.run("R5", "amount in cash", "big", k=5)
+    assert all(not c.startswith("Section 8.3") or "$50,000,000" not in c for c in r5.context)

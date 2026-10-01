@@ -48,3 +48,22 @@ def test_index_stores_section_paths(tmp_path):
     paths = [r[0] for r in sqlite3.connect(db).execute(
         "SELECT section_path FROM passages WHERE kind = 'section' ORDER BY ordinal")]
     assert paths == ["Article I › 1.1", "Article I › 1.2"]
+
+
+def test_passages_carry_definitions_of_terms_they_use(tmp_path):
+    import sqlite3
+    from retrieval.index import build_index
+    parts = ["Section 1.1 Definitions. “Company Termination Fee” means an amount in cash equal to $50,000,000.\n\n",
+             "Section 8.3 Fees. The Company shall pay the Company Termination Fee.\n\n"]
+    parts += [f"Section 9.{i} Misc. Filler clause number {i}.\n\n" for i in range(1, 5)]
+    doc = "".join(parts)
+    db = tmp_path / "i.db"
+    build_index(db, {"c": doc})
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT p.section_id, d.term FROM passage_defs d JOIN passages p USING (passage_id)").fetchall()
+    assert rows == [("8.3", "Company Termination Fee")]
+    [x] = conn.execute("SELECT x.text FROM passages_x_fts x JOIN passages p ON p.passage_id = x.rowid"
+                       " WHERE p.section_id = '8.3'").fetchall()
+    assert "amount in cash" in x[0]
+    assert conn.execute("SELECT COUNT(*) FROM passages_x_fts").fetchone() == conn.execute(
+        "SELECT COUNT(*) FROM passages_fts").fetchone()
