@@ -1,4 +1,5 @@
 from evals.failures import CLASSES, NOT_APPLICABLE
+from evals.tune import GRID_RERANK_DEPTH
 from facts.m2 import CHAR_KS, LADDER, LBR_METHODS, slug
 from facts.queries import CATEGORIES
 from retrieval.models import RERANKERS
@@ -87,6 +88,15 @@ def _bake(f):
                      for name in RERANKERS)
 
 
+def _depths(f):
+    return "\n".join(f"| {d} | {f[f'm2_tune_depth_{d}_recall_at_5']} | {f[f'm2_tune_depth_{d}_p95_ms']} |"
+                     for d in GRID_RERANK_DEPTH)
+
+
+def _probe_clause(f):
+    return "" if f["m2_tune_probe_qualified"] else "; no reranker qualified at the probe depth"
+
+
 def _lbr(f, what):
     rows = []
     for k in CHAR_KS:
@@ -146,11 +156,19 @@ Read gains here, not only on average. M1's per-family table was on all agreement
 
 ## Tuning (tune split only)
 
-Rule: fusion by highest tune recall@5; then the reranker and its depth by highest tune recall@5 among settings whose p95 latency is at most {f['m2_tune_max_p95_ms']} ms on the development machine. Live path within the limit: {'yes' if f['m2_tuned_live_path_ok'] else 'no'}.
+Rule: fusion by highest tune recall@5; then the reranker and its depth by highest tune recall@5 among settings whose p95 latency is at most {f['m2_tune_max_p95_ms']} ms on the development machine. Live path within the limit at the chosen depth ({f['m2_tuned_rerank_depth']}): {'yes' if f['m2_tuned_live_path_ok'] else 'no'}.
 
 | Reranker | Tune recall@5 | Tune p95 ms |
 |---|---|---|
 {_bake(f)}
+
+Chosen reranker by rerank depth (`{f['m2_tuned_reranker']}`):
+
+| Rerank depth | Tune recall@5 | Tune p95 ms |
+|---|---|---|
+{_depths(f)}
+
+For reference, the hybrid without a reranker (R3) scored {f['m2_tune_r3_recall_at_5']} on the tune split (p95 {f['m2_tune_r3_p95_ms']} ms). The rule chooses among rerankers only{_probe_clause(f)}.
 
 ## Chunking: section-aware versus fixed-size (on R3)
 

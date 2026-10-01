@@ -70,3 +70,41 @@ def test_rung_two_names_the_model_from_the_facts():
 def test_rewriting_section_caveats_the_token_measurement():
     section = render_m2(Every()).split("## Query rewriting")[1].split("\n## ")[0]
     assert "measured through `claude -p` (includes the CLI's own prompt and any thinking); a direct API call would cost less" in section
+
+
+def _tuning_section(f):
+    text = render_m2(f)
+    return text.split("## Tuning", 1)[1].split("\n## ", 1)[0]
+
+
+def test_tuning_shows_r3_and_the_chosen_reranker_by_depth():
+    from evals.tune import GRID_RERANK_DEPTH
+    f = Every()
+    f["m2_tune_r3_recall_at_5"] = 0.1234
+    f["m2_tune_r3_p95_ms"] = 55.5
+    for d in GRID_RERANK_DEPTH:
+        f[f"m2_tune_depth_{d}_recall_at_5"] = 0.2000 + d / 1000
+        f[f"m2_tune_depth_{d}_p95_ms"] = 900.5 + d
+    section = _tuning_section(f)
+    assert "Chosen reranker by rerank depth" in section
+    assert "hybrid without a reranker (R3) scored 0.1234" in section
+    assert "(p95 55.5 ms)" in section
+    for d in GRID_RERANK_DEPTH:
+        assert f"| {d} | {0.2 + d / 1000} | {900.5 + d} |" in section
+
+
+def test_probe_clause_only_when_the_probe_did_not_qualify():
+    f = Every()
+    f["m2_tune_probe_qualified"] = False
+    assert "no reranker qualified at the probe depth" in _tuning_section(f)
+    f["m2_tune_probe_qualified"] = True
+    assert "no reranker qualified" not in _tuning_section(f)
+
+
+def test_live_path_sentence_names_the_chosen_depth():
+    f = Every()
+    f["m2_tuned_rerank_depth"] = 10
+    f["m2_tuned_live_path_ok"] = True
+    assert "Live path within the limit at the chosen depth (10): yes" in _tuning_section(f)
+    f["m2_tuned_live_path_ok"] = False
+    assert "chosen depth (10): no" in _tuning_section(f)

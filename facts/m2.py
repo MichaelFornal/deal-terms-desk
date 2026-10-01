@@ -127,6 +127,17 @@ def build_m2(out_dir: Path, index_db: Path, fixed_db: Path, settings_path: Path,
         f[f"m2_bake_{slug(row['reranker'])}_recall_at_5"] = row["recall@5"]
         f[f"m2_bake_{slug(row['reranker'])}_p95_ms"] = row["p95_ms"]
 
+    chosen = [r for r in tuned["evidence"]["fusion"]
+              if r["depth"] == tuned["settings"]["depth"] and r["rrf_k0"] == tuned["settings"]["rrf_k0"]]
+    if len(chosen) != 1:
+        raise ValueError("settings.json evidence.fusion has no single row for the chosen depth and k0")
+    f["m2_tune_r3_recall_at_5"] = chosen[0]["recall@5"]
+    f["m2_tune_r3_p95_ms"] = chosen[0]["p95_ms"]
+    f["m2_tune_probe_qualified"] = bool(tuned["evidence"]["probe_qualified"])
+    for row in tuned["evidence"]["rerank_depth"]:
+        f[f"m2_tune_depth_{row['rerank_depth']}_recall_at_5"] = row["recall@5"]
+        f[f"m2_tune_depth_{row['rerank_depth']}_p95_ms"] = row["p95_ms"]
+
     lexicon = _json(lexicon_path)
     f["m2_lexicon_entries"] = len(lexicon["entries"])
     f["m2_lexicon_model"] = lexicon["_meta"]["model"]
