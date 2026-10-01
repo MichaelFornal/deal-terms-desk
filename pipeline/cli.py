@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from evals.bootstrap import split_of
+from evals.failures import classify
 from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
 from evals.run_rung import evaluate, load_context, with_passages
 from evals.tune import tune
@@ -210,6 +211,21 @@ def _cmd_facts(args) -> int:
     return 0
 
 
+def _cmd_failures(args) -> int:
+    done = []
+    for rung in RUNGS:
+        items = OUT / f"{rung.lower()}_items.jsonl"
+        if items.exists():
+            out = classify(sqlite3.connect(INDEX), items)
+            (OUT / f"failures_{rung.lower()}.json").write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
+            done.append(rung)
+    if not done:
+        print("no rung results; run `dtd eval --rung ...` first", file=sys.stderr)
+        return 2
+    print(json.dumps({"classified": done}))
+    return 0
+
+
 def _cmd_report(args) -> int:
     if not FACTS.exists():
         print("facts.json missing; run `dtd facts` first", file=sys.stderr)
@@ -238,6 +254,7 @@ def entry(argv: list[str] | None = None) -> int:
     facts = sub.add_parser("facts")
     facts.add_argument("--check", action="store_true")
     facts.set_defaults(fn=_cmd_facts)
+    sub.add_parser("failures").set_defaults(fn=_cmd_failures)
     sub.add_parser("report").set_defaults(fn=_cmd_report)
     args = parser.parse_args(argv)
     return args.fn(args)
