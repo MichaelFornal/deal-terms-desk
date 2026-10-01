@@ -127,13 +127,37 @@ def test_unknown_rung_fails(data):
     assert cli.entry(["eval", "--rung", "R9"]) == 2
 
 
+def _add_tune_contract(data):
+    # contract_3 falls in the tune split and defines a term, so the vocabulary is non-empty
+    (data / "raw" / "maud" / "contracts" / "contract_3.txt").write_text(
+        DOC + "\nSection 1.2 Terms. \u201cType of Consideration\u201d means cash.\n", encoding="utf-8")
+
+
 def test_lexicon_command_writes_the_lexicon_and_r5_then_runs(data, monkeypatch):
     from tests.fakes import fake_claude
-    monkeypatch.setattr(cli, "run_claude", fake_claude('{"cash deal": ["Type of Consideration"]}'))
+    _add_tune_contract(data)
+    runner = fake_claude('{"cash deal": ["Type of Consideration"]}')
+    monkeypatch.setattr(cli, "run_claude", runner)
     cli.entry(["build"]); cli.entry(["embed"])
     assert cli.entry(["lexicon"]) == 0
-    assert json.loads((data / "lexicon.json").read_text())["_meta"]["built_by"] == "machine"
+    assert len(runner.calls) == 1
+    doc = json.loads((data / "lexicon.json").read_text())
+    assert doc["_meta"]["built_by"] == "machine"
+    assert doc["entries"] == {"cash deal": ["Type of Consideration"]}
     assert cli.entry(["eval", "--rung", "R5"]) == 0
+
+
+def test_lexicon_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys):
+    _add_tune_contract(data)
+
+    def boom(prompt, model):
+        raise RuntimeError("claude exited 1: nope")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    cli.entry(["build"])
+    capsys.readouterr()
+    assert cli.entry(["lexicon"]) == 2
+    assert "claude exited 1" in capsys.readouterr().err
+    assert not (data / "lexicon.json").exists()
 
 
 @pytest.mark.parametrize("rung", ["R5", "R6"])

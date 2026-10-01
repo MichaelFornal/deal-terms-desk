@@ -1,12 +1,14 @@
 import json
 import re
 import sqlite3
+import sys
 from collections import Counter
 from datetime import date
 from pathlib import Path
 
 from evals.bootstrap import split_of
 from pipeline.claude import run_claude
+from retrieval.lexicon import phrase_pattern
 
 LEXICON_MODEL = "claude-opus-5-5"
 TOP_TERMS = 400
@@ -37,14 +39,19 @@ def prompt(vocab: list[str]) -> str:
 
 def parse(result_text: str, tune_texts: list[str]) -> dict[str, list[str]]:
     m = re.search(r"\{.*\}", result_text, re.S)
-    raw = json.loads(m.group(0)) if m else {}
-    corpus = "\n".join(tune_texts).lower()
+    try:
+        raw = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    lows = [t.lower() for t in tune_texts]
     out: dict[str, list[str]] = {}
     for phrase, terms in raw.items():
         key = phrase.strip().lower()
         if len(key) < 3 or not isinstance(terms, list):
             continue
-        kept = [t.strip() for t in terms if isinstance(t, str) and t.strip() and t.strip().lower() in corpus]
+        kept = [t.strip() for t in terms if isinstance(t, str) and t.strip() and any(phrase_pattern(t.strip()).search(x) for x in lows)]
         if kept:
             out[key] = list(dict.fromkeys(kept))
     return dict(sorted(out.items()))
@@ -54,11 +61,16 @@ def build(conn: sqlite3.Connection, tune_texts: list[str], out_path: Path, runne
           model: str = LEXICON_MODEL) -> dict:
     vocab = vocabulary(conn)
     resp = runner(prompt(vocab), model) if vocab else {"result": "{}", "usage": {}}
+    entries = parse(resp["result"], tune_texts)
+    if vocab and not entries:
+        raise RuntimeError("the model returned no usable lexicon entries; lexicon not written")
+    if not vocab:
+        print("warning: no tune-split defined terms; writing an empty lexicon", file=sys.stderr)
     doc = {
         "_meta": {"built_by": "machine", "model": model, "built_on": date.today().isoformat(),
                   "source": "defined terms of the tune-split MAUD agreements", "saw_eval_queries": False,
                   "usage": resp.get("usage", {})},
-        "entries": parse(resp["result"], tune_texts),
+        "entries": entries,
     }
     out_path = Path(out_path)
     tmp = out_path.with_name(out_path.name + ".tmp")

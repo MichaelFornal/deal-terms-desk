@@ -46,3 +46,32 @@ def test_build_writes_a_machine_labelled_lexicon(tmp_path):
     assert doc["_meta"]["built_by"] == "machine" and doc["_meta"]["saw_eval_queries"] is False
     assert doc["entries"] == {"break-up fee": ["Company Termination Fee"]}
     assert len(runner.calls) == 1 and "Report Secret Term" not in runner.calls[0][0]
+
+
+def test_parse_grounding_is_whole_word_and_case_insensitive():
+    assert parse('{"charge": ["fee"]}', ["feel the coffee"]) == {}
+    assert parse('{"charge": ["Fee"]}', ["the termination fee"]) == {"charge": ["Fee"]}
+    assert parse("{not json}", ["x"]) == {}
+
+
+def test_build_raises_and_writes_nothing_when_the_model_gives_no_entries(tmp_path):
+    import pytest
+    db = tmp_path / "i.db"
+    build_index(db, docs())
+    out = tmp_path / "lexicon.json"
+    with pytest.raises(RuntimeError, match="no usable lexicon entries"):
+        build(sqlite3.connect(db), list(docs()[c] for c in TUNE), out, runner=fake_claude("sorry, no JSON"))
+    assert not out.exists()
+    out.write_text("old")
+    with pytest.raises(RuntimeError):
+        build(sqlite3.connect(db), list(docs()[c] for c in TUNE), out, runner=fake_claude("{}"))
+    assert out.read_text() == "old"
+
+
+def test_build_with_empty_vocabulary_writes_empty_lexicon_with_warning(tmp_path, capsys):
+    db = tmp_path / "i.db"
+    build_index(db, {REPORT[0]: "Section 1.1 Fees. “Report Secret Term” means y.\n"})
+    runner = fake_claude("{}")
+    doc = build(sqlite3.connect(db), [], tmp_path / "l.json", runner=runner)
+    assert doc["entries"] == {} and runner.calls == []
+    assert "warning" in capsys.readouterr().err

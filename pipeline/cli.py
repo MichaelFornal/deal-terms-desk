@@ -111,7 +111,11 @@ def _cmd_lexicon(args) -> int:
         return 2
     files = sorted((RAW / "contracts").glob("*.txt"))
     tune_texts = [load_contract(p) for p in files if split_of(p.stem) == "tune"]
-    doc = build_lexicon(sqlite3.connect(INDEX), tune_texts, LEXICON_PATH, runner=run_claude)
+    try:
+        doc = build_lexicon(sqlite3.connect(INDEX), tune_texts, LEXICON_PATH, runner=run_claude)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     print(json.dumps({"entries": len(doc["entries"])}))
     return 0
 
