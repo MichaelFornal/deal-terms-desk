@@ -7,12 +7,13 @@ from pathlib import Path
 
 from evals.bootstrap import split_of
 from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
-from evals.run_rung import evaluate, load_context
+from evals.run_rung import evaluate, load_context, with_passages
 from evals.tune import tune
 from facts.build import build as build_facts
 from facts.build import check as check_facts
 from facts.report import render
 from pipeline.build_lexicon import build as build_lexicon
+from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
@@ -44,7 +45,21 @@ def _cmd_build(args) -> int:
     if not files:
         print(f"no contracts under {RAW / 'contracts'}; run `dtd fetch` first", file=sys.stderr)
         return 2
-    print(json.dumps(build_index(INDEX, {p.stem: load_contract(p) for p in files})))
+    contracts = {p.stem: load_contract(p) for p in files}
+    if not args.fixed:
+        print(json.dumps(build_index(INDEX, contracts)))
+        return 0
+    if not INDEX.exists():
+        print("the section-aware index sets the chunk size; run `dtd build` first", file=sys.stderr)
+        return 2
+    size = fixed_size(sqlite3.connect(INDEX))
+    summary = build_index(INDEX_FIXED, contracts, chunker=fixed_chunker(size))
+    conn = sqlite3.connect(INDEX_FIXED)
+    conn.execute("CREATE TABLE chunking(size INTEGER NOT NULL)")
+    conn.execute("INSERT INTO chunking VALUES (?)", (size,))
+    conn.commit()
+    conn.close()
+    print(json.dumps(summary | {"size": size}))
     return 0
 
 
@@ -94,7 +109,7 @@ def _cmd_eval(args) -> int:
         print("index or label CSVs missing; run `dtd fetch` then `dtd build` first", file=sys.stderr)
         return 2
     rung = args.rung
-    if rung not in RUNGS + ("R5-llm",):
+    if rung not in RUNGS + ("R5-llm", "R3-fixed"):
         print(f"unknown rung {rung}", file=sys.stderr)
         return 2
     if rung != "R1" and not _has_vectors(INDEX):
@@ -121,6 +136,12 @@ def _cmd_eval(args) -> int:
             "settings": asdict(ladder.settings), "model": REWRITE_MODEL, "queries": n,
             "input_tokens_mean": sum(r["input_tokens"] for r in rewrites.values()) / n,
             "output_tokens_mean": sum(r["output_tokens"] for r in rewrites.values()) / n})
+    elif rung == "R3-fixed":
+        if not INDEX_FIXED.exists() or not _has_vectors(INDEX_FIXED):
+            print("fixed-size index or its vectors missing; run `dtd build --fixed` then `dtd embed --fixed`",
+                  file=sys.stderr)
+            return 2
+        result = _eval_rung("R3", INDEX_FIXED, "R3-fixed", with_passages(ctx, INDEX_FIXED))
     else:
         result = _eval_rung(rung, INDEX, rung, ctx)
     print(json.dumps(result["overall"], indent=2))
@@ -202,7 +223,9 @@ def entry(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dtd")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("fetch").set_defaults(fn=_cmd_fetch)
-    sub.add_parser("build").set_defaults(fn=_cmd_build)
+    build = sub.add_parser("build")
+    build.add_argument("--fixed", action="store_true")
+    build.set_defaults(fn=_cmd_build)
     embed = sub.add_parser("embed")
     embed.add_argument("--fixed", action="store_true")
     embed.set_defaults(fn=_cmd_embed)

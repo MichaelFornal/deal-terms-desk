@@ -187,3 +187,19 @@ def test_rewrite_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys
     capsys.readouterr()
     assert cli.entry(["rewrite"]) == 2
     assert "claude exited 1" in capsys.readouterr().err
+
+
+def test_fixed_index_is_evaluated_on_the_same_items(data):
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["build", "--fixed"]) == 0
+    assert cli.entry(["embed", "--fixed"]) == 0
+    assert cli.entry(["eval", "--rung", "R3"]) == 0
+    assert cli.entry(["eval", "--rung", "R3-fixed"]) == 0
+    a = [json.loads(l)["item_id"] for l in (data / "out" / "r3_items.jsonl").read_text().splitlines()]
+    b = [json.loads(l)["item_id"] for l in (data / "out" / "r3_fixed_items.jsonl").read_text().splitlines()]
+    assert a == b
+
+
+def test_fixed_build_needs_the_section_index_first(data, capsys):
+    assert cli.entry(["build", "--fixed"]) == 2
+    assert "dtd build" in capsys.readouterr().err

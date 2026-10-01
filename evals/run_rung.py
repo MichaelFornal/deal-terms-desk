@@ -39,6 +39,15 @@ def load_context(db_path: Path, csv_paths: list[Path], contracts_dir: Path) -> C
     return Context(items, alignment, texts, dict(passages))
 
 
+def with_passages(ctx: Context, db_path: Path) -> Context:
+    conn = sqlite3.connect(db_path)
+    passages: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for cid, s, e in conn.execute("SELECT contract_id, start_char, end_char FROM passages WHERE kind != 'toc'"):
+        passages[cid].append((s, e))
+    conn.close()
+    return replace(ctx, passages=dict(passages))
+
+
 def isolate_foreign(hits: list, contract_id: str) -> list:
     """Move each hit from another agreement to its own negative span of the same length.
 
