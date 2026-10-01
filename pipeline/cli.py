@@ -6,6 +6,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from evals.bootstrap import split_of
+from evals.compare import load_items
+from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.llm_rewrite import REWRITE_MODEL, rewrite_all
 from evals.run_rung import evaluate, load_context, with_passages
@@ -182,6 +184,33 @@ def _cmd_lexicon(args) -> int:
     return 0
 
 
+def _best_rung() -> str | None:
+    scored = {r: json.loads((OUT / f"{r.lower()}.json").read_text())["by_split"]["report"]["recall@5"]["mean"]
+              for r in RUNGS if (OUT / f"{r.lower()}.json").exists()}
+    return max(scored, key=lambda r: (scored[r], -RUNGS.index(r))) if scored else None
+
+
+def _cmd_disputes(args) -> int:
+    rung = _best_rung()
+    if rung is None:
+        print("no rung results; run `dtd eval --rung ...` first", file=sys.stderr)
+        return 2
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    sample = sample_misses(load_items(OUT / f"{rung.lower()}_items.jsonl"))
+    try:
+        judged = judge(sample, ctx.texts, sqlite3.connect(INDEX), CACHE / "disputes.jsonl", runner=run_claude)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    # No misses to judge (only on toy data): record an empty sample instead of bootstrapping nothing.
+    share = summarise(judged) if judged else {"mean": 0.0, "lo": 0.0, "hi": 0.0, "n_items": 0, "n_clusters": 0}
+    doc = {"rung": rung, "model": DISPUTE_MODEL, "sample": len(judged), "share": share,
+           "machine_built": True, "prompt": DISPUTE_PROMPT}
+    (OUT / "disputes.json").write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
+    print(json.dumps({"rung": rung, "share": doc["share"]["mean"]}))
+    return 0
+
+
 def _cmd_tune(args) -> int:
     if not INDEX.exists() or not _csv_paths() or not _has_vectors(INDEX):
         print("index, vectors or label CSVs missing; run `dtd build` then `dtd embed` first", file=sys.stderr)
@@ -255,6 +284,7 @@ def entry(argv: list[str] | None = None) -> int:
     sub.add_parser("rewrite").set_defaults(fn=_cmd_rewrite)
     sub.add_parser("tune").set_defaults(fn=_cmd_tune)
     sub.add_parser("lexicon").set_defaults(fn=_cmd_lexicon)
+    sub.add_parser("disputes").set_defaults(fn=_cmd_disputes)
     facts = sub.add_parser("facts")
     facts.add_argument("--check", action="store_true")
     facts.set_defaults(fn=_cmd_facts)

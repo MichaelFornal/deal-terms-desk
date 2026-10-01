@@ -213,3 +213,36 @@ def test_failures_with_a_bad_passage_id_exits_2(data, capsys):
     (cli.OUT / "r1_items.jsonl").write_text(json.dumps(row) + "\n")
     assert cli.entry(["failures"]) == 2
     assert "x|1" in capsys.readouterr().err
+
+
+def test_disputes_without_rung_results_exits_2(data, capsys):
+    cli.entry(["build"])
+    capsys.readouterr()
+    assert cli.entry(["disputes"]) == 2
+    assert "dtd eval" in capsys.readouterr().err
+
+
+def test_disputes_command_writes_a_machine_built_estimate(data, monkeypatch):
+    from tests.fakes import fake_claude
+    runner = fake_claude('{"answers": true, "quote": "closing shall occur"}')
+    monkeypatch.setattr(cli, "run_claude", runner)
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["eval", "--rung", "R3"]) == 0
+    assert cli.entry(["disputes"]) == 0
+    doc = json.loads((data / "out" / "disputes.json").read_text())
+    assert doc["rung"] == "R3" and doc["machine_built"] is True and doc["sample"] == len(runner.calls)
+    assert doc["share"]["n_items"] == doc["sample"]
+
+
+def test_disputes_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys):
+    def boom(prompt, model):
+        raise RuntimeError("claude exited 1: nope")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    # force a non-empty sample so the runner is reached
+    monkeypatch.setattr(cli, "sample_misses", lambda rows: [
+        {"item_id": "x", "contract_id": "contract_0", "category": "c", "query": "q", "gold": [[0, 5]],
+         "top_passage_ids": [1], "split": "report", "mrr@10": 0.0}])
+    cli.entry(["build"]); cli.entry(["embed"]); cli.entry(["eval", "--rung", "R3"])
+    capsys.readouterr()
+    assert cli.entry(["disputes"]) == 2
+    assert "claude exited 1" in capsys.readouterr().err
