@@ -125,3 +125,20 @@ def test_embed_before_build_fails_clearly(data, capsys):
 def test_unknown_rung_fails(data):
     cli.entry(["build"])
     assert cli.entry(["eval", "--rung", "R9"]) == 2
+
+
+def test_lexicon_command_writes_the_lexicon_and_r5_then_runs(data, monkeypatch):
+    from tests.fakes import fake_claude
+    monkeypatch.setattr(cli, "run_claude", fake_claude('{"cash deal": ["Type of Consideration"]}'))
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["lexicon"]) == 0
+    assert json.loads((data / "lexicon.json").read_text())["_meta"]["built_by"] == "machine"
+    assert cli.entry(["eval", "--rung", "R5"]) == 0
+
+
+@pytest.mark.parametrize("rung", ["R5", "R6"])
+def test_eval_r5_r6_without_a_lexicon_exit_2(data, capsys, rung):
+    cli.entry(["build"]); cli.entry(["embed"])
+    capsys.readouterr()
+    assert cli.entry(["eval", "--rung", rung]) == 2
+    assert "run `dtd lexicon` first" in capsys.readouterr().err

@@ -76,3 +76,16 @@ def test_unknown_rung_is_refused(ladder):
 
 def test_rungs_are_the_spec_ladder():
     assert RUNGS == ("R1", "R2", "R3", "R4", "R5", "R6")
+
+
+def test_r5_finds_the_clause_through_the_lexicon(ladder):
+    plain = ladder.run("R1", "walk-away payment", "big", k=3)
+    assert not any("Termination Fee" in DOCS["big"][h.start:h.end] for h in plain.hits)
+    got = ladder.run("R5", "walk-away payment", "big", k=3)
+    assert any("Termination Fee" in DOCS["big"][h.start:h.end] for h in got.hits)
+
+
+def test_r5_without_a_lexicon_is_refused(ladder):
+    ladder.lexicon = None
+    with pytest.raises(ValueError, match="dtd lexicon"):
+        ladder.run("R5", "fee", "big")

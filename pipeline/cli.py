@@ -1,13 +1,17 @@
 import argparse
 import json
+import sqlite3
 import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from evals.bootstrap import split_of
 from evals.run_rung import evaluate, load_context
 from facts.build import build as build_facts
 from facts.build import check as check_facts
 from facts.report import render
+from pipeline.build_lexicon import build as build_lexicon
+from pipeline.claude import run_claude
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
 from pipeline.paths import CACHE, CSV_NAMES, INDEX, INDEX_FIXED, OUT, RAW
@@ -92,9 +96,23 @@ def _cmd_eval(args) -> int:
     if rung != "R1" and not _has_vectors(INDEX):
         print("no vectors in the index; run `dtd embed` first", file=sys.stderr)
         return 2
+    if rung in ("R5", "R6") and not LEXICON_PATH.exists():
+        print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
+        return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
     result = _eval_rung(rung, INDEX, rung, ctx)
     print(json.dumps(result["overall"], indent=2))
+    return 0
+
+
+def _cmd_lexicon(args) -> int:
+    if not INDEX.exists():
+        print("index missing; run `dtd build` first", file=sys.stderr)
+        return 2
+    files = sorted((RAW / "contracts").glob("*.txt"))
+    tune_texts = [load_contract(p) for p in files if split_of(p.stem) == "tune"]
+    doc = build_lexicon(sqlite3.connect(INDEX), tune_texts, LEXICON_PATH, runner=run_claude)
+    print(json.dumps({"entries": len(doc["entries"])}))
     return 0
 
 
@@ -135,6 +153,7 @@ def entry(argv: list[str] | None = None) -> int:
     ev = sub.add_parser("eval")
     ev.add_argument("--rung", default="R1")
     ev.set_defaults(fn=_cmd_eval)
+    sub.add_parser("lexicon").set_defaults(fn=_cmd_lexicon)
     facts = sub.add_parser("facts")
     facts.add_argument("--check", action="store_true")
     facts.set_defaults(fn=_cmd_facts)
