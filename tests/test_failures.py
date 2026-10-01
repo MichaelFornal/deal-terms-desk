@@ -1,6 +1,8 @@
 import json
 import sqlite3
 
+import pytest
+
 from evals.failures import CLASSES, NOT_APPLICABLE, classify
 from retrieval.index import build_index
 
@@ -26,7 +28,7 @@ def test_each_class_is_assigned_by_its_rule(tmp_path):
     sec = {}
     for pid, sid, s, e, kind in rows:
         sec.setdefault(sid or kind, []).append((pid, s, e))
-    front, s11, s83 = sec["front"][0], sec["1.1"][0], sec["8.3"][0]
+    front, s83 = sec["front"][0], sec["8.3"][0]
     s51a, s51b = sec["5.1"][0], sec["5.1"][1]
     s91, s92 = sec["9.1"][0], sec["9.2"][0]
     fee = DOC.index("$50,000,000")
@@ -49,3 +51,23 @@ def test_each_class_is_assigned_by_its_rule(tmp_path):
     assert out["by_category_report"]["Remedies"]["wrong_section"] == 1
     assert set(out["not_applicable"]) == set(NOT_APPLICABLE)
     assert CLASSES == ("definition_missing", "right_section_wrong_passage", "unsectioned_gold", "wrong_section")
+
+
+def _one(tmp_path, item):
+    db = tmp_path / "i.db"
+    build_index(db, {"c": DOC})
+    path = tmp_path / "r_items.jsonl"
+    path.write_text(json.dumps({"contract_id": "c", "category": "R", "split": "report", **item}) + "\n")
+    return sqlite3.connect(db), path
+
+
+def test_top_passage_from_another_index_raises(tmp_path):
+    conn, path = _one(tmp_path, {"item_id": "c|bad", "gold": [[0, 10]], "top_passage_ids": [999999]})
+    with pytest.raises(ValueError, match=r"c\|bad.*999999"):
+        classify(conn, path)
+
+
+def test_gold_beyond_the_text_raises(tmp_path):
+    conn, path = _one(tmp_path, {"item_id": "c|far", "gold": [[len(DOC) + 50, len(DOC) + 90]], "top_passage_ids": []})
+    with pytest.raises(ValueError, match=r"c\|far"):
+        classify(conn, path)

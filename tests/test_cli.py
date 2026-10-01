@@ -203,3 +203,13 @@ def test_fixed_index_is_evaluated_on_the_same_items(data):
 def test_fixed_build_needs_the_section_index_first(data, capsys):
     assert cli.entry(["build", "--fixed"]) == 2
     assert "dtd build" in capsys.readouterr().err
+
+
+def test_failures_with_a_bad_passage_id_exits_2(data, capsys):
+    assert cli.entry(["build"]) == 0
+    cli.OUT.mkdir(parents=True, exist_ok=True)
+    row = {"item_id": "x|1", "contract_id": "contract_0", "category": "C", "split": "report",
+           "gold": [[0, 5]], "top_passage_ids": [10**9]}
+    (cli.OUT / "r1_items.jsonl").write_text(json.dumps(row) + "\n")
+    assert cli.entry(["failures"]) == 2
+    assert "x|1" in capsys.readouterr().err

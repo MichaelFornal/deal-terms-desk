@@ -30,13 +30,21 @@ def classify(conn: sqlite3.Connection, items_path: Path, k: int = K) -> dict:
     counts = {split: dict.fromkeys(CLASSES, 0) for split in ("report", "tune")}
     by_category: dict[str, dict[str, int]] = defaultdict(lambda: dict.fromkeys(CLASSES, 0))
     for row in load_items(items_path).values():
-        top = [p for p in row["top_passage_ids"][:k] if p in passages]
+        top = row["top_passage_ids"][:k]
+        for p in top:
+            if p not in passages:
+                raise ValueError(f"{row['item_id']}: top passage {p} is not a passage of this index; "
+                                 "were these items scored against another index?")
         top_sections = {passages[p][3] for p in top if passages[p][3]}
         top_defs = [d for p in top for d in defs[p]]
         for g0, g1 in row["gold"]:
             if any(is_relevant(passages[p][1], passages[p][2], [(g0, g1)]) for p in top):
                 continue
-            home = max(by_contract[row["contract_id"]], key=lambda x: (_overlap(x[1], x[2], g0, g1), -x[0]))
+            home = max(by_contract.get(row["contract_id"], []), default=None,
+                       key=lambda x: (_overlap(x[1], x[2], g0, g1), -x[0]))
+            if home is None or _overlap(home[1], home[2], g0, g1) == 0:
+                raise ValueError(f"{row['item_id']}: gold span [{g0}, {g1}) overlaps no passage of contract "
+                                 f"{row['contract_id']}; were these items scored against another index?")
             if any(_overlap(s, e, g0, g1) > 0 for s, e in top_defs):
                 cls = "definition_missing"
             elif home[3] and home[3] in top_sections:

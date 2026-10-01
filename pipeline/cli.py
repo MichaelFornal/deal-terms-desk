@@ -216,7 +216,11 @@ def _cmd_failures(args) -> int:
     for rung in RUNGS:
         items = OUT / f"{rung.lower()}_items.jsonl"
         if items.exists():
-            out = classify(sqlite3.connect(INDEX), items)
+            try:
+                out = classify(sqlite3.connect(INDEX), items)
+            except ValueError as err:
+                print(f"{rung}: {err}", file=sys.stderr)
+                return 2
             (OUT / f"failures_{rung.lower()}.json").write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
             done.append(rung)
     if not done:
