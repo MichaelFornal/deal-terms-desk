@@ -58,7 +58,7 @@ def test_no_python_literals_are_printed():
     f["m2_tuned_live_path_ok"] = False
     text = render_m2(f)
     assert "None" not in text and "True" not in text and "False" not in text
-    assert "not measured" in text and "Live path within the limit: no." in text
+    assert "not measured" in text and "Live path within the limit at the chosen depth (7777.0): no." in text
 
 
 def test_rung_two_names_the_model_from_the_facts():
