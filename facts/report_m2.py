@@ -5,7 +5,7 @@ from retrieval.models import RERANKERS
 
 ADDS = {
     "r1": "BM25 over section-aware passages",
-    "r2": "Dense only (bge-small-en-v1.5 in sqlite-vec)",
+    "r2": "Dense only ({model} in sqlite-vec)",
     "r3": "R1 and R2 fused by reciprocal rank",
     "r4": "R3 reranked by a cross-encoder",
     "r5": "R4 with the lexicon rewrite (machine-built lexicon)",
@@ -36,16 +36,21 @@ def _verdict(f, p):
     return "no measurable change"
 
 
+def _tokens(f, r):
+    value = f[f"m2_{r}_context_tokens_mean"]
+    return "not measured" if value is None else value
+
+
 def _ladder(f):
     rows = []
     for i, r in enumerate(LADDER):
         p = f"m2_{r}_report"
         vs_r1 = "baseline" if r == "r1" else f"{_d(f, f'm2_cmp_{r}_vs_r1_recall_at_5')}, {_verdict(f, f'm2_cmp_{r}_vs_r1_recall_at_5')}"
         vs_prev = "" if i < 2 else f"{_d(f, f'm2_cmp_{r}_vs_prev_recall_at_5')}, {_verdict(f, f'm2_cmp_{r}_vs_prev_recall_at_5')}"
-        rows.append(f"| {r.upper()} | {ADDS[r]} | {_ci(f, p + '_recall_at_5')} | {f[p + '_recall_at_10']} "
+        rows.append(f"| {r.upper()} | {ADDS[r].format(model=f['m2_vec_model'])} | {_ci(f, p + '_recall_at_5')} | {f[p + '_recall_at_10']} "
                     f"| {f[p + '_mrr_at_10']} | {f[p + '_ndcg_at_10']} | {vs_r1} | {vs_prev} "
                     f"| {f[f'm2_{r}_latency_ms_p50']} / {f[f'm2_{r}_latency_ms_p95']} "
-                    f"| {f[f'm2_{r}_context_tokens_mean']} |")
+                    f"| {_tokens(f, r)} |")
     return "\n".join(rows)
 
 
@@ -56,7 +61,7 @@ def _families(f):
             rows.append(f"| {category} | no report-split items |" + " |" * (len(LADDER) + 1))
             continue
         values = " | ".join(str(f[f"m2_{r}_cat_{s}_recall_at_5"]) for r in LADDER)
-        note = "ceiling under R1: the query already names the clause's own words" if f[f"m2_cat_{s}_ceiling"] else ""
+        note = "ceiling under R1: gains cannot show here" if f[f"m2_cat_{s}_ceiling"] else ""
         rows.append(f"| {category} | {f[f'm2_cat_{s}_items']} | {values} | {note} |")
     return "\n".join(rows)
 
@@ -141,7 +146,7 @@ Read gains here, not only on average. M1's per-family table was on all agreement
 
 ## Tuning (tune split only)
 
-Rule: fusion by highest tune recall@5; then the reranker and its depth by highest tune recall@5 among settings whose p95 latency is at most {f['m2_tune_max_p95_ms']} ms on the development machine. Live path within the limit: {f['m2_tuned_live_path_ok']}.
+Rule: fusion by highest tune recall@5; then the reranker and its depth by highest tune recall@5 among settings whose p95 latency is at most {f['m2_tune_max_p95_ms']} ms on the development machine. Live path within the limit: {'yes' if f['m2_tuned_live_path_ok'] else 'no'}.
 
 | Reranker | Tune recall@5 | Tune p95 ms |
 |---|---|---|
@@ -151,9 +156,9 @@ Rule: fusion by highest tune recall@5; then the reranker and its depth by highes
 
 Fixed-size chunks are {f['m2_fixed_size_chars']} characters, the median section-aware passage, so that length does not decide the comparison ({f['m2_fixed_passages_indexed']} fixed-size passages indexed). Fixed-size R3 recall@5: {_ci(f, 'm2_r3_fixed_report_recall_at_5')}. Fixed minus section-aware: {_d(f, 'm2_cmp_r3_fixed_vs_r3_recall_at_5')}, {_verdict(f, 'm2_cmp_r3_fixed_vs_r3_recall_at_5')}.
 
-## Query rewriting: the lexicon versus a live LLM (offline comparison)
+## Query rewriting: the lexicon versus a live LLM (offline comparison, machine-built rewrites)
 
-The lexicon ({f['m2_lexicon_entries']} entries, machine-built by `{f['m2_lexicon_model']}` from defined terms in tune-split agreements, never shown an eval query) costs no model call. The LLM rewrite used `{f['m2_llm_rewrite_model']}` on {f['m2_llm_rewrite_queries']} distinct queries, at a mean of {f['m2_llm_rewrite_input_tokens_mean']} input and {f['m2_llm_rewrite_output_tokens_mean']} output tokens per query; its latency includes the model's reported API time (p50 / p95 {f['m2_r5_llm_latency_ms_p50']} / {f['m2_r5_llm_latency_ms_p95']} ms). LLM rewrite minus lexicon, recall@5: {_d(f, 'm2_cmp_r5_llm_vs_r5_recall_at_5')}, {_verdict(f, 'm2_cmp_r5_llm_vs_r5_recall_at_5')}.
+The lexicon ({f['m2_lexicon_entries']} entries, machine-built by `{f['m2_lexicon_model']}` from defined terms in tune-split agreements, never shown an eval query) costs no model call. The LLM rewrite (machine-built) used `{f['m2_llm_rewrite_model']}` on {f['m2_llm_rewrite_queries']} distinct queries, at a mean of {f['m2_llm_rewrite_input_tokens_mean']} input and {f['m2_llm_rewrite_output_tokens_mean']} output tokens per query; its latency includes the model's reported API time (p50 / p95 {f['m2_r5_llm_latency_ms_p50']} / {f['m2_r5_llm_latency_ms_p95']} ms). LLM rewrite (machine-built) minus lexicon, recall@5: {_d(f, 'm2_cmp_r5_llm_vs_r5_recall_at_5')}, {_verdict(f, 'm2_cmp_r5_llm_vs_r5_recall_at_5')}.
 
 ## Why retrieval misses (report split, gold spans not touched by the top five)
 
@@ -174,7 +179,7 @@ Vectors: {f['m2_vec_passages']} passages embedded with `{f['m2_vec_model']}`; {f
 
 ## Against LegalBench-RAG
 
-The numbers are **not directly comparable**. LegalBench-RAG ({f['m2_lbr_source']}) searches the whole corpus with questions that name the document, scores precision and recall over characters, and uses short fixed-size or recursive chunks. This project's headline searches one agreement with MAUD's label names and counts a gold span found when a retrieved passage overlaps it. To narrow the gap, R1 and the best rung ({f['m2_best_corpus_rung']}) were also run over the whole corpus and scored over characters, below; the queries and the chunks still differ. Their figures are in percent as printed (Tables {f['m2_lbr_naive_table']}, {f['m2_lbr_rcts_table']} and {f['m2_lbr_rcts_cohere_table']}); ours are in percent over all agreements.
+The numbers are **not directly comparable**. LegalBench-RAG ({f['m2_lbr_source']}) searches the whole corpus with questions that name the document, scores precision and recall over characters, and uses short fixed-size or recursive chunks. This project's headline searches one agreement with MAUD's label names and counts a gold span found when a retrieved passage overlaps it. To narrow the gap, R1 and the best rung ({f['m2_best_corpus_rung']}) were also run over the whole corpus and scored over characters, below; the queries and the chunks still differ. Their figures are in percent as printed (Tables {f['m2_lbr_naive_table']}, {f['m2_lbr_rcts_table']} and {f['m2_lbr_rcts_cohere_table']}); ours are in percent over all agreements, which includes the tune split the settings were chosen on.
 
 Recall over characters, top k:
 

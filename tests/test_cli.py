@@ -302,3 +302,33 @@ def test_facts_with_partial_m2_results_name_what_is_missing(data, capsys):
     cli.entry(["build"]); cli.entry(["embed"]); cli.entry(["eval"]); cli.entry(["eval", "--rung", "R2"])
     assert cli.entry(["facts"]) == 2
     assert "r3.json" in capsys.readouterr().err
+
+
+def test_facts_with_rungs_scored_on_different_items_fail_clearly(data, capsys, monkeypatch):
+    from pathlib import Path
+
+    from evals.bootstrap import split_of
+    from tests.fakes import fake_claude
+    raw = data / "raw" / "maud"
+    part = DOC.split(chr(10) * 2)[1].strip()
+    extra = ""
+    for i, cid in enumerate([c for c in (f"contract_t{i}" for i in range(40)) if split_of(c) == "tune"][:2]):
+        (raw / "contracts" / f"{cid}.txt").write_text(DOC, encoding="utf-8")
+        extra += (f'main,{cid},"{part} (Page 9)",All Cash,0,Type of Consideration-Answer,<NONE>,'
+                  f'Type of Consideration,{50 + i},General Information\n')
+    with open(raw / "MAUD_dev.csv", "a", encoding="utf-8") as fh:
+        fh.write(extra)
+    monkeypatch.setattr(cli, "run_claude", fake_claude('{"answers": true, "quote": "Closing"}'))
+    monkeypatch.setattr(cli, "EXTERNAL", Path("facts/external.json").resolve())
+    cli.entry(["build"]); cli.entry(["embed"]); cli.entry(["lexicon"]); cli.entry(["tune"])
+    for r in ("R1", "R2", "R3", "R4", "R5", "R6"):
+        cli.entry(["eval", "--rung", r])
+    cli.entry(["rewrite"]); cli.entry(["eval", "--rung", "R5-llm"]); cli.entry(["build", "--fixed"])
+    cli.entry(["embed", "--fixed"]); cli.entry(["eval", "--rung", "R3-fixed"]); cli.entry(["eval", "--rung", "corpus"])
+    cli.entry(["failures"]); cli.entry(["disputes"])
+    path = data / "out" / "r3_items.jsonl"
+    lines = path.read_text().splitlines()
+    path.write_text("\n".join(lines[1:]) + "\n")
+    capsys.readouterr()
+    assert cli.entry(["facts"]) == 2
+    assert "different items" in capsys.readouterr().err

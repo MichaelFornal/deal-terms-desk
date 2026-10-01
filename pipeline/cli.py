@@ -258,7 +258,7 @@ def _cmd_facts(args) -> int:
         return 2
     try:
         fresh = _all_facts()
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(str(e), file=sys.stderr)
         return 2
     if args.check:
