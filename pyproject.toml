@@ -3,7 +3,7 @@ name = "deal-terms-desk"
 version = "0.1.0"
 description = "Deal Terms Desk pipeline, retrieval and evals"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = ["fastembed>=0.8.1,<0.9", "sqlite-vec>=0.1.9,<0.2"]
 
 [project.scripts]
 dtd = "pipeline.cli:entry"
@@ -20,3 +20,5 @@ packages = ["pipeline", "retrieval", "evals", "facts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["model: downloads and runs a real model (run with -m model)"]
+addopts = "-m 'not model'"

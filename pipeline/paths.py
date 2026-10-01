@@ -9,3 +9,5 @@ DATA = Path(os.environ.get("DTD_DATA", "data"))
 RAW = DATA / "raw" / "maud"
 INDEX = DATA / "index" / "maud.db"
 OUT = DATA / "out"
+INDEX_FIXED = DATA / "index" / "maud_fixed.db"
+CACHE = DATA / "cache"
