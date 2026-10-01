@@ -226,12 +226,22 @@ def test_disputes_command_writes_a_machine_built_estimate(data, monkeypatch):
     from tests.fakes import fake_claude
     runner = fake_claude('{"answers": true, "quote": "closing shall occur"}')
     monkeypatch.setattr(cli, "run_claude", runner)
+    monkeypatch.setattr(cli, "sample_misses", lambda rows: [sorted(rows.values(), key=lambda r: r["item_id"])[0]])
     cli.entry(["build"]); cli.entry(["embed"])
     assert cli.entry(["eval", "--rung", "R3"]) == 0
     assert cli.entry(["disputes"]) == 0
     doc = json.loads((data / "out" / "disputes.json").read_text())
-    assert doc["rung"] == "R3" and doc["machine_built"] is True and doc["sample"] == len(runner.calls)
-    assert doc["share"]["n_items"] == doc["sample"]
+    assert doc["rung"] == "R3" and doc["machine_built"] is True
+    assert doc["sample"] == 1 and len(runner.calls) == 1 and doc["share"]["n_items"] == 1
+
+
+def test_disputes_with_missing_items_file_exits_2(data, capsys):
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["eval", "--rung", "R3"]) == 0
+    (data / "out" / "r3_items.jsonl").unlink()
+    capsys.readouterr()
+    assert cli.entry(["disputes"]) == 2
+    assert "r3_items.jsonl" in capsys.readouterr().err
 
 
 def test_disputes_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys):

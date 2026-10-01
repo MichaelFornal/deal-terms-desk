@@ -1,4 +1,3 @@
-import json
 import sqlite3
 
 from evals.disputes import judge, sample_misses, summarise, verdict
@@ -27,6 +26,7 @@ def test_verdict_needs_true_and_a_verbatim_quote():
     assert not verdict('{"answers": true, "quote": "shall pay a fee"}', retrieved)
     assert not verdict('{"answers": false, "quote": "shall pay the"}', retrieved)
     assert not verdict("not json", retrieved)
+    assert not verdict('{"answers": true, "quote": "a"}', "a fee")
 
 
 def test_judge_asks_once_per_item_and_resumes(tmp_path):
@@ -42,3 +42,21 @@ def test_judge_asks_once_per_item_and_resumes(tmp_path):
     assert judge(sample, {"c": DOC}, conn, tmp_path / "d.jsonl", runner=again, model="m") == first
     assert again.calls == []
     assert summarise(first, n_boot=50)["mean"] == 1.0
+
+
+def test_cache_is_keyed_on_passage_and_model(tmp_path):
+    db = tmp_path / "i.db"
+    build_index(db, {"c": DOC})
+    conn = sqlite3.connect(db)
+    ok = '{"answers": true, "quote": "Reverse Termination Fee"}'
+    sample = sample_misses(rows(), n=10)
+    path = tmp_path / "d.jsonl"
+    runner = fake_claude(ok)
+    judge(sample, {"c": DOC}, conn, path, runner=runner, model="m")
+    judge(sample, {"c": DOC}, conn, path, runner=runner, model="m")
+    assert len(runner.calls) == 1
+    judge(sample, {"c": DOC}, conn, path, runner=runner, model="other")
+    assert len(runner.calls) == 2
+    moved = [{**sample[0], "top_passage_ids": [1, 2]}]
+    out = judge(moved, {"c": DOC}, conn, path, runner=runner, model="m")
+    assert len(runner.calls) == 3 and out[0]["passage_id"] == 1

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import random
 import re
@@ -12,6 +13,7 @@ from pipeline.normalise import squash
 
 DISPUTE_MODEL = "claude-opus-5-5"
 SAMPLE = 150
+MIN_QUOTE_CHARS = 10
 MAX_GOLD_CHARS = 3000
 PROMPT = """Lawyers marked the text under GOLD as the part of a merger agreement that answers the question. A search system returned the passage under RETRIEVED instead.
 
@@ -40,23 +42,28 @@ def verdict(result_text: str, retrieved: str) -> bool:
     except json.JSONDecodeError:
         return False
     quote = str(obj.get("quote", "")).strip()
-    return obj.get("answers") is True and bool(quote) and squash(quote)[0] in squash(retrieved)[0]
+    squashed = squash(quote)[0]
+    return obj.get("answers") is True and len(squashed) >= MIN_QUOTE_CHARS and squashed in squash(retrieved)[0]
 
 
 def judge(sample: list[dict], texts: dict[str, str], conn: sqlite3.Connection, cache_path: Path,
           runner=run_claude, model: str = DISPUTE_MODEL) -> list[dict]:
-    ledger = Ledger(Path(cache_path), key="item_id")
+    ledger = Ledger(Path(cache_path), key="key")
+    digest = hashlib.sha1(PROMPT.encode()).hexdigest()[:12]
     out = []
     for row in sample:
-        rec = ledger.get(row["item_id"])
+        pid = row["top_passage_ids"][0]
+        key = f"{row['item_id']}|{pid}|{model}|{digest}"
+        rec = ledger.get(key)
         if rec is None:
             text = texts[row["contract_id"]]
             s, e = conn.execute("SELECT start_char, end_char FROM passages WHERE passage_id = ?",
-                                (row["top_passage_ids"][0],)).fetchone()
+                                (pid,)).fetchone()
             retrieved = text[s:e]
             gold = "\n…\n".join(text[a:b] for a, b in row["gold"])[:MAX_GOLD_CHARS]
             resp = runner(PROMPT.format(query=row["query"], gold=gold, retrieved=retrieved), model)
-            rec = {"item_id": row["item_id"], "contract_id": row["contract_id"], "category": row["category"],
+            rec = {"key": key, "passage_id": pid, "model": model,
+                   "item_id": row["item_id"], "contract_id": row["contract_id"], "category": row["category"],
                    "disputed": verdict(resp["result"], retrieved), "raw": resp["result"][:2000]}
             ledger.put(rec)
         out.append(rec)

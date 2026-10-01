@@ -195,8 +195,12 @@ def _cmd_disputes(args) -> int:
     if rung is None:
         print("no rung results; run `dtd eval --rung ...` first", file=sys.stderr)
         return 2
+    items_path = OUT / f"{rung.lower()}_items.jsonl"
+    if not items_path.exists():
+        print(f"{items_path.name} missing; re-run `dtd eval --rung {rung}`", file=sys.stderr)
+        return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
-    sample = sample_misses(load_items(OUT / f"{rung.lower()}_items.jsonl"))
+    sample = sample_misses(load_items(items_path))
     try:
         judged = judge(sample, ctx.texts, sqlite3.connect(INDEX), CACHE / "disputes.jsonl", runner=run_claude)
     except RuntimeError as e:
