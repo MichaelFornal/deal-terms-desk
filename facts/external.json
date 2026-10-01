@@ -1,0 +1,25 @@
+{
+  "legalbench_rag": {
+    "source": "Pipitone and Houir Alami, LegalBench-RAG, arXiv:2408.10343v1",
+    "url": "https://arxiv.org/abs/2408.10343",
+    "verified_against_pdf": true,
+    "setup": {
+      "search_space": "whole corpus",
+      "embedding": "text-embedding-3-large",
+      "unit": "characters",
+      "query_form": "Consider (document description); (question)"
+    },
+    "k": [1, 2, 4, 8, 16, 32, 64],
+    "methods": {
+      "naive": {"label": "Naive 500-character chunks, no reranker", "table": 4,
+                "precision_pct": [3.36, 2.65, 2.18, 1.89, 1.48, 1.06, 0.75],
+                "recall_pct": [2.54, 3.12, 4.53, 8.75, 13.16, 18.36, 25.62]},
+      "rcts": {"label": "Recursive splitter, no reranker", "table": 5,
+               "precision_pct": [2.65, 1.77, 1.96, 1.40, 1.39, 1.15, 0.82],
+               "recall_pct": [1.65, 2.09, 4.59, 6.18, 12.93, 21.04, 28.28]},
+      "rcts_cohere": {"label": "Recursive splitter, Cohere rerank-english-v3.0", "table": 7,
+                      "precision_pct": [1.94, 2.63, 2.05, 1.77, 1.79, 1.55, 1.12],
+                      "recall_pct": [0.52, 2.48, 4.39, 7.24, 14.03, 22.60, 31.46]}
+    }
+  }
+}

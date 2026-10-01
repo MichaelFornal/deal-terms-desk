@@ -32,6 +32,7 @@ from retrieval.result import Retrieved
 FACTS = Path("facts.json")
 REPORT = Path("docs/m1/REPORT.md")
 REWRITES = "llm_rewrites.jsonl"
+CHAR_KS = (1, 2, 4, 8, 16, 32, 64)
 
 
 def _csv_paths() -> list[Path]:
@@ -112,7 +113,7 @@ def _cmd_eval(args) -> int:
         print("index or label CSVs missing; run `dtd fetch` then `dtd build` first", file=sys.stderr)
         return 2
     rung = args.rung
-    if rung not in RUNGS + ("R5-llm", "R3-fixed"):
+    if rung not in RUNGS + ("R5-llm", "R3-fixed", "corpus"):
         print(f"unknown rung {rung}", file=sys.stderr)
         return 2
     if rung != "R1" and not _has_vectors(INDEX):
@@ -145,6 +146,16 @@ def _cmd_eval(args) -> int:
                   file=sys.stderr)
             return 2
         result = _eval_rung("R3", INDEX_FIXED, "R3-fixed", with_passages(ctx, INDEX_FIXED))
+    elif rung == "corpus":
+        best = _best_rung() or "R1"
+        if best in ("R5", "R6") and not LEXICON_PATH.exists():
+            print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
+            return 2
+        _eval_rung("R1", INDEX, "R1-corpus", ctx, scope="corpus-wide", k=max(CHAR_KS), char_ks=CHAR_KS)
+        ladder = _ladder(INDEX, ctx.texts)
+        result = evaluate(ctx, "best-corpus", lambda q, c, k: ladder.run(best, q, c, k), OUT,
+                          count_tokens=ladder.embedder.count_tokens, scope="corpus-wide", k=max(CHAR_KS),
+                          char_ks=CHAR_KS, extra={"rung": best, "settings": asdict(ladder.settings)})
     else:
         result = _eval_rung(rung, INDEX, rung, ctx)
     print(json.dumps(result["overall"], indent=2))

@@ -256,3 +256,14 @@ def test_disputes_command_exits_2_when_the_runner_fails(data, monkeypatch, capsy
     capsys.readouterr()
     assert cli.entry(["disputes"]) == 2
     assert "claude exited 1" in capsys.readouterr().err
+
+
+def test_corpus_wide_runs_r1_and_the_best_rung(data):
+    cli.entry(["build"]); cli.entry(["embed"])
+    for rung in ("R1", "R2"):
+        cli.entry(["eval", "--rung", rung])
+    assert cli.entry(["eval", "--rung", "corpus"]) == 0
+    r1 = json.loads((data / "out" / "r1_corpus.json").read_text())
+    best = json.loads((data / "out" / "best_corpus.json").read_text())
+    assert r1["scope"] == "corpus-wide" and "char_recall@64" in r1["overall"]
+    assert best["extra"]["rung"] in ("R1", "R2")
