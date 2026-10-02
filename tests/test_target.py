@@ -44,3 +44,33 @@ def test_resolve_matches_only_the_filings_own_filers():
                                     ("2834", False), ("", False), (None, False), ("n/a", False)])
 def test_is_tech(sic, ok):
     assert is_tech(sic) is ok
+
+
+def _p(text):
+    return preamble(text)
+
+
+def test_resolve_refuses_loose_matches():
+    assert resolve("Acme", ["1"], ["Acme Software Inc  (CIK 1)"]) is None
+    assert resolve("Oracle Financial Services", ["1"], ["ORACLE CORP (CIK 1)"]) is None
+    names = ["Acme Software Holdings Co (CIK 1)", "Acme Software Labs Inc (CIK 2)"]
+    assert resolve("Acme Software", ["1", "2"], names) is None
+    with pytest.raises(ValueError):
+        resolve("Acme Software", ["1"], names)
+
+
+def test_signing_date_prefers_dated_as_of_and_ignores_case():
+    t = ("This Agreement, together with the Voting Agreement dated May 2, 2010 and others, dated as of "
+         "March 1, 2016, by and among Big Co, a Delaware corporation (“Parent”), and Acme Inc., a Delaware "
+         "corporation (the “Company”).")
+    assert _p(t).signed == date(2016, 3, 1)
+    assert _p("AGREEMENT DATED AS OF MARCH 1, 2016").signed == date(2016, 3, 1)
+
+
+def test_party_names_do_not_swallow_prose():
+    p = _p('May 2, 2010. Big Co, a Delaware corporation (“Parent”), and Acme Inc., a Delaware corporation '
+           '(the “Company”).')
+    assert p.parent == "Big Co"
+    p = _p('THIS AGREEMENT, DATED AS OF MARCH 1, 2016, Big Co, a Delaware corporation (“Parent”), and '
+           'Acme Inc., a Delaware corporation (the “Company”).')
+    assert p.parent == "Big Co" and p.company == "Acme Inc."

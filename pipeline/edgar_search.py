@@ -37,6 +37,8 @@ def is_ex21(file_type: str) -> bool:
 
 
 def _folder(r: dict) -> str:
+    if not r.get("ciks"):
+        raise ValueError(f"filing {r.get('adsh')} has no CIK; cannot build its URL")
     return f"https://www.sec.gov/Archives/edgar/data/{int(r['ciks'][0])}/{r['adsh'].replace('-', '')}"
 
 
@@ -60,4 +62,6 @@ def search_window(client, start: date, end: date) -> list[dict]:
     hits = list(first["hits"]["hits"])
     for offset in range(PAGE, total["value"], PAGE):
         hits += client.get_json(search_url(start, end, offset))["hits"]["hits"]
+    if len(hits) != total["value"]:
+        raise ValueError(f"window {start}..{end}: expected {total['value']} hits, paged {len(hits)}")
     return [row(h) for h in hits]

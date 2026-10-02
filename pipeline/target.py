@@ -17,8 +17,10 @@ PARTY = re.compile(
 COMPANY_ROLES = ("Company", "Target")
 PARENT_ROLES = ("Parent", "Acquiror", "Acquirer", "Buyer", "Purchaser")
 MONTH = "(" + "|".join(MONTHS) + ")"
-DATED = re.compile(r"dated\s+(?:as\s+of\s+)?" + MONTH + r"\s+(\d{1,2}),?\s+(\d{4})")
-DAY_OF = re.compile(r"(\d{1,2})(?:st|nd|rd|th)?\s+day\s+of\s+" + MONTH + r",?\s+(\d{4})")
+DATED_AS_OF = re.compile(r"dated\s+as\s+of\s+" + MONTH + r"\s+(\d{1,2}),?\s+(\d{4})", re.I)
+DATED = re.compile(r"dated\s+(?:as\s+of\s+)?" + MONTH + r"\s+(\d{1,2}),?\s+(\d{4})", re.I)
+PROSE_END = re.compile(r"[.;:]\s+|\d{4},?\s+|\b(?:by\s+and\s+among|by\s+and\s+between|among|between)\s+", re.I)
+DAY_OF = re.compile(r"(\d{1,2})(?:st|nd|rd|th)?\s+day\s+of\s+" + MONTH + r",?\s+(\d{4})", re.I)
 AMENDMENT = re.compile(r"\bAmendment\s+No\.?\s*\d|\b(?:First|Second|Third)\s+Amendment\b|"
                        r"\bAmendment\s+to\s+(?:the\s+)?Agreement\s+and\s+Plan\s+of\s+Merger", re.I)
 SUFFIX = re.compile(r"\b(?:incorporated|inc|corporation|corp|company|co|ltd|limited|llc|plc|nv|holdings|holding|"
@@ -42,7 +44,7 @@ def is_tech(sic) -> bool:
 
 
 def _signed(head: str) -> date | None:
-    m = DATED.search(head)
+    m = DATED_AS_OF.search(head) or DATED.search(head)
     if m:
         return _date(int(m.group(3)), m.group(1), int(m.group(2)))
     m = DAY_OF.search(head)
@@ -53,16 +55,23 @@ def _signed(head: str) -> date | None:
 
 def _date(year: int, month: str, day: int) -> date | None:
     try:
-        return date(year, MONTHS.index(month) + 1, day)
+        return date(year, MONTHS.index(month.capitalize()) + 1, day)
     except ValueError:
         return None
+
+
+def _trim(name: str) -> str:
+    end = 0
+    for m in PROSE_END.finditer(name):
+        end = m.end()
+    return name[end:].strip(" ,")
 
 
 def preamble(text: str) -> Preamble:
     head = text[:PREAMBLE_CHARS]
     roles: dict[str, str] = {}
     for m in PARTY.finditer(head):
-        roles.setdefault(m.group("role").strip(), m.group("name").strip(" ,"))
+        roles.setdefault(m.group("role").strip(), _trim(m.group("name")))
     company = next((roles[r] for r in COMPANY_ROLES if r in roles), None)
     parent = next((roles[r] for r in PARENT_ROLES if r in roles), None)
     return Preamble(company, parent, _signed(head), bool(AMENDMENT.search(head[:1500])))
@@ -82,11 +91,17 @@ def deal_key(p: Preamble) -> tuple[str, str, str] | None:
 
 
 def resolve(company: str, ciks: list[str], names: list[str]) -> str | None:
+    if len(ciks) != len(names):
+        raise ValueError(f"{len(ciks)} CIKs but {len(names)} names")
     target = norm(company)
     if not target:
         return None
+    found = []
     for cik, display in zip(ciks, names):
         n = norm(re.sub(r"\(.*?\)", " ", display))
-        if n and (n == target or n.startswith(target + " ") or target.startswith(n + " ")):
-            return cik
-    return None
+        if not n:
+            continue
+        short, long_ = sorted((n, target), key=lambda x: len(x.split()))
+        if n == target or (long_.startswith(short + " ") and len(short.split()) >= 2):
+            found.append(cik)
+    return found[0] if len(found) == 1 else None

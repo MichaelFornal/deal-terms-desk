@@ -74,3 +74,20 @@ def test_row_and_urls():
                                   ("EX-99.1", False), ("", False)])
 def test_is_ex21(t, ok):
     assert is_ex21(t) is ok
+
+
+def test_a_short_later_page_raises_instead_of_returning_fewer_rows():
+    class Short(FakeClient):
+        def get_json(self, url):
+            r = super().get_json(url)
+            if "from=100" in url:
+                r["hits"]["hits"] = r["hits"]["hits"][:-1]
+            return r
+
+    with pytest.raises(ValueError, match="expected 250"):
+        search_window(Short(lambda s, e: 250), date(2016, 1, 1), date(2016, 1, 31))
+
+
+def test_doc_url_without_ciks_raises_clearly():
+    with pytest.raises(ValueError, match="no CIK"):
+        doc_url({"adsh": "0001-16-000001", "filename": "a.htm", "ciks": []})
