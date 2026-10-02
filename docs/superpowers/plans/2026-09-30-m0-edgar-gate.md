@@ -28,7 +28,7 @@
 
 Nothing about the tech half has been measured (PRD §2.2). sec.gov blocked the development machine for 40+ minutes on 2026-09-30 after parallel agents hit it. This plan was written without any request to sec.gov, so the response shapes below come from public knowledge of EDGAR's endpoints, not from a probe. **Task 2 is a probe:** four requests (a search page, a submissions JSON, an exhibit and its filing index), recorded as test fixtures. Every later task codes against those recorded fixtures. If a recorded shape differs from what this plan assumes, the implementer adapts the parser to the fixture and says so.
 
-Assumed shapes (to be confirmed by Task 1):
+Assumed shapes (to be confirmed by Task 2):
 - **Full-text search:** `https://efts.sec.gov/LATEST/search-index?q="agreement and plan of merger"&forms=8-K&dateRange=custom&startdt=YYYY-MM-DD&enddt=YYYY-MM-DD&from=N`. JSON `hits.total.value` and `hits.total.relation` (`"gte"` at the 10,000 cap), and `hits.hits[]` with `_id` = `"<accession>:<filename>"` and `_source` with `ciks`, `display_names`, `file_type`, `file_date`, `form`, `adsh`, `sics`. Pages of 100.
 - **Submissions:** `https://data.sec.gov/submissions/CIK##########.json` with `name`, `sic`, `sicDescription`.
 - **Archive document:** `https://www.sec.gov/Archives/edgar/data/<cik>/<accession without dashes>/<filename>`, and the filing index `…/<accession>-index.htm` listing each document's type.

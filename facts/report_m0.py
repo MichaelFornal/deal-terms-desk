@@ -64,7 +64,7 @@ Selection rule (PRD §2.2): an EX-2.1 exhibit to an 8-K whose text is an agreeme
 | Fetched documents with a parsed deal identity | {f['m0_keyed']} |
 | Preamble names a "Company" | {f['m0_company_parsed']} (rate {f['m0_company_parsed_rate']}) |
 | Amendments among them | {f['m0_amendment_docs']} |
-| Distinct deals (target, acquirer, signing date) | {f['m0_deals']} |
+| Distinct deals (target, acquirer, signing date) | {f['m0_deals']} (of which {f['m0_orphan_restated']} are known only through an amended and restated agreement) |
 | Deals whose target resolved to a filer | {f['m0_deals_resolved']} (rate {f['m0_target_resolved_rate']}) |
 | Tech agreements: resolved target with a tech SIC, signed in range | {f['m0_tech_deals']} |
 | Distinct target companies among the tech agreements | {f['m0_tech_targets']} |

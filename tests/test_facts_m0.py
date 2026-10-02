@@ -8,7 +8,7 @@ FAM = ("equity_awards", "termination_fee", "contingent_consideration")
 def measure(tmp_path, tech=150, present=(30, 29, 4), sample=30):
     m = {"search_docs": 9000, "ex21_docs": 4000, "candidates": 600, "fetched": 590, "missing": 10,
          "fetch_errors": 3, "not_merger": 20, "keyed": 540, "tech_targets": 140,
-         "company_parsed": 560, "amendment_docs": 40, "deals": 300, "deals_resolved": 240, "tech_deals": tech,
+         "company_parsed": 560, "amendment_docs": 40, "orphan_restated": 7, "deals": 300, "deals_resolved": 240, "tech_deals": tech,
          "tech_multi_copy": 90, "tech_amended": 12, "sample": sample,
          "family_present": dict(zip(FAM, present)), "family_regex": dict(zip(FAM, (30, 30, 9))),
          "family_truncated": dict(zip(FAM, (1, 2, 3))), "press_unusable": 4,

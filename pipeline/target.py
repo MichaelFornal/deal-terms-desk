@@ -26,6 +26,7 @@ PROSE_END = re.compile(r"[.;:]\s+|" + MONTH + r"\s+\d{1,2},\s+\d{4},?\s+|"
                        r"\b(?:by\s+and\s+among|by\s+and\s+between|among|between)\s+", re.I)
 ABBREVIATIONS = ("corp", "inc", "co", "ltd", "llc", "l.p", "lp", "n.v", "b.v", "s.a", "bros", "no")
 DAY_OF = re.compile(r"(\d{1,2})(?:st|nd|rd|th)?\s+day\s+of\s+" + MONTH + r",?\s+(\d{4})", re.I)
+RESTATED = re.compile(r"\bAmended\s+and\s+Restated\s+Agreement\s+and\s+Plan\s+of\s+Merger", re.I)
 AMENDMENT = re.compile(r"\bAmendment\s+No\.?\s*\d|\b(?:First|Second|Third)\s+Amendment\b|"
                        r"\bAmendment\s+to\s+(?:the\s+)?Agreement\s+and\s+Plan\s+of\s+Merger|"
                        r"\bAmended\s+and\s+Restated\s+Agreement\s+and\s+Plan\s+of\s+Merger", re.I)
@@ -39,6 +40,7 @@ class Preamble:
     parent: str | None
     signed: date | None
     amendment: bool
+    restated: bool = False
 
 
 def is_tech(sic) -> bool:
@@ -85,7 +87,8 @@ def preamble(text: str) -> Preamble:
     company = next((roles[r] for r in COMPANY_ROLES if r in roles), None)
     parent = next((roles[r] for r in PARENT_ROLES if r in roles), None)
     near = head if first is None else head[max(0, first - DATE_REACH):first + DATE_REACH]
-    return Preamble(company, parent, _signed(near) or _signed(head), bool(AMENDMENT.search(head[:1500])))
+    return Preamble(company, parent, _signed(near) or _signed(head), bool(AMENDMENT.search(head[:1500])),
+                    bool(RESTATED.search(head[:1500])))
 
 
 def norm(name: str) -> str:

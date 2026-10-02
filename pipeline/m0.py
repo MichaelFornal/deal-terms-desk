@@ -123,7 +123,7 @@ def _fetch_one(client, out: Path, r: dict) -> dict:
     key = deal_key(p)
     row = {**r, "missing": False, "chars": len(text), "text": str(path), "company": p.company,
            "parent": p.parent, "signed": p.signed.isoformat() if p.signed else None,
-           "amendment": p.amendment, "key": list(key) if key else None, "not_merger": not _is_merger(text),
+           "amendment": p.amendment, "restated": p.restated, "key": list(key) if key else None, "not_merger": not _is_merger(text),
            "target_cik": None}
     if p.company:
         try:
@@ -153,8 +153,15 @@ def stage_deals(client, out: Path = M0_DIR) -> dict:
     for d in docs:
         if d["key"] and not d["amendment"]:
             groups.setdefault(tuple(d["key"]), []).append(d)
+    originals = {k[:2] for k in groups}
+    orphans = []
+    for d in docs:  # an amended and restated agreement whose original we never saw stands as its own deal
+        if d["key"] and d["amendment"] and d.get("restated") and (norm(d["company"]), norm(d["parent"])) not in originals:
+            groups.setdefault(tuple(d["key"]), []).append(d)
+            orphans.append(d)
+    orphan_keys = {tuple(d["key"]) for d in orphans}
     amended = [(norm(d["company"]), norm(d["parent"])) for d in docs
-               if d["amendment"] and d["company"] and d["parent"]]
+               if d["amendment"] and d["company"] and d["parent"] and not any(d is o for o in orphans)]
     rows = []
     for key, copies in sorted(groups.items()):
         cik = next((c["target_cik"] for c in copies if c["target_cik"]), None)
@@ -164,10 +171,11 @@ def stage_deals(client, out: Path = M0_DIR) -> dict:
         canonical = min(copies, key=lambda c: (c["file_date"], c["adsh"]))
         rows.append({"key": list(key), "signed": key[2], "target_cik": cik, "target_sic": sic,
                      "tech": bool(cik) and is_tech(sic), "copies": len(copies), "target_conflict": conflict,
+                     "orphan_restated": key in orphan_keys,
                      "amendments": sum(1 for a in amended if a == key[:2]),
                      "canonical": {k: canonical[k] for k in ("adsh", "filename", "ciks", "file_date", "text")}})
     _write_jsonl(Path(out) / "deals.jsonl", rows)
-    return {"deals": len(rows), "resolved": sum(bool(r["target_cik"]) for r in rows),
+    return {"deals": len(rows), "orphan_restated": sum(r["orphan_restated"] for r in rows), "resolved": sum(bool(r["target_cik"]) for r in rows),
             "tech": sum(r["tech"] for r in rows)}
 
 
@@ -188,8 +196,9 @@ def _clean(s: str) -> str:
     return squash(s.translate(_PUNCT))[0]
 
 
-def _json_object(s: str) -> dict:
-    """The whole reply if it is a JSON object, else the first balanced object found by scanning."""
+def _json_object(s: str, keys: tuple = ()) -> dict:
+    """The whole reply if it is a JSON object, else the first balanced object found by scanning that holds
+    at least one of `keys` (a nested object inside a truncated reply never qualifies)."""
     try:
         obj = json.loads(s)
         if isinstance(obj, dict):
@@ -203,7 +212,7 @@ def _json_object(s: str) -> dict:
                 obj, _ = dec.raw_decode(s, i)
             except json.JSONDecodeError:
                 continue
-            if isinstance(obj, dict):
+            if isinstance(obj, dict) and (not keys or any(k in obj for k in keys)):
                 return obj
     raise RuntimeError("lead-family reply had no parseable JSON object")
 
@@ -235,7 +244,7 @@ def lead_families(text: str, runner, model: str) -> dict:
                                                        len(full[f]) > MAX_HINT_PASSAGES)
         shown[f] = _clean(blocks[f])
     excerpt = PASSAGE_SEP.join(blocks[f] for f in asked)
-    answer = _json_object(runner(PROMPT.format(excerpt=excerpt), model)["result"])
+    answer = _json_object(runner(PROMPT.format(excerpt=excerpt), model)["result"], tuple(asked))
     for f in asked:
         got = answer.get(f) if isinstance(answer.get(f), dict) else {}
         quote = str(got.get("quote", "")).strip()
@@ -347,6 +356,7 @@ def stage_measure(out: Path = M0_DIR) -> dict:
         "company_parsed": sum(1 for d in fetched if d["company"]),
         "amendment_docs": sum(1 for d in fetched if d["amendment"]),
         "deals": len(deals),
+        "orphan_restated": sum(1 for d in deals if d.get("orphan_restated")),
         "deals_resolved": sum(1 for d in deals if d["target_cik"]),
         "tech_deals": len(gate),
         "tech_targets": len({d["target_cik"] for d in gate}),

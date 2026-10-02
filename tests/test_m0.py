@@ -78,7 +78,7 @@ def test_the_stages_measure_a_small_fake_edgar(tmp_path):
     assert stage_candidates(edgar, tmp_path)["candidates"] == 2
     assert stage_fetch(edgar, tmp_path)["fetched"] == 2
     deals = stage_deals(edgar, tmp_path)
-    assert deals == {"deals": 1, "resolved": 1, "tech": 1}
+    assert deals == {"deals": 1, "orphan_restated": 0, "resolved": 1, "tech": 1}
     runner = fake_claude(ANSWER)
     assert stage_sample(tmp_path, runner=runner, model="m")["sample"] == 1
     assert stage_press(edgar, tmp_path)["restated"] == 1
@@ -358,3 +358,60 @@ def test_search_records_and_accepts_its_end_date(tmp_path):
     assert json.loads((tmp_path / "search_meta.json").read_text()) == {"end": "2016-04-30"}
     q = [parse_qs(urlparse(u).query) for u in edgar.urls]
     assert max(x["enddt"][0] for x in q) == "2016-04-30"
+
+
+def test_a_truncated_reply_does_not_yield_a_nested_object(tmp_path):
+    from pipeline.m0 import _json_object
+    trunc = '{"equity_awards": {"present": true, "quote": "x"}, "contingent_consideration": {"pres'
+    with pytest.raises(RuntimeError):
+        _json_object(trunc, keys=("equity_awards", "contingent_consideration"))
+    with pytest.raises(RuntimeError):
+        lead_families(PRE.format(d="March 1, 2016", p="P Corp.", c="C Inc."), fake_claude(trunc), "m")
+    prose = 'Sure thing. {"termination_fee": {"present": false, "quote": ""}} done'
+    assert _json_object(prose, keys=("termination_fee",)) == {"termination_fee": {"present": False, "quote": ""}}
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    stage_deals(edgar, tmp_path)
+    with pytest.raises(RuntimeError):
+        stage_sample(tmp_path, runner=fake_claude(trunc), model="m")
+    ledger = tmp_path / "sample_ledger.jsonl"
+    assert not ledger.exists() or ledger.read_text() == ""
+
+
+def _edit_docs(tmp_path, edit):
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    docs = [json.loads(x) for x in (tmp_path / "docs.jsonl").read_text().splitlines()]
+    edit(docs)
+    (tmp_path / "docs.jsonl").write_text("".join(json.dumps(d) + "\n" for d in docs))
+    return edgar, stage_deals(edgar, tmp_path)
+
+
+def test_an_amended_and_restated_agreement_with_no_original_is_its_own_deal(tmp_path):
+    def edit(docs):
+        for d in docs:
+            d["amendment"] = d["restated"] = True
+    _, res = _edit_docs(tmp_path, edit)
+    assert res["deals"] == 1 and res["orphan_restated"] == 1
+    row = json.loads((tmp_path / "deals.jsonl").read_text().splitlines()[0])
+    assert row["key"][0] == "acme software" and row["signed"] == "2016-03-01"
+    assert row["amendments"] == 0 and row["copies"] == 2
+    assert stage_measure_for(tmp_path)["orphan_restated"] == 1
+
+
+def test_an_amended_and_restated_agreement_with_its_original_stays_an_amendment(tmp_path):
+    def edit(docs):
+        for i, d in enumerate(docs):
+            d["restated"] = d["amendment"] = i == 1
+            if i == 1:
+                d["signed"] = "2016-06-01"
+                d["key"] = [d["key"][0], d["key"][1], "2016-06-01"]
+    _, res = _edit_docs(tmp_path, edit)
+    assert res["deals"] == 1 and res["orphan_restated"] == 0
+    row = json.loads((tmp_path / "deals.jsonl").read_text().splitlines()[0])
+    assert row["amendments"] == 1 and row["copies"] == 1
+    assert stage_measure_for(tmp_path)["orphan_restated"] == 0

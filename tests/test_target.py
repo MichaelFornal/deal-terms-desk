@@ -123,3 +123,10 @@ def test_the_signing_date_is_read_near_the_preamble_not_from_later_definitions()
          "Big Buyer Corp., a Delaware corporation (“Parent”), and Acme Software, Inc., a Delaware corporation "
          "(the “Company”).\n" + later)
     assert preamble(t).signed == date(2016, 3, 1)
+
+
+def test_restated_flag_marks_only_amended_and_restated():
+    t = ("AMENDED AND RESTATED AGREEMENT AND PLAN OF MERGER\n\nThis Amended and Restated Agreement and Plan of Merger, "
+         "dated as of May 1, 2016, by and among Big Buyer Corp. (\u201cParent\u201d), and Acme, Inc. (the \u201cCompany\u201d).")
+    p = preamble(t)
+    assert p.restated is True and p.amendment is True

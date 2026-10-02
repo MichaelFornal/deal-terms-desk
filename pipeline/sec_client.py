@@ -65,7 +65,7 @@ class SecClient:
         try:
             self._last_wall = float(self._last_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            self._last_wall = started = self._wall()
+            self._last_wall = self._wall()
         self._mutex = threading.Lock()
         self._pid = os.getpid()
         self._closed = False
