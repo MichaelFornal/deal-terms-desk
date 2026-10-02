@@ -26,14 +26,16 @@ def test_the_report_states_the_gate_and_its_labels():
 
 class EveryWithAccess(Every):
     def __init__(self):
-        super().__init__(m0_sec_requests=SENTINEL, m0_min_request_gap_s=SENTINEL, m0_blocked_events=SENTINEL)
+        super().__init__(m0_sec_requests=SENTINEL, m0_min_request_gap_s=SENTINEL, m0_blocked_events=SENTINEL,
+                         m0_server_errors=SENTINEL)
 
 
 def test_the_access_sentence_is_built_from_facts():
     text = render_m0(EveryWithAccess())
     assert "Every request followed" not in text
     line = text[text.index("Requests made to sec.gov"):].splitlines()[0]
-    assert line.count(str(SENTINEL)) == 3 and "smallest gap between request starts" in line
+    assert line.count(str(SENTINEL)) == 4 and "smallest gap between request starts" in line
+    assert "server errors" in line
     lines = [l for l in text.replace(str(SENTINEL), "").splitlines() if re.search(r"\d", ALLOWED.sub("", l))]
     assert lines == []
 

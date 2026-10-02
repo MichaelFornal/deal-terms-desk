@@ -27,7 +27,8 @@ def _rows(path: Path) -> list[dict]:
 
 
 def access(sec_dir: Path) -> dict:
-    """What the sec.gov client's own logs show: requests answered, the smallest spacing, refusals met."""
+    """What the sec.gov client's own logs show: requests answered, the smallest spacing, refusals and
+    server errors met."""
     sec_dir = Path(sec_dir)
     if not (sec_dir / "ledger.jsonl").exists():
         return {}
@@ -36,7 +37,8 @@ def access(sec_dir: Path) -> dict:
     gaps = [b - a for a, b in zip(starts, starts[1:])]
     return {"m0_sec_requests": len(rows),
             "m0_min_request_gap_s": round(min(gaps), 3) if gaps else None,
-            "m0_blocked_events": len(_rows(sec_dir / "blocked_events.jsonl"))}
+            "m0_blocked_events": len(_rows(sec_dir / "blocked_events.jsonl")),
+            "m0_server_errors": len(_rows(sec_dir / "server_errors.jsonl"))}
 
 
 def build_m0(m0_dir: Path, facts: dict | None = None, sec_dir: Path | None = None) -> dict:
