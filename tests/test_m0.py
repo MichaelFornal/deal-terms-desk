@@ -260,3 +260,20 @@ def test_short_sics_fall_back_to_submissions(tmp_path):
     (tmp_path / "search.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     assert stage_candidates(edgar, tmp_path)["candidates"] == 3
     assert any("data.sec.gov" in u for u in edgar.urls)
+
+
+def test_merger_titles_and_new_measure_keys(tmp_path):
+    from pipeline.m0 import _is_merger
+    for t in ("PLAN AND AGREEMENT OF MERGER", "Agreement of  Merger", "PLAN OF MERGER", "This Merger Agreement is"):
+        assert _is_merger(t + " by and among X")
+    assert not _is_merger("STOCK PURCHASE AGREEMENT by and among X")
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    stage_deals(edgar, tmp_path)
+    stage_sample(tmp_path, runner=fake_claude(ANSWER), model="m")
+    stage_press(edgar, tmp_path)
+    m = stage_measure(tmp_path)
+    assert m["family_truncated"] == {"equity_awards": 0, "termination_fee": 0, "contingent_consideration": 0}
+    assert m["press_unusable"] == 0

@@ -48,6 +48,8 @@ SCALES = {"million": 1e6, "mm": 1e6, "m": 1e6, "billion": 1e9, "bn": 1e9, "b": 1
 QUOTE_MIN = 20
 SNIPPET = 100
 MERGER_HEAD = 1500
+MERGER_TITLES = ("agreement and plan of merger", "plan and agreement of merger", "agreement of merger",
+                 "plan of merger", "merger agreement")
 _PUNCT = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-"})
 
 
@@ -90,7 +92,8 @@ def stage_candidates(client, out: Path = M0_DIR) -> dict:
 
 
 def _is_merger(text: str) -> bool:
-    return "agreement and plan of merger" in " ".join(text[:MERGER_HEAD].split()).lower()
+    head = " ".join(text[:MERGER_HEAD].split()).lower()
+    return any(t in head for t in MERGER_TITLES)
 
 
 def _fetch_one(client, out: Path, r: dict) -> dict:
@@ -317,6 +320,8 @@ def stage_measure(out: Path = M0_DIR) -> dict:
         "sample": len(sample),
         "family_present": {f: sum(1 for r in sample if r[f]["present"]) for f in FAMILIES},
         "family_regex": {f: sum(1 for r in sample if r[f]["regex"]) for f in FAMILIES},
+        "family_truncated": {f: sum(1 for r in sample if r[f]["truncated"]) for f in FAMILIES},
+        "press_unusable": sum(1 for r in press if r.get("unusable")),
         "press_fee": sum(r["fee"] for r in press),
         "press_release": sum(r["release"] for r in press),
         "press_both": sum(1 for r in press if r["fee"] and r["release"]),
