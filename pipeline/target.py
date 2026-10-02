@@ -3,7 +3,10 @@ from dataclasses import dataclass
 from datetime import date
 
 TECH_SIC = ((3570, 3579), (3661, 3679), (7370, 7379))
-PREAMBLE_CHARS = 6000
+PREAMBLE_CHARS = 15000
+# The signing date is read first within this many characters of the first party (then anywhere in the head),
+# so a later definition's date ("dated as of ...") does not beat a preamble that a long cover page pushed down.
+DATE_REACH = 1500
 MONTHS = ("January February March April May June July August September October November December").split()
 _Q = "[“\"]"
 _QE = "[”\"]"
@@ -12,8 +15,8 @@ _QE = "[”\"]"
 NAME = r"(?P<name>[A-Z0-9][\w.&'’\-]*(?:,?\s+(?:[A-Z0-9&][\w.&'’\-]*|of|and|de|la|the))*)"
 PARTY = re.compile(
     NAME + r",?\s+(?:a|an)\s+[A-Za-z .’'\-]{0,80}?"
-    r"(?:corporation|company|partnership|N\.V\.|B\.V\.|S\.A\.|plc|Ltd\.?|limited)\b[^()“”\"]{0,120}?"
-    r"\(\s*(?:the\s+)?" + _Q + r"(?P<role>[A-Z][A-Za-z ]{1,40})" + _QE + r"\s*\)", re.S)
+    r"(?:corporation|company|partnership|trust|N\.V\.|B\.V\.|S\.A\.|plc|Ltd\.?|limited)\b[^()“”\"]{0,120}?"
+    r"\(\s*(?:the\s+)?" + _Q + r"(?P<role>[A-Z][A-Za-z ]{1,40})" + _QE + r"[^()]*\)", re.S)
 COMPANY_ROLES = ("Company", "Target")
 PARENT_ROLES = ("Parent", "Acquiror", "Acquirer", "Buyer", "Purchaser")
 MONTH = "(" + "|".join(MONTHS) + ")"
@@ -24,7 +27,8 @@ PROSE_END = re.compile(r"[.;:]\s+|" + MONTH + r"\s+\d{1,2},\s+\d{4},?\s+|"
 ABBREVIATIONS = ("corp", "inc", "co", "ltd", "llc", "l.p", "lp", "n.v", "b.v", "s.a", "bros", "no")
 DAY_OF = re.compile(r"(\d{1,2})(?:st|nd|rd|th)?\s+day\s+of\s+" + MONTH + r",?\s+(\d{4})", re.I)
 AMENDMENT = re.compile(r"\bAmendment\s+No\.?\s*\d|\b(?:First|Second|Third)\s+Amendment\b|"
-                       r"\bAmendment\s+to\s+(?:the\s+)?Agreement\s+and\s+Plan\s+of\s+Merger", re.I)
+                       r"\bAmendment\s+to\s+(?:the\s+)?Agreement\s+and\s+Plan\s+of\s+Merger|"
+                       r"\bAmended\s+and\s+Restated\s+Agreement\s+and\s+Plan\s+of\s+Merger", re.I)
 SUFFIX = re.compile(r"\b(?:incorporated|inc|corporation|corp|company|co|ltd|limited|llc|plc|nv|holdings|holding|"
                     r"group|the)\b")
 
@@ -74,11 +78,14 @@ def _trim(name: str) -> str:
 def preamble(text: str) -> Preamble:
     head = text[:PREAMBLE_CHARS]
     roles: dict[str, str] = {}
+    first = None
     for m in PARTY.finditer(head):
+        first = m.start() if first is None else first
         roles.setdefault(m.group("role").strip(), _trim(m.group("name")))
     company = next((roles[r] for r in COMPANY_ROLES if r in roles), None)
     parent = next((roles[r] for r in PARENT_ROLES if r in roles), None)
-    return Preamble(company, parent, _signed(head), bool(AMENDMENT.search(head[:1500])))
+    near = head if first is None else head[max(0, first - DATE_REACH):first + DATE_REACH]
+    return Preamble(company, parent, _signed(near) or _signed(head), bool(AMENDMENT.search(head[:1500])))
 
 
 def norm(name: str) -> str:

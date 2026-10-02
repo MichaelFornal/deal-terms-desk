@@ -84,3 +84,42 @@ def test_trim_keeps_names_with_numbers_and_abbreviations():
     p = _p("by and among Company 2000 Ltd., a Delaware corporation (“Parent”), and Acme Inc., a Delaware "
            "corporation (the “Company”).")
     assert p.parent == "Company 2000 Ltd."
+
+
+def test_a_long_cover_page_and_contents_do_not_hide_the_preamble():
+    toc = "".join(f"Section {i // 10}.{i % 10} Heading Number {i} .......... {i}\n" for i in range(200))
+    cover = "AGREEMENT AND PLAN OF MERGER\n\nby and among\n\nBig Buyer Corp.\n\nand Acme Software, Inc.\n\n" + toc
+    assert len(cover) > 6000
+    p = preamble(cover + "\n" + PRE)
+    assert p.company == "Acme Software, Inc." and p.parent == "Big Buyer Corp." and p.signed == date(2016, 3, 1)
+
+
+def test_the_role_may_be_followed_by_more_text_in_its_parenthesis():
+    t = ("This AGREEMENT AND PLAN OF MERGER, dated as of March 1, 2016, by and among Big Buyer Corp., a Delaware "
+         "corporation (“Parent”), and Acme Software, Inc., a Delaware corporation (the “Company” and, together "
+         "with Parent and Merger Sub, the “Parties”).")
+    p = preamble(t)
+    assert p.company == "Acme Software, Inc." and p.parent == "Big Buyer Corp."
+
+
+def test_a_trust_is_a_party():
+    t = ("This AGREEMENT AND PLAN OF MERGER, dated as of March 1, 2016, by and among Big REIT Inc., a Maryland "
+         "corporation (“Parent”), and Acme Realty Trust, a Maryland real estate investment trust (the “Company”).")
+    p = preamble(t)
+    assert p.company == "Acme Realty Trust" and p.parent == "Big REIT Inc."
+
+
+def test_an_amended_and_restated_agreement_is_an_amendment():
+    t = ("AMENDED AND RESTATED AGREEMENT AND PLAN OF MERGER\n\nThis Amended and Restated Agreement and Plan of "
+         "Merger, dated as of March 1, 2016, by and among Big Buyer Corp., a Delaware corporation (“Parent”), and "
+         "Acme Software, Inc., a Delaware corporation (the “Company”).")
+    assert preamble(t).amendment is True
+
+
+def test_the_signing_date_is_read_near_the_preamble_not_from_later_definitions():
+    later = ("x " * 2000) + ("“Clean Team Agreement” means the amendment to the Confidentiality Agreement, dated as of "
+                             "July 21, 2016, by and between Parent and the Company.")
+    t = ("THIS AGREEMENT AND PLAN OF MERGER (this “Agreement”), dated March 1, 2016, is entered into by and among "
+         "Big Buyer Corp., a Delaware corporation (“Parent”), and Acme Software, Inc., a Delaware corporation "
+         "(the “Company”).\n" + later)
+    assert preamble(t).signed == date(2016, 3, 1)
