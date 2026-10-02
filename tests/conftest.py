@@ -1,3 +1,4 @@
+import socket
 import urllib.request
 from urllib.parse import urlparse
 
@@ -17,3 +18,13 @@ def no_real_sec_requests(monkeypatch):
             raise AssertionError(f"test tried to reach sec.gov: {url}")
         return real(req, *args, **kwargs)
     monkeypatch.setattr(urllib.request, "urlopen", guarded)
+
+    real_gai = socket.getaddrinfo
+
+    def guarded_gai(host, *args, **kwargs):
+        name = host.decode("ascii", "ignore") if isinstance(host, bytes) else (host or "")
+        name = name.lower().rstrip(".")
+        if name == "sec.gov" or name.endswith(".sec.gov"):
+            raise AssertionError(f"test tried to resolve sec.gov: {name}")
+        return real_gai(host, *args, **kwargs)
+    monkeypatch.setattr(socket, "getaddrinfo", guarded_gai)
