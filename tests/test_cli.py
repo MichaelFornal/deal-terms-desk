@@ -405,3 +405,22 @@ def test_facts_with_rungs_scored_on_different_items_fail_clearly(data, capsys, m
     capsys.readouterr()
     assert cli.entry(["facts"]) == 2
     assert "different items" in capsys.readouterr().err
+
+
+def test_m0_without_a_contact_refuses_before_any_request(data, monkeypatch, capsys):
+    monkeypatch.delenv("SEC_CONTACT", raising=False)
+    monkeypatch.chdir(data)
+    assert cli.entry(["m0", "search"]) == 2
+    assert "SEC_CONTACT" in capsys.readouterr().err
+
+
+def test_m0_stops_with_exit_3_when_blocked(data, monkeypatch, capsys):
+    from pipeline.sec_client import Blocked
+    monkeypatch.setenv("SEC_CONTACT", "tester@example.com")
+    monkeypatch.setattr(cli, "DATA", data)
+
+    def blocked(client, out, today=None):
+        raise Blocked("sec.gov answered 403; stopped, no retry")
+    monkeypatch.setattr(cli.m0, "stage_search", blocked)
+    assert cli.entry(["m0", "search"]) == 3
+    assert "403" in capsys.readouterr().err

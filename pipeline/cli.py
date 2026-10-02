@@ -14,16 +14,19 @@ from evals.run_rung import evaluate, load_context, with_passages
 from evals.tune import tune
 from facts.build import build as build_facts
 from facts.build import UNSTABLE
+from facts.m0 import build_m0
 from facts.m2 import build_m2, is_unstable
 from facts.m2 import present as m2_present
 from facts.report import render
+from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
+from pipeline import m0
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
-from pipeline.paths import CACHE, CSV_NAMES, INDEX, INDEX_FIXED, OUT, RAW
+from pipeline.paths import CACHE, DATA, CSV_NAMES, INDEX, INDEX_FIXED, OUT, RAW
 from retrieval import vectors
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
@@ -36,6 +39,9 @@ FACTS = Path("facts.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
+REPORT_M0 = Path("docs/m0/REPORT.md")
+M0_STAGES = ("search", "candidates", "fetch", "deals", "sample", "press", "measure")
+NEEDS_SEC = {"search", "candidates", "fetch", "deals", "press"}
 REWRITES = "llm_rewrites.jsonl"
 CHAR_KS = (1, 2, 4, 8, 16, 32, 64)
 
@@ -269,6 +275,8 @@ def _all_facts() -> dict:
     facts = build_facts(INDEX, OUT / "r1.json", _csv_paths())
     if m2_present(OUT):
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
+    if (DATA / "m0" / "measure.json").exists():
+        facts |= build_m0(DATA / "m0", facts)
     return facts
 
 
@@ -317,6 +325,31 @@ def _cmd_failures(args) -> int:
     return 0
 
 
+def _cmd_m0(args) -> int:
+    from pipeline.env import sec_contact
+    from pipeline.sec_client import Blocked, SecClient
+    stages = M0_STAGES if args.stage == "all" else (args.stage,)
+    client = None
+    try:
+        if NEEDS_SEC & set(stages):
+            client = SecClient(DATA / "sec", sec_contact())
+        out = DATA / "m0"
+        for stage in stages:
+            fn = getattr(m0, f"stage_{stage}")
+            summary = fn(out) if stage in ("sample", "measure") else fn(client, out)
+            print(json.dumps({stage: summary}), flush=True)
+        return 0
+    except Blocked as e:
+        print(str(e), file=sys.stderr)
+        return 3
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    finally:
+        if client is not None:
+            client.close()
+
+
 def _cmd_report(args) -> int:
     if not FACTS.exists():
         print("facts.json missing; run `dtd facts` first", file=sys.stderr)
@@ -327,6 +360,9 @@ def _cmd_report(args) -> int:
     if "m2_r1_report_recall_at_5" in facts:
         REPORT_M2.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M2.write_text(render_m2(facts), encoding="utf-8")
+    if "m0_gate_pass" in facts:
+        REPORT_M0.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M0.write_text(render_m0(facts), encoding="utf-8")
     return 0
 
 
@@ -352,6 +388,9 @@ def entry(argv: list[str] | None = None) -> int:
     facts.set_defaults(fn=_cmd_facts)
     sub.add_parser("failures").set_defaults(fn=_cmd_failures)
     sub.add_parser("report").set_defaults(fn=_cmd_report)
+    m0p = sub.add_parser("m0")
+    m0p.add_argument("stage", choices=M0_STAGES + ("all",))
+    m0p.set_defaults(fn=_cmd_m0)
     args = parser.parse_args(argv)
     return args.fn(args)
 
