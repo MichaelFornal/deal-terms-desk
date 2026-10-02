@@ -277,3 +277,84 @@ def test_merger_titles_and_new_measure_keys(tmp_path):
     m = stage_measure(tmp_path)
     assert m["family_truncated"] == {"equity_awards": 0, "termination_fee": 0, "contingent_consideration": 0}
     assert m["press_unusable"] == 0
+
+
+def test_a_resolve_error_keeps_the_document(tmp_path):
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    rows = [json.loads(x) for x in (tmp_path / "search.jsonl").read_text().splitlines()]
+    rows[0]["names"] = []
+    rows[1]["ciks"] = []
+    (tmp_path / "candidates.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    out = stage_fetch(edgar, tmp_path)
+    assert out["fetched"] == 2 and out["errors"] == 1
+    docs = {d["adsh"]: d for d in map(json.loads, (tmp_path / "docs.jsonl").read_text().splitlines())}
+    bad = docs[rows[0]["adsh"]]
+    assert bad["missing"] is False and bad["key"] and bad["target_cik"] is None
+    assert "1 CIKs but 0 names" in bad["resolve_error"] and "error" not in bad
+    assert "error" in docs[rows[1]["adsh"]]
+    stage_deals(edgar, tmp_path)
+    m = stage_measure_for(tmp_path)
+    assert m["resolve_errors"] == 1 and m["fetch_errors"] == 1
+
+
+def test_the_prompt_asks_for_a_fragment_of_forty_to_three_hundred_characters():
+    from pipeline.m0 import PROMPT, QUOTE_MIN
+    assert "a verbatim fragment of 40 to 300 characters" in PROMPT and "shortest" not in PROMPT
+    assert QUOTE_MIN == 20
+
+
+def test_a_bad_press_url_is_unusable_not_fatal(tmp_path):
+    class Edgar(FakeEdgar):
+        def _route(self, url):
+            if url.endswith("-index.htm"):
+                return b'<tr><td><a href="https://example.com/pr.htm">pr.htm</a></td><td>EX-99.1</td></tr>'
+            return super()._route(url)
+
+        def get(self, url):
+            if urlparse(url).hostname not in ("www.sec.gov", "efts.sec.gov", "data.sec.gov"):
+                raise ValueError(f"host not allowed: {url}")
+            return super().get(url)
+    edgar = Edgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    stage_deals(edgar, tmp_path)
+    stage_sample(tmp_path, runner=fake_claude(ANSWER), model="m")
+    assert stage_press(edgar, tmp_path)["sample"] == 1
+    row = json.loads((tmp_path / "press.jsonl").read_text().splitlines()[0])
+    assert row["unusable"] == "bad-url" and row["release"] is False
+
+
+def test_the_reply_parser_takes_the_whole_reply_then_the_first_balanced_object():
+    from pipeline.m0 import _json_object
+    assert _json_object('{"a": {"b": "}"}}') == {"a": {"b": "}"}}
+    assert _json_object('Here: {"a": 1} and then {"b": 2}') == {"a": 1}
+    assert _json_object('Sure. {"a": "x}"} done') == {"a": "x}"}
+    with pytest.raises(RuntimeError):
+        _json_object("no object {here")
+
+
+def test_copies_resolving_to_different_targets_are_a_conflict(tmp_path):
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    assert stage_deals(edgar, tmp_path)["deals"] == 1
+    row = json.loads((tmp_path / "deals.jsonl").read_text().splitlines()[0])
+    assert row["target_conflict"] is False
+    docs = [json.loads(x) for x in (tmp_path / "docs.jsonl").read_text().splitlines()]
+    docs[1]["target_cik"] = "0000000022"
+    (tmp_path / "docs.jsonl").write_text("".join(json.dumps(d) + "\n" for d in docs))
+    stage_deals(edgar, tmp_path)
+    row = json.loads((tmp_path / "deals.jsonl").read_text().splitlines()[0])
+    assert row["target_conflict"] is True
+
+
+def test_search_records_and_accepts_its_end_date(tmp_path):
+    edgar = FakeEdgar()
+    out = stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    assert out["end"] == "2016-04-30"
+    assert json.loads((tmp_path / "search_meta.json").read_text()) == {"end": "2016-04-30"}
+    q = [parse_qs(urlparse(u).query) for u in edgar.urls]
+    assert max(x["enddt"][0] for x in q) == "2016-04-30"

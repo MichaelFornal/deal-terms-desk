@@ -7,6 +7,8 @@ BLOCK = {"p", "div", "br", "tr", "li", "table", "h1", "h2", "h3", "h4", "h5", "h
 SKIP = {"script", "style", "title"}
 PAGE_LINE = re.compile(r"(?m)^[ \t]*(?:-\s*\d{1,3}\s*-|\d{1,3}|Page\s+\d{1,3}(?:\s+of\s+\d{1,3})?)[ \t]*\n")
 TEXT_BLOCK = re.compile(r"<TEXT>(.*?)(?:</TEXT>|\Z)", re.I | re.S)
+# Only an EDGAR submission wrapper has a <TEXT> block; an HTML exhibit may hold an SVG <text> element.
+SGML_START = re.compile(r"\ufeff?\s*<(?:SEC-DOCUMENT|DOCUMENT)>", re.I)
 SPACES = re.compile(r"[ \t\xa0]+")
 
 
@@ -50,7 +52,7 @@ def to_text(raw: bytes, filename: str) -> str:
         s = raw.decode("utf-8")
     except UnicodeDecodeError:
         s = raw.decode("cp1252", errors="replace")
-    m = TEXT_BLOCK.search(s)
+    m = TEXT_BLOCK.search(s) if filename.lower().endswith(".txt") or SGML_START.match(s) else None
     if m:
         s = m.group(1)
     if _is_html(s, filename):

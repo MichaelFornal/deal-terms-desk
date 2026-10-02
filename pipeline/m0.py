@@ -30,7 +30,7 @@ HINTS = {
     "contingent_consideration": re.compile(r"\b(?:earn-?outs?|contingent\s+value\s+rights?|CVRs?|"
                                            r"milestone\s+payments?|contingent\s+consideration)\b", re.I),
 }
-PROMPT = """Below are passages from one merger agreement, separated by ---. For each topic, decide whether these passages contain a provision on it, and quote the shortest verbatim fragment (at most 300 characters) that shows it.
+PROMPT = """Below are passages from one merger agreement, separated by ---. For each topic, decide whether these passages contain a provision on it, and quote a verbatim fragment of 40 to 300 characters that shows it.
 
 Topics:
 - equity_awards: how employee stock options, restricted stock units or other equity awards are treated in the merger
@@ -65,12 +65,26 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def stage_search(client, out: Path = M0_DIR, today: date | None = None) -> dict:
+    """`today` pins the search's end date; a rerun passes the one recorded in search_meta.json."""
+    last = today or date.today()
     rows: dict[tuple[str, str], dict] = {}
-    for start, end in months(START, today or date.today()):
+    for start, end in months(START, last):
         for r in search_window(client, start, end):
             rows[(r["adsh"], r["filename"])] = r
     _write_jsonl(Path(out) / "search.jsonl", [rows[k] for k in sorted(rows)])
-    return {"docs": len(rows), "ex21": sum(is_ex21(r["file_type"]) for r in rows.values())}
+    meta = Path(out) / "search_meta.json"
+    tmp = meta.with_name(meta.name + ".tmp")
+    tmp.write_text(json.dumps({"end": last.isoformat()}, sort_keys=True), encoding="utf-8")
+    tmp.replace(meta)
+    return {"docs": len(rows), "ex21": sum(is_ex21(r["file_type"]) for r in rows.values()), "end": last.isoformat()}
+
+
+def search_end(out: Path = M0_DIR) -> date | None:
+    """The end date an earlier search recorded, so a rerun asks EDGAR the same windows."""
+    meta = Path(out) / "search_meta.json"
+    if not meta.exists():
+        return None
+    return date.fromisoformat(json.loads(meta.read_text(encoding="utf-8"))["end"])
 
 
 def _filer_sics(client, r: dict) -> list[str]:
@@ -107,10 +121,16 @@ def _fetch_one(client, out: Path, r: dict) -> dict:
     tmp.replace(path)
     p = preamble(text)
     key = deal_key(p)
-    return {**r, "missing": False, "chars": len(text), "text": str(path), "company": p.company,
-            "parent": p.parent, "signed": p.signed.isoformat() if p.signed else None,
-            "amendment": p.amendment, "key": list(key) if key else None, "not_merger": not _is_merger(text),
-            "target_cik": resolve(p.company, r["ciks"], r["names"]) if p.company else None}
+    row = {**r, "missing": False, "chars": len(text), "text": str(path), "company": p.company,
+           "parent": p.parent, "signed": p.signed.isoformat() if p.signed else None,
+           "amendment": p.amendment, "key": list(key) if key else None, "not_merger": not _is_merger(text),
+           "target_cik": None}
+    if p.company:
+        try:
+            row["target_cik"] = resolve(p.company, r["ciks"], r["names"])
+        except ValueError as e:  # the filing's filer lists disagree: keep the document, unresolved
+            row["resolve_error"] = str(e)
+    return row
 
 
 def stage_fetch(client, out: Path = M0_DIR) -> dict:
@@ -138,11 +158,12 @@ def stage_deals(client, out: Path = M0_DIR) -> dict:
     rows = []
     for key, copies in sorted(groups.items()):
         cik = next((c["target_cik"] for c in copies if c["target_cik"]), None)
+        conflict = len({c["target_cik"] for c in copies if c["target_cik"]}) > 1
         sub = client.get_json(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json") if cik else None
         sic = str(sub.get("sic", "")) if sub else None
         canonical = min(copies, key=lambda c: (c["file_date"], c["adsh"]))
         rows.append({"key": list(key), "signed": key[2], "target_cik": cik, "target_sic": sic,
-                     "tech": bool(cik) and is_tech(sic), "copies": len(copies),
+                     "tech": bool(cik) and is_tech(sic), "copies": len(copies), "target_conflict": conflict,
                      "amendments": sum(1 for a in amended if a == key[:2]),
                      "canonical": {k: canonical[k] for k in ("adsh", "filename", "ciks", "file_date", "text")}})
     _write_jsonl(Path(out) / "deals.jsonl", rows)
@@ -168,14 +189,23 @@ def _clean(s: str) -> str:
 
 
 def _json_object(s: str) -> dict:
-    m = re.search(r"\{.*\}", s, re.S)
+    """The whole reply if it is a JSON object, else the first balanced object found by scanning."""
     try:
-        obj = json.loads(m.group(0)) if m else None
+        obj = json.loads(s)
+        if isinstance(obj, dict):
+            return obj
     except json.JSONDecodeError:
-        obj = None
-    if not isinstance(obj, dict):
-        raise RuntimeError("lead-family reply had no parseable JSON object")
-    return obj
+        pass
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(s):
+        if ch == "{":
+            try:
+                obj, _ = dec.raw_decode(s, i)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                return obj
+    raise RuntimeError("lead-family reply had no parseable JSON object")
 
 
 def _family_block(passages: list[str], cap: int, more: bool) -> tuple[str, bool]:
@@ -272,11 +302,15 @@ def stage_press(client, out: Path = M0_DIR) -> dict:
     for s in _read_jsonl(Path(out) / "sample.jsonl"):
         c = deals[s["adsh"]]["canonical"]
         fees = fee_amounts(Path(c["text"]).read_text(encoding="utf-8"))
-        index = client.get(index_url(c))
-        url = press_release_url(index.decode("utf-8", errors="replace")) if index else None
-        raw = client.get(url) if url else None
         row = {"adsh": s["adsh"], "fee": bool(fees), "release": False, "restated": False,
                "matched_amount": None, "snippet": None, "unusable": None}
+        try:
+            index = client.get(index_url(c))
+            url = press_release_url(index.decode("utf-8", errors="replace")) if index else None
+            raw = client.get(url) if url else None
+        except ValueError:  # an off-host or malformed link in the index: count it, do not stop the stage
+            row["unusable"] = "bad-url"
+            raw = None
         if raw and (raw[:4] == b"%PDF" or url.lower().endswith(".pdf")):
             row["unusable"] = "pdf"
         elif raw:
@@ -307,6 +341,7 @@ def stage_measure(out: Path = M0_DIR) -> dict:
         "fetched": len(fetched),
         "missing": sum(1 for d in docs if d["missing"] and "error" not in d),
         "fetch_errors": sum(1 for d in docs if "error" in d),
+        "resolve_errors": sum(1 for d in fetched if "resolve_error" in d),
         "not_merger": sum(1 for d in fetched if d["not_merger"]),
         "keyed": sum(1 for d in fetched if d["key"]),
         "company_parsed": sum(1 for d in fetched if d["company"]),

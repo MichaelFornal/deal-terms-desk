@@ -41,3 +41,13 @@ def test_sgml_submission_keeps_only_the_text_block():
 def test_pre_keeps_newlines_and_title_is_dropped():
     t = to_text(b"<html><head><title>T!</title></head><body><pre>line one\nline two</pre></body></html>", "a.htm")
     assert t == "line one\nline two\n"
+
+
+def test_an_html_exhibit_with_svg_text_is_not_cut_to_a_text_block():
+    raw = b'<html><body><svg><text>Logo</text></svg><p>AGREEMENT AND PLAN OF MERGER</p></body></html>'
+    assert "AGREEMENT AND PLAN OF MERGER" in to_text(raw, "d1dex21.htm")
+
+
+def test_a_document_wrapper_is_cut_to_its_text_block_whatever_the_extension():
+    raw = b"  <DOCUMENT>\n<TYPE>EX-2.1\n<TEXT>\n<html><body><p>The Agreement</p></body></html>\n</TEXT>\n</DOCUMENT>"
+    assert to_text(raw, "d1dex21.htm") == "The Agreement\n"
