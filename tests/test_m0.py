@@ -1,8 +1,10 @@
 import json
 from datetime import date
+
+import pytest
 from urllib.parse import parse_qs, urlparse
 
-from pipeline.m0 import (fee_amounts, lead_families, press_release_url, restates, stage_candidates, stage_deals,
+from pipeline.m0 import (fee_amounts, restatement, lead_families, press_release_url, restates, stage_candidates, stage_deals,
                          stage_fetch, stage_measure, stage_press, stage_sample, stage_search)
 from tests.fakes import fake_claude
 
@@ -87,8 +89,9 @@ def test_the_stages_measure_a_small_fake_edgar(tmp_path):
     assert m["passages_total"] >= 2
     assert len(runner.calls) == 1
     before = len(edgar.urls)
-    stage_sample(tmp_path, runner=fake_claude("unused"), model="m")
-    assert len(edgar.urls) == before
+    again = fake_claude("unused")
+    stage_sample(tmp_path, runner=again, model="m")
+    assert len(edgar.urls) == before and again.calls == []
 
 
 def test_a_family_with_no_hint_is_absent_without_a_call():
@@ -116,3 +119,144 @@ def test_press_release_url_reads_the_index_row_typed_ex_99_1():
             '<tr><td><a href="/ix?doc=/Archives/edgar/data/1/2/pr.htm">pr.htm</a></td><td>EX-99.1</td></tr>')
     assert press_release_url(html) == "https://www.sec.gov/Archives/edgar/data/1/2/pr.htm"
     assert press_release_url("<tr><td>EX-2.1</td></tr>") is None
+
+
+def _sec(n, body):
+    return f"Section {n} Heading. {body}\n\n"
+
+
+def test_each_family_gets_its_own_budget():
+    text = "".join(_sec(f"2.{i}", "Each Company Option vests. " + "x " * 1500) for i in range(30))
+    text += _sec("8.3", "The Company shall pay a termination fee of $5,000,000. " + "y " * 1500)
+    text += _sec("3.1", "Part of the price is an earn-out payable later.")
+    runner = fake_claude(json.dumps({}))
+    out = lead_families(text, runner, "m")
+    assert "earn-out payable later" in runner.calls[0][0]
+    assert out["equity_awards"]["truncated"] is True and out["contingent_consideration"]["truncated"] is False
+
+
+def test_an_unparseable_reply_raises_and_is_not_ledgered(tmp_path):
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    stage_deals(edgar, tmp_path)
+    with pytest.raises(RuntimeError):
+        stage_sample(tmp_path, runner=fake_claude("I cannot do that."), model="m")
+    ledger = tmp_path / "sample_ledger.jsonl"
+    assert not ledger.exists() or ledger.read_text() == ""
+    assert stage_sample(tmp_path, runner=fake_claude(ANSWER), model="m")["sample"] == 1
+    assert "0000000001-16-000001" in ledger.read_text()
+
+
+TEXT = "Section 8.3 Fees. The Company shall pay Parent a termination fee of $5,000,000 \u2014 in cash.\n"
+
+
+def _ask(quote, text=TEXT):
+    r = fake_claude(json.dumps({"termination_fee": {"present": True, "quote": quote}}))
+    return lead_families(text, r, "m")["termination_fee"]["present"]
+
+
+def test_the_quote_gate_normalises_punctuation_and_needs_length():
+    assert _ask("termination fee of $5,000,000 - in cash")
+    assert _ask("Parent a \u2018termination fee\u2019 of $5,000,000".replace("\u2018", "").replace("\u2019", ""))
+    assert not _ask("termination fee")
+    curly = "Section 8.3 Fees. The Company\u2019s \u201ctermination fee\u201d of $5,000,000 is due.\n"
+    assert _ask("The Company's \"termination fee\" of $5,000,000", curly)
+
+
+def test_the_quote_must_come_from_its_own_family_passages():
+    text = ("Section 2.1 Options. Each Company Option shall be cancelled for cash at closing.\n\n"
+            "Section 8.3 Fees. The Company shall pay a termination fee of $5,000,000.\n")
+    r = fake_claude(json.dumps({"termination_fee": {"present": True, "quote": "Each Company Option shall be cancelled"},
+                                "equity_awards": {"present": True, "quote": "Each Company Option shall be cancelled"}}))
+    out = lead_families(text, r, "m")
+    assert out["equity_awards"]["present"] and not out["termination_fee"]["present"]
+
+
+def test_fetch_gates_and_errors(tmp_path):
+    class Edgar(FakeEdgar):
+        def _route(self, url):
+            if url.endswith("ex21.htm") and "000000000316" in url:
+                return b"<html><body><p>Subsidiaries of Acme</p></body></html>"
+            return super()._route(url)
+    edgar = Edgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    rows = [json.loads(x) for x in (tmp_path / "search.jsonl").read_text().splitlines()]
+    rows[0]["ciks"] = []
+    rows[0]["sics"] = ["7372"]
+    (tmp_path / "candidates.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    out = stage_fetch(edgar, tmp_path)
+    assert out["errors"] == 1
+    stage_deals(edgar, tmp_path)
+    m = stage_measure_for(tmp_path)
+    assert m["fetch_errors"] == 1 and m["keyed"] == 1
+
+
+def stage_measure_for(out):
+    (out / "sample.jsonl").write_text("")
+    (out / "press.jsonl").write_text("")
+    return stage_measure(out)
+
+
+def test_not_merger_is_marked_and_excluded(tmp_path):
+    class Edgar(FakeEdgar):
+        def _route(self, url):
+            if url.endswith("ex21.htm") and "000000000316" in url:
+                return b"<html><body><p>Subsidiaries of Acme</p></body></html>"
+            return super()._route(url)
+    edgar = Edgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    docs = [json.loads(x) for x in (tmp_path / "docs.jsonl").read_text().splitlines()]
+    assert sum(d["not_merger"] for d in docs) == 0
+    sub = {**docs[0], "adsh": "x", "not_merger": True}
+    docs.append(sub)
+    (tmp_path / "docs.jsonl").write_text("".join(json.dumps(d) + "\n" for d in docs))
+    assert stage_deals(edgar, tmp_path)["deals"] == 1
+    m = stage_measure_for(tmp_path)
+    assert m["not_merger"] == 1 and m["tech_targets"] == 1
+
+
+def test_amount_suffixes_and_snippet():
+    assert fee_amounts("the Termination Fee is $45M") == {45e6}
+    assert fee_amounts("the Termination Fee is $1.2 bn") == {1.2e9}
+    assert fee_amounts("the Termination Fee is $45 mm") == {45e6}
+    assert fee_amounts("the Termination Fee is $5,000,000 may be due") == {5e6}
+    amount, snip = restatement("Intro text. A fee of $45M applies here.", {45e6})
+    assert amount == 45e6 and "$45M" in snip
+
+
+def test_press_index_accepts_ex_99_variants():
+    html = '<tr><td><a href="/a/pr.htm">pr.htm</a></td><td>EX-99</td></tr>'
+    assert press_release_url(html) == "https://www.sec.gov/a/pr.htm"
+    html = ('<tr><td><a href="/a/o.htm">o</a></td><td>EX-99.2</td></tr>'
+            '<tr><td><a href="/a/p.htm">p</a></td><td>EX-99.1</td></tr>')
+    assert press_release_url(html) == "https://www.sec.gov/a/p.htm"
+
+
+def test_a_pdf_release_is_unusable(tmp_path):
+    class Edgar(FakeEdgar):
+        def _route(self, url):
+            return b"%PDF-1.4 stuff" if url.endswith("pr.htm") else super()._route(url)
+    edgar = Edgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    stage_deals(edgar, tmp_path)
+    stage_sample(tmp_path, runner=fake_claude(ANSWER), model="m")
+    stage_press(edgar, tmp_path)
+    row = json.loads((tmp_path / "press.jsonl").read_text().splitlines()[0])
+    assert row["release"] is False and row["unusable"] == "pdf"
+
+
+def test_short_sics_fall_back_to_submissions(tmp_path):
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    rows = [json.loads(x) for x in (tmp_path / "search.jsonl").read_text().splitlines()]
+    for r in rows:
+        r["ciks"], r["sics"] = ["0000000033", "0000000011"], ["2834"]
+    (tmp_path / "search.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert stage_candidates(edgar, tmp_path)["candidates"] == 3
+    assert any("data.sec.gov" in u for u in edgar.urls)

@@ -20,6 +20,7 @@ FAMILIES = ("equity_awards", "termination_fee", "contingent_consideration")
 LEAD_MODEL = "claude-opus-5-5"
 MAX_HINT_PASSAGES = 12
 MAX_PROMPT_CHARS = 40000
+PASSAGE_SEP = "\n\n---\n\n"
 MIN_FEE = 100_000
 FEE_TOLERANCE = 0.005
 HINTS = {
@@ -40,8 +41,14 @@ Reply with one JSON object and nothing else: {{"equity_awards": {{"present": tru
 
 Passages:
 {excerpt}"""
-FEE = re.compile(r"termination\s+fee[^;]{0,300}?\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion)?", re.I | re.S)
-DOLLARS = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(million|billion)?", re.I)
+SCALE = r"(?:\s*(million|billion|mm|bn|m|b)\b)?"
+FEE = re.compile(r"termination\s+fee[^;]{0,300}?\$\s?(\d[\d,]*(?:\.\d+)?)" + SCALE, re.I | re.S)
+DOLLARS = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)" + SCALE, re.I)
+SCALES = {"million": 1e6, "mm": 1e6, "m": 1e6, "billion": 1e9, "bn": 1e9, "b": 1e9}
+QUOTE_MIN = 20
+SNIPPET = 100
+MERGER_HEAD = 1500
+_PUNCT = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-"})
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -65,7 +72,7 @@ def stage_search(client, out: Path = M0_DIR, today: date | None = None) -> dict:
 
 
 def _filer_sics(client, r: dict) -> list[str]:
-    if r["sics"]:
+    if r["sics"] and len(r["sics"]) >= len(r["ciks"]):
         return [str(s) for s in r["sics"]]
     out = []
     for cik in r["ciks"]:
@@ -82,32 +89,43 @@ def stage_candidates(client, out: Path = M0_DIR) -> dict:
     return {"ex21": len(ex21), "candidates": len(cands)}
 
 
+def _is_merger(text: str) -> bool:
+    return "agreement and plan of merger" in " ".join(text[:MERGER_HEAD].split()).lower()
+
+
+def _fetch_one(client, out: Path, r: dict) -> dict:
+    raw = client.get(doc_url(r))
+    if raw is None:
+        return {**r, "missing": True}
+    text = to_text(raw, r["filename"])
+    path = out / "text" / f"{r['adsh']}_{r['filename']}.txt"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+    p = preamble(text)
+    key = deal_key(p)
+    return {**r, "missing": False, "chars": len(text), "text": str(path), "company": p.company,
+            "parent": p.parent, "signed": p.signed.isoformat() if p.signed else None,
+            "amendment": p.amendment, "key": list(key) if key else None, "not_merger": not _is_merger(text),
+            "target_cik": resolve(p.company, r["ciks"], r["names"]) if p.company else None}
+
+
 def stage_fetch(client, out: Path = M0_DIR) -> dict:
     out = Path(out)
     (out / "text").mkdir(parents=True, exist_ok=True)
     docs = []
     for r in _read_jsonl(out / "candidates.jsonl"):
-        raw = client.get(doc_url(r))
-        if raw is None:
-            docs.append({**r, "missing": True})
-            continue
-        text = to_text(raw, r["filename"])
-        path = out / "text" / f"{r['adsh']}_{r['filename']}.txt"
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        tmp.replace(path)
-        p = preamble(text)
-        key = deal_key(p)
-        docs.append({**r, "missing": False, "chars": len(text), "text": str(path), "company": p.company,
-                     "parent": p.parent, "signed": p.signed.isoformat() if p.signed else None,
-                     "amendment": p.amendment, "key": list(key) if key else None,
-                     "target_cik": resolve(p.company, r["ciks"], r["names"]) if p.company else None})
+        try:
+            docs.append(_fetch_one(client, out, r))
+        except ValueError as e:
+            docs.append({**r, "missing": True, "error": str(e)})
     _write_jsonl(out / "docs.jsonl", docs)
-    return {"candidates": len(docs), "fetched": sum(not d["missing"] for d in docs)}
+    return {"candidates": len(docs), "fetched": sum(not d["missing"] for d in docs),
+            "errors": sum("error" in d for d in docs)}
 
 
 def stage_deals(client, out: Path = M0_DIR) -> dict:
-    docs = [d for d in _read_jsonl(Path(out) / "docs.jsonl") if not d["missing"]]
+    docs = [d for d in _read_jsonl(Path(out) / "docs.jsonl") if not d["missing"] and not d["not_merger"]]
     groups: dict[tuple, list[dict]] = {}
     for d in docs:
         if d["key"] and not d["amendment"]:
@@ -133,47 +151,80 @@ def _gate_deals(out: Path) -> list[dict]:
     return [d for d in _read_jsonl(Path(out) / "deals.jsonl") if d["tech"] and d["signed"] >= START.isoformat()]
 
 
-def hint_passages(text: str) -> dict[str, list[str]]:
+def _all_hints(text: str) -> dict[str, list[str]]:
     chunks = [text[p.start:p.end] for p in segment("m0", text)]
-    return {f: [c for c in chunks if HINTS[f].search(c)][:MAX_HINT_PASSAGES] for f in FAMILIES}
+    return {f: [c for c in chunks if HINTS[f].search(c)] for f in FAMILIES}
+
+
+def hint_passages(text: str) -> dict[str, list[str]]:
+    return {f: v[:MAX_HINT_PASSAGES] for f, v in _all_hints(text).items()}
+
+
+def _clean(s: str) -> str:
+    return squash(s.translate(_PUNCT))[0]
 
 
 def _json_object(s: str) -> dict:
     m = re.search(r"\{.*\}", s, re.S)
     try:
-        return json.loads(m.group(0)) if m else {}
+        obj = json.loads(m.group(0)) if m else None
     except json.JSONDecodeError:
-        return {}
+        obj = None
+    if not isinstance(obj, dict):
+        raise RuntimeError("lead-family reply had no parseable JSON object")
+    return obj
+
+
+def _family_block(passages: list[str], cap: int, more: bool) -> tuple[str, bool]:
+    parts, used, truncated = [], 0, more
+    for c in passages:
+        room = cap - used
+        if len(c) > room:
+            if room > 0:
+                parts.append(c[:room])
+            truncated = True
+            break
+        parts.append(c)
+        used += len(c) + len(PASSAGE_SEP)
+    return PASSAGE_SEP.join(parts), truncated
 
 
 def lead_families(text: str, runner, model: str) -> dict:
-    hints = hint_passages(text)
-    out = {f: {"present": False, "regex": bool(hints[f]), "quote": ""} for f in FAMILIES}
-    asked = [f for f in FAMILIES if hints[f]]
+    full = _all_hints(text)
+    out = {f: {"present": False, "regex": bool(full[f]), "quote": "", "truncated": False} for f in FAMILIES}
+    asked = [f for f in FAMILIES if full[f]]
     if not asked:
         return out
-    excerpt = "\n\n---\n\n".join(dict.fromkeys(c for f in asked for c in hints[f]))[:MAX_PROMPT_CHARS]
+    cap = MAX_PROMPT_CHARS // len(asked)
+    blocks, shown = {}, {}
+    for f in asked:
+        blocks[f], out[f]["truncated"] = _family_block(full[f][:MAX_HINT_PASSAGES], cap,
+                                                       len(full[f]) > MAX_HINT_PASSAGES)
+        shown[f] = _clean(blocks[f])
+    excerpt = PASSAGE_SEP.join(blocks[f] for f in asked)
     answer = _json_object(runner(PROMPT.format(excerpt=excerpt), model)["result"])
-    shown = squash(excerpt)[0]
     for f in asked:
         got = answer.get(f) if isinstance(answer.get(f), dict) else {}
         quote = str(got.get("quote", "")).strip()
-        out[f] = {"present": got.get("present") is True and bool(quote) and squash(quote)[0] in shown,
-                  "regex": True, "quote": quote[:300]}
+        q = _clean(quote)
+        out[f].update(present=got.get("present") is True and len(q) >= QUOTE_MIN and q in shown[f],
+                      quote=quote[:300])
     return out
 
 
 def stage_sample(out: Path = M0_DIR, runner=run_claude, model: str = LEAD_MODEL) -> dict:
     deals = sorted(_gate_deals(out), key=lambda d: d["key"])
     picked = random.Random(SEED).sample(deals, min(SAMPLE, len(deals)))
-    ledger = Ledger(Path(out) / "sample_ledger.jsonl", key="adsh")
+    ledger = Ledger(Path(out) / "sample_ledger.jsonl", key="id")
     rows = []
     for d in sorted(picked, key=lambda d: d["key"]):
         adsh = d["canonical"]["adsh"]
-        rec = ledger.get(adsh)
+        lid = f"{adsh}|{d['canonical']['filename']}|{model}"
+        rec = ledger.get(lid)
         if rec is None:
             text = Path(d["canonical"]["text"]).read_text(encoding="utf-8")
-            rec = {"adsh": adsh, "model": model, **lead_families(text, runner, model)}
+            rec = {"id": lid, "adsh": adsh, "filename": d["canonical"]["filename"], "model": model,
+                   **lead_families(text, runner, model)}
             ledger.put(rec)
         rows.append({**rec, "key": d["key"]})
     _write_jsonl(Path(out) / "sample.jsonl", rows)
@@ -181,26 +232,35 @@ def stage_sample(out: Path = M0_DIR, runner=run_claude, model: str = LEAD_MODEL)
 
 
 def _amount(num: str, scale: str | None) -> float:
-    return float(num.replace(",", "")) * {"million": 1e6, "billion": 1e9}.get((scale or "").lower(), 1.0)
+    return float(num.replace(",", "")) * SCALES.get((scale or "").lower(), 1.0)
 
 
 def fee_amounts(text: str) -> set[float]:
     return {v for v in (_amount(*m.groups()) for m in FEE.finditer(text)) if v >= MIN_FEE}
 
 
+def restatement(press_text: str, fees: set[float]) -> tuple[float, str] | None:
+    for m in DOLLARS.finditer(press_text):
+        v = _amount(*m.groups())
+        if any(abs(v - f) <= FEE_TOLERANCE * f for f in fees):
+            snip = press_text[max(0, m.start() - SNIPPET):m.end() + SNIPPET]
+            return v, " ".join(snip.split())
+    return None
+
+
 def restates(press_text: str, fees: set[float]) -> bool:
-    found = [_amount(*m.groups()) for m in DOLLARS.finditer(press_text)]
-    return any(abs(v - f) <= FEE_TOLERANCE * f for v in found for f in fees)
+    return restatement(press_text, fees) is not None
 
 
 def press_release_url(index_html: str) -> str | None:
+    found = []
     for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", index_html, re.S | re.I):
-        if re.search(r">\s*EX-99\.1\s*<", tr, re.I):
-            m = re.search(r'href="([^"]+)"', tr)
-            if m:
-                href = m.group(1).replace("/ix?doc=", "")
-                return href if href.startswith("http") else "https://www.sec.gov" + href
-    return None
+        t = re.search(r">\s*EX-99(\.\d+)?\s*<", tr, re.I)
+        m = re.search(r'href="([^"]+)"', tr)
+        if t and m:
+            href = m.group(1).replace("/ix?doc=", "")
+            found.append((t.group(1) not in (None, ".1"), href if href.startswith("http") else "https://www.sec.gov" + href))
+    return min(found, key=lambda x: x[0])[1] if found else None
 
 
 def stage_press(client, out: Path = M0_DIR) -> dict:
@@ -212,9 +272,17 @@ def stage_press(client, out: Path = M0_DIR) -> dict:
         index = client.get(index_url(c))
         url = press_release_url(index.decode("utf-8", errors="replace")) if index else None
         raw = client.get(url) if url else None
-        release = to_text(raw, url) if raw else None
-        rows.append({"adsh": s["adsh"], "fee": bool(fees), "release": release is not None,
-                     "restated": bool(fees) and release is not None and restates(release, fees)})
+        row = {"adsh": s["adsh"], "fee": bool(fees), "release": False, "restated": False,
+               "matched_amount": None, "snippet": None, "unusable": None}
+        if raw and (raw[:4] == b"%PDF" or url.lower().endswith(".pdf")):
+            row["unusable"] = "pdf"
+        elif raw:
+            release = to_text(raw, url)
+            row["release"] = True
+            hit = restatement(release, fees) if fees else None
+            if hit:
+                row.update(restated=True, matched_amount=hit[0], snippet=hit[1])
+        rows.append(row)
     _write_jsonl(Path(out) / "press.jsonl", rows)
     return {"sample": len(rows), "restated": sum(r["restated"] for r in rows)}
 
@@ -234,12 +302,16 @@ def stage_measure(out: Path = M0_DIR) -> dict:
         "ex21_docs": sum(is_ex21(r["file_type"]) for r in search),
         "candidates": len(docs),
         "fetched": len(fetched),
-        "missing": len(docs) - len(fetched),
+        "missing": sum(1 for d in docs if d["missing"] and "error" not in d),
+        "fetch_errors": sum(1 for d in docs if "error" in d),
+        "not_merger": sum(1 for d in fetched if d["not_merger"]),
+        "keyed": sum(1 for d in fetched if d["key"]),
         "company_parsed": sum(1 for d in fetched if d["company"]),
         "amendment_docs": sum(1 for d in fetched if d["amendment"]),
         "deals": len(deals),
         "deals_resolved": sum(1 for d in deals if d["target_cik"]),
         "tech_deals": len(gate),
+        "tech_targets": len({d["target_cik"] for d in gate}),
         "tech_multi_copy": sum(1 for d in gate if d["copies"] > 1),
         "tech_amended": sum(1 for d in gate if d["amendments"] > 0),
         "sample": len(sample),
@@ -254,5 +326,8 @@ def stage_measure(out: Path = M0_DIR) -> dict:
         "passages_median": median(passages) if passages else 0,
         "lead_model": sample[0]["model"] if sample else LEAD_MODEL,
     }
-    (out / "measure.json").write_text(json.dumps(m, indent=2, sort_keys=True), encoding="utf-8")
+    path = out / "measure.json"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(m, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
     return m
