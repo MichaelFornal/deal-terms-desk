@@ -9,7 +9,8 @@ import urllib.request
 
 import pytest
 
-from pipeline.sec_client import COOLDOWN_S, MIN_INTERVAL, Blocked, SecClient, _NoRedirect
+from pipeline.sec_client import (COOLDOWN_S, MAX_RETRIES, MIN_INTERVAL, RETRY_WAIT_S, Blocked, SecClient,
+                                 _NoRedirect)
 
 CONTACT = "tester@example.com"
 
@@ -39,6 +40,8 @@ class Net:
     def __call__(self, req, timeout=None):
         self.seen.append((req.full_url, req.get_header("User-agent")))
         out = self.script[req.full_url]
+        if isinstance(out, list):  # a scripted sequence of answers, one per attempt
+            out = out.pop(0)
         if isinstance(out, Exception):
             raise out
         if isinstance(out, int):
@@ -270,3 +273,102 @@ def test_each_refusal_is_appended_to_the_blocked_events(tmp_path, code):
     events = [json.loads(x) for x in (tmp_path / "sec" / "blocked_events.jsonl").read_text().splitlines()]
     assert [(e["status"], e["url"]) for e in events] == [(code, A), (code, A)]
     assert events[1]["at"] > events[0]["at"] and CONTACT not in json.dumps(events)
+
+
+def _server_errors(tmp_path):
+    p = tmp_path / "sec" / "server_errors.jsonl"
+    return [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
+
+
+def _ledger(tmp_path):
+    p = tmp_path / "sec" / "ledger.jsonl"
+    return [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
+
+
+def test_retry_constants_are_bounded():
+    assert (RETRY_WAIT_S, MAX_RETRIES) == (30, 2)
+
+
+def test_a_server_error_is_retried_once_after_the_wait(tmp_path):
+    net = Net({A: [500, b"a"]})
+    c, clock = client(tmp_path, net)
+    assert c.get(A) == b"a"
+    assert c.requests == 2 and len(net.seen) == 2
+    assert clock.slept.count(RETRY_WAIT_S) == 1
+    rows = _ledger(tmp_path)
+    assert len(rows) == 1 and rows[0]["status"] == "ok"
+    assert rows[0]["at"] == clock.t  # the start of the attempt that succeeded, not the first
+    errs = _server_errors(tmp_path)
+    assert len(errs) == 1 and errs[0]["status"] == 500 and errs[0]["url"] == A
+    assert CONTACT not in json.dumps(errs)
+
+
+def test_server_errors_give_up_after_two_retries(tmp_path):
+    net = Net({A: [500, 502, 503, b"never"]})
+    c, clock = client(tmp_path, net)
+    with pytest.raises(urllib.error.HTTPError) as e:
+        c.get(A)
+    assert e.value.code == 503
+    assert len(net.seen) == 1 + MAX_RETRIES == 3 and c.requests == 3
+    assert clock.slept.count(RETRY_WAIT_S) == 2
+    assert _ledger(tmp_path) == []
+    assert [r["status"] for r in _server_errors(tmp_path)] == [500, 502, 503]
+
+
+@pytest.mark.parametrize("code", [403, 429])
+def test_a_refusal_on_a_retry_stops_at_once(tmp_path, code):
+    net = Net({A: [500, code, b"never"], B: b"b"})
+    c, clock = client(tmp_path, net)
+    with pytest.raises(Blocked):
+        c.get(A)
+    assert len(net.seen) == 2
+    assert json.loads((tmp_path / "sec" / "blocked.json").read_text())["status"] == code
+    assert len((tmp_path / "sec" / "blocked_events.jsonl").read_text().splitlines()) == 1
+    with pytest.raises(Blocked):
+        c.get(B)
+    assert len(net.seen) == 2 and _ledger(tmp_path) == []
+
+
+def test_a_retry_still_goes_through_the_spacing(tmp_path):
+    class ShortWait(Clock):
+        """The retry wait returns at once: only the spacing logic can hold the retry back."""
+
+        def sleep(self, s):
+            self.slept.append(s)
+            if s != RETRY_WAIT_S:
+                self.t += s
+
+    clock = ShortWait()
+    net = Net({A: [500, b"a"]})
+    c, _ = client(tmp_path, net, clock)
+    starts = []
+    real = c._opener
+    c._opener = lambda req, timeout=None: (starts.append(clock.t), real(req, timeout))[1]
+    assert c.get(A) == b"a"
+    assert starts[1] - starts[0] >= MIN_INTERVAL
+    assert clock.slept == [MIN_INTERVAL, RETRY_WAIT_S, MIN_INTERVAL]
+    assert float((tmp_path / "sec" / "last_request").read_text()) == starts[1]
+
+
+def test_a_404_after_a_server_error_is_recorded_missing(tmp_path):
+    net = Net({A: [500, 404]})
+    c, _ = client(tmp_path, net)
+    assert c.get(A) is None and c.get(A) is None
+    assert len(net.seen) == 2
+    assert [r["status"] for r in _ledger(tmp_path)] == ["missing"]
+
+
+def test_a_redirect_after_a_server_error_is_an_error(tmp_path):
+    net = Net({A: [500, 301]})
+    c, _ = client(tmp_path, net)
+    with pytest.raises(RuntimeError, match="redirect"):
+        c.get(A)
+    assert len(net.seen) == 2
+
+
+def test_other_http_errors_are_not_retried(tmp_path):
+    net = Net({A: [400, b"never"]})
+    c, clock = client(tmp_path, net)
+    with pytest.raises(urllib.error.HTTPError):
+        c.get(A)
+    assert len(net.seen) == 1 and RETRY_WAIT_S not in clock.slept and _server_errors(tmp_path) == []

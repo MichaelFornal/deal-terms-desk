@@ -7,7 +7,7 @@ from pipeline.target import TECH_SIC
 
 GATE_AGREEMENTS = 100
 GATE_FAMILY_SHARE = 0.5
-COPIED = ("search_docs", "ex21_docs", "candidates", "fetched", "missing", "fetch_errors", "not_merger", "keyed",
+COPIED = ("search_docs", "ex21_docs", "ex2_bare_docs", "candidates", "fetched", "missing", "fetch_errors", "not_merger", "keyed",
           "company_parsed", "amendment_docs", "deals", "orphan_restated", "deals_resolved", "tech_deals", "tech_targets",
           "tech_multi_copy", "tech_amended", "sample", "press_fee", "press_release", "press_both",
           "press_restated", "press_unusable", "passages_total", "passages_mean", "passages_median", "lead_model")
@@ -27,16 +27,22 @@ def _rows(path: Path) -> list[dict]:
 
 
 def access(sec_dir: Path) -> dict:
-    """What the sec.gov client's own logs show: requests answered, the smallest spacing, refusals met."""
+    """What the sec.gov client's own logs show: requests answered, the smallest spacing, refusals and
+    server errors met."""
     sec_dir = Path(sec_dir)
     if not (sec_dir / "ledger.jsonl").exists():
         return {}
     rows = [r for r in _rows(sec_dir / "ledger.jsonl") if r.get("status") in ("ok", "missing")]
-    starts = sorted(r["at"] for r in rows if "at" in r)
+    errors = _rows(sec_dir / "server_errors.jsonl")
+    # Every request start counts, answered or not. Hand-appended rows carry approximate times: left out of the gaps.
+    starts = sorted([r["at"] for r in rows if "at" in r]
+                    + [r["at"] for r in errors if "at" in r and not r.get("recorded_later")])
     gaps = [b - a for a, b in zip(starts, starts[1:])]
     return {"m0_sec_requests": len(rows),
             "m0_min_request_gap_s": round(min(gaps), 3) if gaps else None,
-            "m0_blocked_events": len(_rows(sec_dir / "blocked_events.jsonl"))}
+            "m0_blocked_events": len(_rows(sec_dir / "blocked_events.jsonl")),
+            "m0_server_errors": len(errors),
+            "m0_server_errors_recorded_later": sum(1 for r in errors if r.get("recorded_later"))}
 
 
 def build_m0(m0_dir: Path, facts: dict | None = None, sec_dir: Path | None = None) -> dict:

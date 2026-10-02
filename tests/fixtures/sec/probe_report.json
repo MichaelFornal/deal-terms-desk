@@ -1,0 +1,144 @@
+{
+ "requests": 7,
+ "jan_total": {
+  "value": 343,
+  "relation": "eq"
+ },
+ "jan_1_30_total": {
+  "value": 343,
+  "relation": "eq"
+ },
+ "jan_31_total": {
+  "value": 0,
+  "relation": "eq"
+ },
+ "range_includes_both_ends": true,
+ "page0_len": 100,
+ "page1_len": 100,
+ "id_examples": [
+  "0001193125-16-444343:d110067dex21.htm",
+  "0001193125-16-424514:d112074d8k.htm",
+  "0001213900-16-010307:f8k011316ex2i_lilisenergy.htm"
+ ],
+ "source_keys": [
+  "adsh",
+  "biz_locations",
+  "biz_states",
+  "ciks",
+  "display_names",
+  "file_date",
+  "file_description",
+  "file_num",
+  "file_type",
+  "film_num",
+  "form",
+  "inc_states",
+  "items",
+  "period_ending",
+  "root_forms",
+  "sequence",
+  "sics",
+  "xsl"
+ ],
+ "file_types": [
+  "8-K",
+  "8-K/A",
+  "EX-10.",
+  "EX-10.1",
+  "EX-10.10",
+  "EX-10.2",
+  "EX-10.3",
+  "EX-10.4",
+  "EX-10.5",
+  "EX-2",
+  "EX-2.1",
+  "EX-2.2",
+  "EX-3.1",
+  "EX-3.2",
+  "EX-4.1",
+  "EX-99.1",
+  "EX-99.3",
+  "EX-99.5"
+ ],
+ "ex21_hits": 6,
+ "ciks_names_sics_lengths": [
+  [
+   1,
+   1,
+   1
+  ],
+  [
+   2,
+   2,
+   2
+  ]
+ ],
+ "chosen": {
+  "adsh": "0001193125-16-444343",
+  "filename": "d110067dex21.htm",
+  "file_date": "2016-01-29",
+  "ciks": [
+   "0001328655"
+  ],
+  "names": [
+   "Affinia Group Intermediate Holdings Inc.  (CIK 0001328655)"
+  ],
+  "sics": [
+   "3714"
+  ]
+ },
+ "submissions_keys": [
+  "cik",
+  "name",
+  "sic",
+  "sicDescription"
+ ],
+ "submissions_sic_type": "str",
+ "doc_bytes": 14778,
+ "index_bytes": 7402,
+ "index_mentions_ex99": false,
+ "headers": [
+  {
+   "url": "https://efts.sec.gov/LATEST/search-index?q=%22agreement+and+plan+of+merger%22&forms=8-K&dateRange=custom&startdt=2016-01-01&enddt=2016-01-31&from=0",
+   "status": 200,
+   "content_type": "application/json",
+   "content_encoding": "gzip"
+  },
+  {
+   "url": "https://efts.sec.gov/LATEST/search-index?q=%22agreement+and+plan+of+merger%22&forms=8-K&dateRange=custom&startdt=2016-01-01&enddt=2016-01-31&from=100",
+   "status": 200,
+   "content_type": "application/json",
+   "content_encoding": "gzip"
+  },
+  {
+   "url": "https://efts.sec.gov/LATEST/search-index?q=%22agreement+and+plan+of+merger%22&forms=8-K&dateRange=custom&startdt=2016-01-01&enddt=2016-01-30&from=0",
+   "status": 200,
+   "content_type": "application/json",
+   "content_encoding": "gzip"
+  },
+  {
+   "url": "https://efts.sec.gov/LATEST/search-index?q=%22agreement+and+plan+of+merger%22&forms=8-K&dateRange=custom&startdt=2016-01-31&enddt=2016-01-31&from=0",
+   "status": 200,
+   "content_type": "application/json",
+   "content_encoding": "gzip"
+  },
+  {
+   "url": "https://data.sec.gov/submissions/CIK0001328655.json",
+   "status": 200,
+   "content_type": "application/json",
+   "content_encoding": "gzip"
+  },
+  {
+   "url": "https://www.sec.gov/Archives/edgar/data/1328655/000119312516444343/d110067dex21.htm",
+   "status": 200,
+   "content_type": "text/html",
+   "content_encoding": "gzip"
+  },
+  {
+   "url": "https://www.sec.gov/Archives/edgar/data/1328655/000119312516444343/0001193125-16-444343-index.htm",
+   "status": 200,
+   "content_type": "text/html; charset=UTF-8",
+   "content_encoding": "gzip"
+  }
+ ]
+}

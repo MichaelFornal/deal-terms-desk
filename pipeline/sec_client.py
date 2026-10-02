@@ -16,6 +16,9 @@ HOSTS = {"www.sec.gov", "efts.sec.gov", "data.sec.gov"}
 MIN_INTERVAL = 0.5
 COOLDOWN_S = 3600
 STOP_CODES = {403, 429}
+RETRY_CODES = {500, 502, 503, 504}  # server errors, not refusals: retried after a long wait
+RETRY_WAIT_S = 30
+MAX_RETRIES = 2
 
 
 class Blocked(RuntimeError):
@@ -115,35 +118,44 @@ class SecClient:
             path = self._cached(url)
             if rec and path.exists():
                 return path.read_bytes()
-            self._refuse_if_blocked()
-            wait = self._last_wall + MIN_INTERVAL - self._wall()
-            wait = min(wait, MIN_INTERVAL)
-            if self._last is not None:
-                wait = max(wait, self._last + MIN_INTERVAL - self._clock())
-            if wait > 0:
-                self._sleep(wait)
-            self._last = self._clock()
-            self._last_wall = started = self._wall()
-            _atomic_write(self._last_file, repr(self._last_wall))
-            self.requests += 1
-            req = urllib.request.Request(url, headers={"User-Agent": self._ua, "Accept-Encoding": "gzip"})
-            try:
-                with self._opener(req, timeout=60) as resp:
-                    body = resp.read()
-                    if resp.headers.get("Content-Encoding") == "gzip":
-                        body = gzip.decompress(body)
-            except urllib.error.HTTPError as e:
-                if e.code in STOP_CODES:
-                    event = {"at": self._wall(), "status": e.code, "url": url}
-                    _append(self.root / "blocked_events.jsonl", event)
-                    _atomic_write(self.root / "blocked.json", json.dumps(event))
-                    raise Blocked(f"sec.gov answered {e.code} for {url}; stopped, no retry") from e
-                if e.code == 404:
-                    self.ledger.put({"url": url, "status": "missing", "at": started})
-                    return None
-                if 300 <= e.code < 400:
-                    raise RuntimeError(f"sec.gov answered a redirect ({e.code}) for {url}; not followed") from e
-                raise
+            attempt = 0
+            while True:
+                self._refuse_if_blocked()
+                wait = self._last_wall + MIN_INTERVAL - self._wall()
+                wait = min(wait, MIN_INTERVAL)
+                if self._last is not None:
+                    wait = max(wait, self._last + MIN_INTERVAL - self._clock())
+                if wait > 0:
+                    self._sleep(wait)
+                self._last = self._clock()
+                self._last_wall = started = self._wall()
+                _atomic_write(self._last_file, repr(self._last_wall))
+                self.requests += 1
+                req = urllib.request.Request(url, headers={"User-Agent": self._ua, "Accept-Encoding": "gzip"})
+                try:
+                    with self._opener(req, timeout=60) as resp:
+                        body = resp.read()
+                        if resp.headers.get("Content-Encoding") == "gzip":
+                            body = gzip.decompress(body)
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code in STOP_CODES:
+                        event = {"at": self._wall(), "status": e.code, "url": url}
+                        _append(self.root / "blocked_events.jsonl", event)
+                        _atomic_write(self.root / "blocked.json", json.dumps(event))
+                        raise Blocked(f"sec.gov answered {e.code} for {url}; stopped, no retry") from e
+                    if e.code == 404:
+                        self.ledger.put({"url": url, "status": "missing", "at": started})
+                        return None
+                    if 300 <= e.code < 400:
+                        raise RuntimeError(f"sec.gov answered a redirect ({e.code}) for {url}; not followed") from e
+                    if e.code in RETRY_CODES:
+                        _append(self.root / "server_errors.jsonl", {"at": self._wall(), "status": e.code, "url": url})
+                        if attempt < MAX_RETRIES:
+                            attempt += 1
+                            self._sleep(RETRY_WAIT_S)
+                            continue
+                    raise
             part = path.with_name(path.name + ".part")
             part.write_bytes(body)
             os.replace(part, path)

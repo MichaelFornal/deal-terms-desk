@@ -6,7 +6,7 @@ FAM = ("equity_awards", "termination_fee", "contingent_consideration")
 
 
 def measure(tmp_path, tech=150, present=(30, 29, 4), sample=30):
-    m = {"search_docs": 9000, "ex21_docs": 4000, "candidates": 600, "fetched": 590, "missing": 10,
+    m = {"search_docs": 9000, "ex21_docs": 4000, "ex2_bare_docs": 55, "candidates": 600, "fetched": 590, "missing": 10,
          "fetch_errors": 3, "not_merger": 20, "keyed": 540, "tech_targets": 140,
          "company_parsed": 560, "amendment_docs": 40, "orphan_restated": 7, "deals": 300, "deals_resolved": 240, "tech_deals": tech,
          "tech_multi_copy": 90, "tech_amended": 12, "sample": sample,
@@ -61,8 +61,25 @@ def test_the_sec_access_record_comes_from_the_ledger(tmp_path):
             {"url": "c", "status": "ok", "at": 101.6}]
     (sec / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows) + '{"url": "d", "sta')
     (sec / "blocked_events.jsonl").write_text(json.dumps({"at": 102.0, "status": 403, "url": "d"}) + "\n")
+    errs = [{"at": 99.0, "status": 500, "url": "a"}, {"at": 99.5, "status": 503, "url": "a"}]
+    (sec / "server_errors.jsonl").write_text("".join(json.dumps(r) + "\n" for r in errs))
     f = build_m0(measure(tmp_path), sec_dir=sec)
     assert (f["m0_sec_requests"], f["m0_min_request_gap_s"], f["m0_blocked_events"]) == (3, 0.5, 1)
+    assert f["m0_server_errors"] == 2
+
+
+def test_the_gap_counts_server_error_starts_and_skips_recorded_later_rows(tmp_path):
+    sec = tmp_path / "sec"
+    sec.mkdir()
+    rows = [{"url": "a", "status": "ok", "at": 100.0}, {"url": "b", "status": "ok", "at": 103.0}]
+    (sec / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    errs = [{"at": 101.0, "status": 500, "url": "x"},
+            {"at": 100.1, "status": 500, "url": "y", "recorded_later": True}]
+    (sec / "server_errors.jsonl").write_text("".join(json.dumps(r) + "\n" for r in errs))
+    f = build_m0(measure(tmp_path), sec_dir=sec)
+    assert f["m0_min_request_gap_s"] == 1.0
+    assert f["m0_server_errors"] == 2
+    assert f["m0_server_errors_recorded_later"] == 1
 
 
 def test_the_access_record_without_refusals_or_a_second_request(tmp_path):
@@ -71,6 +88,7 @@ def test_the_access_record_without_refusals_or_a_second_request(tmp_path):
     (sec / "ledger.jsonl").write_text(json.dumps({"url": "a", "status": "ok", "at": 1.0}) + "\n")
     f = build_m0(measure(tmp_path), sec_dir=sec)
     assert (f["m0_sec_requests"], f["m0_min_request_gap_s"], f["m0_blocked_events"]) == (1, None, 0)
+    assert f["m0_server_errors"] == 0 and f["m0_server_errors_recorded_later"] == 0
 
 
 def test_no_ledger_means_no_access_facts(tmp_path):

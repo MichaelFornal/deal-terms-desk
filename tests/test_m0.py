@@ -436,3 +436,11 @@ def test_a_whole_reply_without_an_asked_key_raises_and_is_not_ledgered(tmp_path)
             stage_sample(tmp_path, runner=fake_claude(bad), model="m")
     ledger = tmp_path / "sample_ledger.jsonl"
     assert not ledger.exists() or ledger.read_text() == ""
+
+
+def test_measure_counts_bare_ex2_exhibits(tmp_path):
+    rows = [{"file_type": t} for t in ("EX-2", " ex-2 ", "EX-2.1", "EX-2.2", "EX-21")]
+    (tmp_path / "search.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    for n in ("docs", "deals", "sample", "press"):
+        (tmp_path / f"{n}.jsonl").write_text("")
+    assert stage_measure(tmp_path)["ex2_bare_docs"] == 2
