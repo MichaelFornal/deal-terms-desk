@@ -57,6 +57,12 @@ def _section_share(conn, r1, labels):
     return round(with_id / total, 4)
 
 
+def _article_share(conn, r1, labels):
+    total, with_article = conn.execute(
+        "SELECT COUNT(*), SUM(section_path LIKE 'Article %') FROM passages WHERE kind != 'toc'").fetchone()
+    return round(with_article / total, 4)
+
+
 def _label_contracts_with_text(conn, r1, labels):
     with_text = {r[0] for r in conn.execute("SELECT contract_id FROM contracts")}
     return len(labels["contracts"] & with_text)
@@ -68,6 +74,7 @@ QUERIES: dict[str, Callable[[sqlite3.Connection, dict, dict], int | float | None
     "maud_passages": _scalar("SELECT COUNT(*) FROM passages"),
     "maud_passages_indexed": _scalar("SELECT COUNT(*) FROM passages_fts"),
     "maud_passages_with_section_share": _section_share,
+    "maud_passages_with_article_share": _article_share,
     "maud_terms_defined": _scalar(
         "SELECT COUNT(*) FROM (SELECT DISTINCT contract_id, term FROM terms WHERE style IN ('means', 'paren'))"),
     "maud_terms_xref": _scalar("SELECT COUNT(*) FROM terms WHERE style = 'xref'"),

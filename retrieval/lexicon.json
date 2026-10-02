@@ -1,0 +1,1575 @@
+{
+  "_meta": {
+    "built_by": "machine",
+    "built_on": "2026-09-30",
+    "model": "claude-opus-5-5",
+    "saw_eval_queries": false,
+    "source": "defined terms of the tune-split MAUD agreements",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 20437,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 20437,
+      "cache_read_input_tokens": 11904,
+      "fallback_credit": null,
+      "inference_geo": "not_available",
+      "input_tokens": 2,
+      "iterations": [
+        {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 20437,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 20437,
+          "cache_read_input_tokens": 11904,
+          "input_tokens": 2,
+          "output_tokens": 11207,
+          "type": "message"
+        }
+      ],
+      "output_tokens": 11207,
+      "output_tokens_details": {
+        "thinking_tokens": 76
+      },
+      "server_tool_use": {
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      },
+      "service_tier": "standard",
+      "speed": "standard"
+    }
+  },
+  "entries": {
+    "10-k": [
+      "Company 10-K",
+      "Company SEC Documents"
+    ],
+    "280g": [
+      "Code",
+      "Company Benefit Plan"
+    ],
+    "401k": [
+      "Company 401(k) Plan",
+      "Parent 401(k) Plan"
+    ],
+    "absence of changes": [
+      "Company Balance Sheet Date",
+      "Material Adverse Effect",
+      "Ordinary Course of Business"
+    ],
+    "access to information": [
+      "Confidentiality Agreement",
+      "Representatives",
+      "Pre-Closing Period"
+    ],
+    "accounting": [
+      "GAAP",
+      "Company Financial Statements",
+      "Audit Committee"
+    ],
+    "acquirer": [
+      "Parent",
+      "Merger Sub",
+      "Acquiror"
+    ],
+    "acquisition": [
+      "Merger",
+      "Transactions",
+      "Acquisition Transaction"
+    ],
+    "acquisition proposal": [
+      "Acquisition Proposal",
+      "Company Acquisition Proposal",
+      "Acquisition Transaction"
+    ],
+    "advisors": [
+      "Representatives",
+      "Representative",
+      "Company Financial Advisor"
+    ],
+    "affiliate": [
+      "Affiliate",
+      "ERISA Affiliate"
+    ],
+    "amendment": [
+      "Agreement",
+      "Company Board"
+    ],
+    "anti-corruption": [
+      "Anti-Corruption Laws",
+      "FCPA"
+    ],
+    "anti-takeover": [
+      "Takeover Statute",
+      "Takeover Laws",
+      "DGCL"
+    ],
+    "antitrust": [
+      "HSR Act",
+      "Antitrust Laws",
+      "Antitrust Law",
+      "Competition Laws"
+    ],
+    "appraisal rights": [
+      "Dissenting Shares",
+      "DGCL",
+      "Delaware Law"
+    ],
+    "articles of incorporation": [
+      "Company Articles of Incorporation",
+      "Certificate of Incorporation",
+      "Organizational Documents"
+    ],
+    "articles of merger": [
+      "Articles of Merger",
+      "Certificate of Merger"
+    ],
+    "assignment": [
+      "Agreement",
+      "Affiliate"
+    ],
+    "backup financing": [
+      "Alternative Financing",
+      "Debt Financing"
+    ],
+    "balance sheet": [
+      "Company Balance Sheet",
+      "Company Balance Sheet Date"
+    ],
+    "bank merger": [
+      "Bank Merger",
+      "Bank Plan of Merger",
+      "Federal Reserve",
+      "FDIC"
+    ],
+    "bank regulators": [
+      "Federal Reserve",
+      "FDIC",
+      "Company Regulatory Reports"
+    ],
+    "bankers": [
+      "Company Financial Advisor",
+      "Representatives",
+      "BofA Securities"
+    ],
+    "bankruptcy exception": [
+      "Bankruptcy and Equity Exception",
+      "Enforceability Exceptions"
+    ],
+    "benefit plans": [
+      "Company Benefit Plan",
+      "Company Employee Plan",
+      "Benefit Plan",
+      "ERISA Plans"
+    ],
+    "better offer": [
+      "Superior Proposal",
+      "Company Superior Proposal"
+    ],
+    "between signing and closing": [
+      "Pre-Closing Period",
+      "Ordinary Course of Business",
+      "Effective Time"
+    ],
+    "board": [
+      "Company Board",
+      "Parent Board",
+      "Board of Directors",
+      "Board"
+    ],
+    "board of directors": [
+      "Company Board",
+      "Board of Directors",
+      "Parent Board"
+    ],
+    "board recommendation": [
+      "Company Recommendation",
+      "Company Board Recommendation"
+    ],
+    "bonds": [
+      "Existing Notes",
+      "Indenture",
+      "Debt Tender Offer"
+    ],
+    "book entry": [
+      "Book-Entry Shares",
+      "Book-Entry Share",
+      "Uncertificated Shares",
+      "DTC"
+    ],
+    "break up fee": [
+      "Termination Fee",
+      "Company Termination Fee",
+      "Parent Termination Fee"
+    ],
+    "breakup fee": [
+      "Termination Fee",
+      "Company Termination Fee",
+      "Parent Termination Fee"
+    ],
+    "bribery": [
+      "Anti-Corruption Laws",
+      "FCPA"
+    ],
+    "bring down": [
+      "Company Material Adverse Effect",
+      "Material Adverse Effect",
+      "Closing"
+    ],
+    "brokers": [
+      "Company Financial Advisor"
+    ],
+    "business day": [
+      "Business Day"
+    ],
+    "buyer": [
+      "Parent",
+      "Merger Sub",
+      "Purchaser",
+      "Acquiror"
+    ],
+    "buyout": [
+      "Merger",
+      "Transactions",
+      "Acquisition Transaction"
+    ],
+    "bylaws": [
+      "Bylaws",
+      "Company Bylaws",
+      "Organizational Documents"
+    ],
+    "cap table": [
+      "Capitalization Date",
+      "Company Capital Stock",
+      "Company Equity Awards",
+      "Company Securities"
+    ],
+    "capitalization": [
+      "Capitalization Date",
+      "Company Capitalization Date",
+      "Company Capital Stock",
+      "Company Securities"
+    ],
+    "capped call": [
+      "Capped Call Transactions",
+      "Capped Call Documentation"
+    ],
+    "carve outs": [
+      "Company Material Adverse Effect",
+      "Material Adverse Effect",
+      "Effect"
+    ],
+    "cash and stock": [
+      "Merger Consideration",
+      "Per Share Cash Consideration",
+      "Exchange Ratio",
+      "Election Deadline"
+    ],
+    "cash deal": [
+      "Per Share Cash Consideration",
+      "Merger Consideration",
+      "Paying Agent"
+    ],
+    "cash election": [
+      "Election Deadline",
+      "Per Share Cash Consideration",
+      "Merger Consideration"
+    ],
+    "certificate of merger": [
+      "Certificate of Merger",
+      "Articles of Merger",
+      "Effective Time"
+    ],
+    "cfius": [
+      "CFIUS",
+      "CFIUS Approval",
+      "DPA"
+    ],
+    "change of control consent": [
+      "Third-Party Consents",
+      "Consent",
+      "Contract"
+    ],
+    "change of recommendation": [
+      "Change of Recommendation",
+      "Company Recommendation",
+      "Intervening Event",
+      "Superior Proposal"
+    ],
+    "charter": [
+      "Company Charter",
+      "Certificate of Incorporation",
+      "Organizational Documents",
+      "Charter"
+    ],
+    "clean team": [
+      "Clean Team Agreement"
+    ],
+    "closing": [
+      "Closing",
+      "Closing Date",
+      "Effective Time"
+    ],
+    "closing conditions": [
+      "Company Stockholder Approval",
+      "HSR Act",
+      "Material Adverse Effect",
+      "Registration Statement"
+    ],
+    "closing date": [
+      "Closing Date",
+      "Closing",
+      "Business Day"
+    ],
+    "collar": [
+      "Exchange Ratio",
+      "Parent Common Stock",
+      "Measurement Date"
+    ],
+    "commitment letter": [
+      "Equity Commitment Letter",
+      "Debt Financing",
+      "Financing Sources"
+    ],
+    "common stock": [
+      "Company Common Stock",
+      "Parent Common Stock",
+      "Common Stock",
+      "Shares"
+    ],
+    "community reinvestment": [
+      "CRA"
+    ],
+    "company after the deal": [
+      "Surviving Corporation",
+      "Certificate of Incorporation",
+      "Bylaws"
+    ],
+    "comparable benefits": [
+      "Continuation Period",
+      "Continuing Employees",
+      "New Plans"
+    ],
+    "competing bid": [
+      "Acquisition Proposal",
+      "Company Acquisition Proposal",
+      "Superior Proposal"
+    ],
+    "competition clearance": [
+      "Antitrust Laws",
+      "Competition Laws",
+      "HSR Act"
+    ],
+    "compliance with laws": [
+      "Law",
+      "Laws",
+      "Applicable Law",
+      "Legal Requirement"
+    ],
+    "conditions to closing": [
+      "Offer Conditions",
+      "Minimum Condition",
+      "Company Stockholder Approval",
+      "Burdensome Condition"
+    ],
+    "conduct of business": [
+      "Ordinary Course of Business",
+      "Pre-Closing Period"
+    ],
+    "confidentiality agreement": [
+      "Confidentiality Agreement",
+      "Acceptable Confidentiality Agreement",
+      "Company Acceptable Confidentiality Agreement"
+    ],
+    "consents": [
+      "Third-Party Consents",
+      "Consent",
+      "Company Approvals"
+    ],
+    "contingent value right": [
+      "Milestone"
+    ],
+    "contractors": [
+      "Independent Contractor"
+    ],
+    "contracts": [
+      "Contract",
+      "Company Material Contract",
+      "Lease"
+    ],
+    "conversion of shares": [
+      "Merger Consideration",
+      "Effective Time",
+      "Shares",
+      "Exchange Ratio"
+    ],
+    "convertible notes": [
+      "Convertible Notes",
+      "Indenture",
+      "Capped Call Transactions"
+    ],
+    "copyrights": [
+      "Copyrights",
+      "Software"
+    ],
+    "court": [
+      "Chosen Courts",
+      "Delaware Courts",
+      "Governmental Authority"
+    ],
+    "court order": [
+      "Order",
+      "Governmental Authority"
+    ],
+    "covid": [
+      "COVID-19",
+      "COVID-19 Measures",
+      "CARES Act"
+    ],
+    "credit agreement": [
+      "Credit Facility",
+      "Existing Credit Agreement",
+      "Company Debt Agreement"
+    ],
+    "cvr": [
+      "Milestone",
+      "Merger Consideration"
+    ],
+    "cybersecurity": [
+      "IT Systems",
+      "Malicious Code",
+      "Personal Information",
+      "Company Data"
+    ],
+    "d&o insurance": [
+      "D&O Insurance",
+      "Maximum Premium",
+      "Current Premium"
+    ],
+    "data breach": [
+      "Personal Information",
+      "Personal Data",
+      "Company Data",
+      "Privacy Laws"
+    ],
+    "data room": [
+      "Made Available"
+    ],
+    "deadline": [
+      "End Date",
+      "Outside Date",
+      "Termination Date"
+    ],
+    "deal costs": [
+      "Expenses",
+      "Transfer Taxes"
+    ],
+    "deal price": [
+      "Merger Consideration",
+      "Per Share Merger Consideration",
+      "Per Share Cash Consideration"
+    ],
+    "debt": [
+      "Indebtedness",
+      "Credit Facility",
+      "Convertible Notes",
+      "Indenture"
+    ],
+    "debt financing": [
+      "Debt Financing",
+      "Debt Financing Sources",
+      "Lenders",
+      "Alternative Financing"
+    ],
+    "definitions": [
+      "Agreement",
+      "Person",
+      "Affiliate",
+      "Subsidiary"
+    ],
+    "delaware": [
+      "DGCL",
+      "Delaware Law",
+      "Delaware Courts"
+    ],
+    "delisting": [
+      "Nasdaq",
+      "NYSE",
+      "Exchange Act"
+    ],
+    "deposit insurance": [
+      "FDIC",
+      "Deposit Insurance Fund"
+    ],
+    "deregistration": [
+      "Exchange Act",
+      "SEC"
+    ],
+    "director indemnification": [
+      "Indemnified Parties",
+      "Indemnified Persons",
+      "D&O Insurance"
+    ],
+    "disclosure schedule": [
+      "Company Disclosure Schedule",
+      "Company Disclosure Letter",
+      "Parent Disclosure Schedule",
+      "Parent Disclosure Letter"
+    ],
+    "dissenters rights": [
+      "Dissenting Shares",
+      "DGCL",
+      "MBCA"
+    ],
+    "divestiture": [
+      "Burdensome Condition",
+      "Antitrust Laws"
+    ],
+    "drop dead date": [
+      "End Date",
+      "Outside Date",
+      "Termination Date"
+    ],
+    "due authority": [
+      "Company Board",
+      "Bankruptcy and Equity Exception",
+      "Enforceability Exceptions"
+    ],
+    "earn-out": [
+      "Merger Consideration",
+      "Milestone"
+    ],
+    "earnout": [
+      "Merger Consideration",
+      "Aggregate Merger Consideration",
+      "Milestone"
+    ],
+    "effective time": [
+      "Effective Time",
+      "Certificate of Merger",
+      "Articles of Merger"
+    ],
+    "employee benefits": [
+      "Company Benefit Plan",
+      "Company Benefit Plans",
+      "Employee Benefit Plan",
+      "Company Plan"
+    ],
+    "employee stock": [
+      "Company Equity Awards",
+      "Company Stock Plans",
+      "Company ESPP"
+    ],
+    "employee stock purchase plan": [
+      "Company ESPP",
+      "ESPP",
+      "Final Exercise Date"
+    ],
+    "employees": [
+      "Company Employee",
+      "Company Employees",
+      "Continuing Employees",
+      "Covered Employees"
+    ],
+    "enforceability": [
+      "Bankruptcy and Equity Exception",
+      "Enforceability Exceptions"
+    ],
+    "entire agreement": [
+      "Agreement",
+      "Confidentiality Agreement"
+    ],
+    "environmental": [
+      "Environmental Law",
+      "Environmental Laws",
+      "Environmental Permits",
+      "Hazardous Substance",
+      "Release"
+    ],
+    "equity awards": [
+      "Company Equity Awards",
+      "Company Equity Award",
+      "Company Option",
+      "Company RSU"
+    ],
+    "equity commitment": [
+      "Equity Commitment Letter",
+      "Equity Financing",
+      "Investors"
+    ],
+    "equity plan": [
+      "Company Stock Plans",
+      "Company Stock Plan",
+      "Company Equity Plan",
+      "Stock Plans"
+    ],
+    "erisa": [
+      "ERISA",
+      "ERISA Affiliate",
+      "Company ERISA Affiliate",
+      "ERISA Plans"
+    ],
+    "escheat": [
+      "Exchange Fund",
+      "Payment Fund"
+    ],
+    "espp": [
+      "Company ESPP",
+      "ESPP",
+      "Final Exercise Date"
+    ],
+    "exceptions to reps": [
+      "Company Disclosure Letter",
+      "Company Disclosure Schedule",
+      "Company SEC Documents"
+    ],
+    "exchange agent": [
+      "Exchange Agent",
+      "Paying Agent",
+      "Depository Agent",
+      "Exchange Fund"
+    ],
+    "exchange fund": [
+      "Exchange Fund",
+      "Payment Fund",
+      "Exchange Agent"
+    ],
+    "exchange ratio": [
+      "Exchange Ratio",
+      "Parent Common Stock",
+      "Merger Consideration"
+    ],
+    "excluded shares": [
+      "Excluded Shares",
+      "Cancelled Shares",
+      "Dissenting Shares"
+    ],
+    "exclusive remedy": [
+      "Termination Fee",
+      "Parent Related Parties",
+      "Company Related Parties"
+    ],
+    "existing debt": [
+      "Indebtedness",
+      "Credit Facility",
+      "Existing Credit Agreement",
+      "Existing Notes"
+    ],
+    "expense reimbursement": [
+      "Expenses",
+      "Termination Fee"
+    ],
+    "export controls": [
+      "Export and Sanctions Regulations",
+      "ITAR",
+      "Sanctions"
+    ],
+    "extension": [
+      "End Date",
+      "Outside Date",
+      "Marketing Period"
+    ],
+    "fairness opinion": [
+      "Company Financial Advisor",
+      "Company Board"
+    ],
+    "fcc approval": [
+      "FCC",
+      "Governmental Authorization"
+    ],
+    "fda": [
+      "FDA",
+      "FDCA"
+    ],
+    "fiduciary out": [
+      "Superior Proposal",
+      "Intervening Event",
+      "Change of Recommendation",
+      "Notice Period"
+    ],
+    "financial statements": [
+      "Company Financial Statements",
+      "GAAP",
+      "Company Balance Sheet"
+    ],
+    "financing": [
+      "Debt Financing",
+      "Equity Financing",
+      "Financing Sources",
+      "Required Amount"
+    ],
+    "financing condition": [
+      "Debt Financing",
+      "Required Amount",
+      "Financing Sources"
+    ],
+    "financing cooperation": [
+      "Required Information",
+      "Debt Financing",
+      "Marketing Period"
+    ],
+    "finders fee": [
+      "Company Financial Advisor",
+      "Expenses"
+    ],
+    "foreign benefit plans": [
+      "Foreign Employee Plan"
+    ],
+    "foreign investment": [
+      "CFIUS",
+      "DPA",
+      "FOCI Mitigation"
+    ],
+    "forum": [
+      "Chosen Courts",
+      "Delaware Courts"
+    ],
+    "fractional shares": [
+      "Fractional Share Consideration",
+      "Exchange Ratio",
+      "Exchange Agent"
+    ],
+    "fraud": [
+      "Fraud",
+      "Willful Breach"
+    ],
+    "go shop": [
+      "Acquisition Proposal",
+      "Superior Proposal",
+      "Acceptable Confidentiality Agreement"
+    ],
+    "golden parachute": [
+      "Code",
+      "Company Benefit Plan",
+      "Company Compensation Committee"
+    ],
+    "governing law": [
+      "Delaware Law",
+      "DGCL",
+      "Chosen Courts"
+    ],
+    "government": [
+      "Governmental Authority",
+      "Governmental Entity",
+      "Governmental Body"
+    ],
+    "government contracts": [
+      "Government Contract",
+      "Company Government Contract"
+    ],
+    "guarantee": [
+      "Limited Guarantee",
+      "Guarantor"
+    ],
+    "health insurance continuation": [
+      "COBRA",
+      "Company Benefit Plan"
+    ],
+    "healthcare": [
+      "HIPAA",
+      "HITECH",
+      "FDA"
+    ],
+    "hell or high water": [
+      "Burdensome Condition",
+      "Antitrust Laws",
+      "HSR Act"
+    ],
+    "hsr": [
+      "HSR Act",
+      "FTC",
+      "Antitrust Division",
+      "DOJ"
+    ],
+    "indemnification": [
+      "Indemnified Parties",
+      "Indemnified Party",
+      "Indemnified Person",
+      "D&O Insurance"
+    ],
+    "injunction": [
+      "Order",
+      "Proceeding",
+      "Chosen Courts"
+    ],
+    "insurance": [
+      "Insurance Policies"
+    ],
+    "intellectual property": [
+      "Intellectual Property",
+      "Intellectual Property Rights",
+      "Company Intellectual Property",
+      "Company IP"
+    ],
+    "intentional breach": [
+      "Willful Breach",
+      "Willful and Material Breach"
+    ],
+    "interim operating covenants": [
+      "Ordinary Course of Business",
+      "Pre-Closing Period"
+    ],
+    "internal controls": [
+      "Internal Control Over Financial Reporting",
+      "Sarbanes-Oxley Act",
+      "SOX"
+    ],
+    "intervening event": [
+      "Intervening Event",
+      "Company Intervening Event",
+      "Change of Recommendation"
+    ],
+    "investment bank": [
+      "Company Financial Advisor",
+      "BofA Securities"
+    ],
+    "irs": [
+      "IRS",
+      "Taxing Authority",
+      "Treasury Regulations"
+    ],
+    "it systems": [
+      "IT Systems",
+      "IT Assets",
+      "Company IT Assets",
+      "Systems"
+    ],
+    "joint venture": [
+      "Company Joint Venture",
+      "Equity Interests"
+    ],
+    "jury waiver": [
+      "Chosen Courts",
+      "Proceeding"
+    ],
+    "knowledge qualifier": [
+      "Knowledge",
+      "Company’s Knowledge",
+      "Knowledge of the Company"
+    ],
+    "kyc": [
+      "Sanctions",
+      "OFAC"
+    ],
+    "last look": [
+      "Notice Period",
+      "Superior Proposal"
+    ],
+    "law": [
+      "Law",
+      "Applicable Law",
+      "Legal Requirement"
+    ],
+    "lawsuit": [
+      "Proceeding",
+      "Legal Proceeding",
+      "Action",
+      "Claim"
+    ],
+    "layoffs": [
+      "WARN",
+      "WARN Act"
+    ],
+    "leases": [
+      "Leases",
+      "Lease",
+      "Company Leases",
+      "Real Property Leases"
+    ],
+    "lenders": [
+      "Lenders",
+      "Debt Financing Sources",
+      "Financing Sources"
+    ],
+    "liability cap": [
+      "Parent Termination Fee",
+      "Maximum Amount",
+      "Limited Guarantee"
+    ],
+    "licenses": [
+      "Licenses",
+      "Licensed Intellectual Property"
+    ],
+    "licenses and permits": [
+      "Company Permits",
+      "Permits",
+      "Environmental Permits"
+    ],
+    "liens": [
+      "Lien",
+      "Liens",
+      "Encumbrance",
+      "Permitted Liens"
+    ],
+    "litigation": [
+      "Proceeding",
+      "Legal Proceeding",
+      "Transaction Litigation",
+      "Action"
+    ],
+    "long stop date": [
+      "End Date",
+      "Outside Date",
+      "Termination Date"
+    ],
+    "lost certificate": [
+      "Certificates",
+      "Exchange Agent",
+      "Certificate"
+    ],
+    "mac": [
+      "Company Material Adverse Effect",
+      "Material Adverse Effect",
+      "Effect"
+    ],
+    "made available": [
+      "Made Available"
+    ],
+    "mae": [
+      "Company Material Adverse Effect",
+      "Parent Material Adverse Effect",
+      "Material Adverse Effect"
+    ],
+    "marketing period": [
+      "Marketing Period",
+      "Required Information"
+    ],
+    "match right": [
+      "Notice Period",
+      "Superior Proposal"
+    ],
+    "matching rights": [
+      "Notice Period",
+      "Superior Proposal",
+      "Change of Recommendation"
+    ],
+    "material adverse change": [
+      "Company Material Adverse Effect",
+      "Material Adverse Effect",
+      "Effect"
+    ],
+    "material adverse effect": [
+      "Material Adverse Effect",
+      "Company Material Adverse Effect",
+      "Parent Material Adverse Effect"
+    ],
+    "material contracts": [
+      "Company Material Contract",
+      "Contract",
+      "Nicolet Material Contract"
+    ],
+    "merger sub": [
+      "Merger Sub",
+      "Merger Subsidiary"
+    ],
+    "milestone payment": [
+      "Milestone"
+    ],
+    "minimum tender": [
+      "Minimum Condition",
+      "Offer Conditions"
+    ],
+    "multiemployer": [
+      "Multiemployer Plan",
+      "Multiemployer Plans",
+      "PBGC"
+    ],
+    "national security review": [
+      "CFIUS",
+      "CFIUS Approval",
+      "DCSA",
+      "FOCI Mitigation"
+    ],
+    "nda": [
+      "Confidentiality Agreement",
+      "Acceptable Confidentiality Agreement",
+      "Clean Team Agreement"
+    ],
+    "no conflicts": [
+      "Organizational Documents",
+      "Contract",
+      "Law",
+      "Lien"
+    ],
+    "no shop": [
+      "Acquisition Proposal",
+      "Representatives",
+      "Superior Proposal",
+      "Acceptable Confidentiality Agreement"
+    ],
+    "no-shop": [
+      "Acquisition Proposal",
+      "Company Acquisition Proposal",
+      "Superior Proposal",
+      "Representatives"
+    ],
+    "non-recourse": [
+      "Company Related Parties",
+      "Parent Related Parties",
+      "Financing Sources"
+    ],
+    "notice": [
+      "Notice Period",
+      "Business Day"
+    ],
+    "offer expiration": [
+      "Expiration Time",
+      "Offer Conditions"
+    ],
+    "officer certificate": [
+      "Closing",
+      "Company Material Adverse Effect"
+    ],
+    "oil and gas": [
+      "Hydrocarbons"
+    ],
+    "open source": [
+      "Open Source Software"
+    ],
+    "option cash out": [
+      "Company Option",
+      "Company Equity Payments",
+      "Merger Consideration"
+    ],
+    "options": [
+      "Company Option",
+      "Company Stock Option",
+      "Company Equity Awards"
+    ],
+    "ordinary course": [
+      "Ordinary Course of Business",
+      "Pre-Closing Period"
+    ],
+    "outside date": [
+      "Outside Date",
+      "End Date",
+      "Termination Date"
+    ],
+    "pandemic": [
+      "COVID-19",
+      "COVID-19 Measures",
+      "Material Adverse Effect"
+    ],
+    "patents": [
+      "Patents",
+      "Registered Intellectual Property",
+      "Company Registered Intellectual Property"
+    ],
+    "paying agent": [
+      "Paying Agent",
+      "Exchange Agent",
+      "Payment Fund"
+    ],
+    "payoff letter": [
+      "Credit Facility",
+      "Existing Credit Agreement",
+      "Indebtedness"
+    ],
+    "pension": [
+      "ERISA",
+      "PBGC",
+      "Multiemployer Plan",
+      "Company Benefit Plan"
+    ],
+    "performance shares": [
+      "Company PSU",
+      "Company PSUs",
+      "Company Equity Awards"
+    ],
+    "permits": [
+      "Permits",
+      "Company Permits",
+      "Governmental Authorization",
+      "Governmental Permits"
+    ],
+    "permitted liens": [
+      "Permitted Liens",
+      "Permitted Lien",
+      "Permitted Encumbrance",
+      "Company Permitted Exceptions"
+    ],
+    "person": [
+      "Person",
+      "Entity",
+      "Third Party"
+    ],
+    "poison pill": [
+      "Takeover Statute",
+      "Takeover Laws"
+    ],
+    "pollution": [
+      "Hazardous Substance",
+      "Hazardous Materials",
+      "Release",
+      "Environmental Law"
+    ],
+    "preferred stock": [
+      "Company Preferred Stock",
+      "Company Capital Stock"
+    ],
+    "press release": [
+      "SEC",
+      "Exchange Act"
+    ],
+    "price per share": [
+      "Per Share Merger Consideration",
+      "Per Share Cash Consideration",
+      "Merger Consideration"
+    ],
+    "privacy": [
+      "Privacy Laws",
+      "Personal Information",
+      "Personal Data",
+      "HIPAA"
+    ],
+    "private equity sponsor": [
+      "Investors",
+      "Guarantor",
+      "Equity Commitment Letter",
+      "Limited Guarantee"
+    ],
+    "products": [
+      "Company Products"
+    ],
+    "property owned": [
+      "Owned Real Property",
+      "Real Property"
+    ],
+    "proration": [
+      "Election Deadline",
+      "Merger Consideration",
+      "Maximum Amount"
+    ],
+    "proxy": [
+      "Joint Proxy Statement",
+      "Registration Statement",
+      "SEC"
+    ],
+    "proxy statement": [
+      "Joint Proxy Statement",
+      "Registration Statement",
+      "Exchange Act"
+    ],
+    "psus": [
+      "Company PSU",
+      "Company PSUs"
+    ],
+    "public announcement": [
+      "SEC",
+      "Exchange Act"
+    ],
+    "purchase price": [
+      "Merger Consideration",
+      "Aggregate Merger Consideration",
+      "Per Share Merger Consideration"
+    ],
+    "real estate": [
+      "Real Property",
+      "Owned Real Property",
+      "Leased Real Property",
+      "Real Property Leases"
+    ],
+    "reasonable best efforts": [
+      "Antitrust Laws",
+      "HSR Act",
+      "Burdensome Condition"
+    ],
+    "registration statement": [
+      "Registration Statement",
+      "Securities Act",
+      "Joint Proxy Statement"
+    ],
+    "regulator": [
+      "Governmental Authority",
+      "Governmental Entity",
+      "SEC",
+      "FTC"
+    ],
+    "regulatory approval": [
+      "HSR Act",
+      "Antitrust Laws",
+      "CFIUS Approval",
+      "Company Approvals",
+      "Governmental Authority"
+    ],
+    "related party transactions": [
+      "Affiliate",
+      "Company Related Parties"
+    ],
+    "representations": [
+      "Company Disclosure Schedule",
+      "Company Disclosure Letter",
+      "Parent Disclosure Letter"
+    ],
+    "reps and warranties": [
+      "Company Disclosure Schedule",
+      "Company Disclosure Letter",
+      "Knowledge",
+      "Material Adverse Effect"
+    ],
+    "restricted stock": [
+      "Company Restricted Stock",
+      "Company Restricted Share",
+      "Company Restricted Stock Award",
+      "Company Restricted Share Award"
+    ],
+    "restricted stock units": [
+      "Company RSU",
+      "Company RSUs",
+      "Company Equity Award"
+    ],
+    "retained employees": [
+      "Continuing Employee",
+      "Continuing Employees",
+      "Continuation Period",
+      "New Plans"
+    ],
+    "reverse break fee": [
+      "Parent Termination Fee",
+      "Termination Fee"
+    ],
+    "reverse termination fee": [
+      "Parent Termination Fee",
+      "Termination Fee"
+    ],
+    "rival offer": [
+      "Acquisition Proposal",
+      "Superior Proposal",
+      "Alternative Acquisition Agreement"
+    ],
+    "rollover of awards": [
+      "Company Equity Awards",
+      "Parent Common Stock",
+      "Exchange Ratio"
+    ],
+    "rsus": [
+      "Company RSU",
+      "Company RSUs",
+      "Company Equity Awards"
+    ],
+    "s-4": [
+      "Registration Statement",
+      "Joint Proxy Statement",
+      "Securities Act"
+    ],
+    "sanctions": [
+      "Sanctions",
+      "OFAC",
+      "Sanctioned Person",
+      "Sanctioned Country"
+    ],
+    "sec filings": [
+      "Company SEC Documents",
+      "Company SEC Reports",
+      "Company Reports",
+      "Company 10-K"
+    ],
+    "second request": [
+      "HSR Act",
+      "FTC",
+      "DOJ"
+    ],
+    "section 16": [
+      "Exchange Act",
+      "Company Director"
+    ],
+    "section 203": [
+      "Takeover Statute",
+      "DGCL",
+      "Takeover Laws"
+    ],
+    "securities laws": [
+      "Exchange Act",
+      "Securities Act",
+      "SEC"
+    ],
+    "seller": [
+      "Company",
+      "Company Board"
+    ],
+    "severance": [
+      "Company Benefit Plan",
+      "Continuing Employees",
+      "Continuation Period"
+    ],
+    "shareholder lawsuit": [
+      "Transaction Litigation",
+      "Proceeding"
+    ],
+    "shareholder meeting": [
+      "Company Stockholder Meeting",
+      "Company Shareholders Meeting",
+      "Company Stockholders’ Meeting",
+      "Company Meeting"
+    ],
+    "shareholder vote": [
+      "Company Stockholder Approval",
+      "Company Shareholder Approval",
+      "Company Stockholder Meeting",
+      "Company Meeting"
+    ],
+    "shares outstanding": [
+      "Capitalization Date",
+      "Company Capital Stock",
+      "Company Securities"
+    ],
+    "shell company": [
+      "Merger Sub",
+      "Merger Subsidiary"
+    ],
+    "software": [
+      "Software",
+      "Company Software",
+      "Open Source Software"
+    ],
+    "sole remedy": [
+      "Termination Fee",
+      "Parent Termination Fee",
+      "Company Related Parties",
+      "Parent Related Parties"
+    ],
+    "solvency": [
+      "Solvent",
+      "Required Amount"
+    ],
+    "sox": [
+      "Sarbanes-Oxley Act",
+      "SOX",
+      "Internal Control Over Financial Reporting"
+    ],
+    "specific performance": [
+      "Chosen Courts",
+      "Equity Commitment Letter",
+      "Willful Breach"
+    ],
+    "standstill": [
+      "Confidentiality Agreement",
+      "Acceptable Confidentiality Agreement"
+    ],
+    "stock certificates": [
+      "Certificates",
+      "Certificate",
+      "Company Stock Certificates",
+      "Book-Entry Shares"
+    ],
+    "stock deal": [
+      "Exchange Ratio",
+      "Parent Common Stock",
+      "Merger Consideration",
+      "Registration Statement"
+    ],
+    "stock exchange": [
+      "Nasdaq",
+      "NYSE",
+      "NASDAQ",
+      "Nasdaq Rules"
+    ],
+    "stock for stock": [
+      "Exchange Ratio",
+      "Parent Common Stock",
+      "Merger Consideration"
+    ],
+    "stock options": [
+      "Company Option",
+      "Company Options",
+      "Company Stock Option",
+      "Company Stock Plans"
+    ],
+    "stock split adjustment": [
+      "Exchange Ratio",
+      "Merger Consideration",
+      "Company Common Stock"
+    ],
+    "stockholder approval": [
+      "Company Stockholder Approval",
+      "Company Shareholder Approval"
+    ],
+    "subsidiaries": [
+      "Subsidiary",
+      "Company Subsidiaries",
+      "Company Subsidiary"
+    ],
+    "superior proposal": [
+      "Superior Proposal",
+      "Company Superior Proposal",
+      "Notice Period"
+    ],
+    "surviving company": [
+      "Surviving Corporation",
+      "Effective Time"
+    ],
+    "tail policy": [
+      "D&O Insurance",
+      "Maximum Premium",
+      "Current Premium"
+    ],
+    "tail provision": [
+      "Company Termination Fee",
+      "Acquisition Proposal",
+      "Termination Fee"
+    ],
+    "takeover": [
+      "Merger",
+      "Acquisition Transaction",
+      "Acquisition Proposal"
+    ],
+    "target": [
+      "Company",
+      "Surviving Corporation"
+    ],
+    "tax code": [
+      "Code",
+      "Treasury Regulations"
+    ],
+    "tax returns": [
+      "Tax Return",
+      "Tax Returns",
+      "Company Return"
+    ],
+    "tax-free reorganization": [
+      "Code",
+      "Treasury Regulations",
+      "IRS"
+    ],
+    "taxes": [
+      "Taxes",
+      "Tax",
+      "Tax Return",
+      "Taxing Authority"
+    ],
+    "tender offer": [
+      "Offer to Purchase",
+      "Offer Conditions",
+      "Offer Commencement Date",
+      "Minimum Condition",
+      "Expiration Time"
+    ],
+    "termination": [
+      "Termination Date",
+      "End Date",
+      "Termination Fee",
+      "Willful Breach"
+    ],
+    "termination fee": [
+      "Termination Fee",
+      "Company Termination Fee",
+      "Parent Termination Fee"
+    ],
+    "the deal": [
+      "Merger",
+      "Transactions",
+      "Contemplated Transactions",
+      "Agreement"
+    ],
+    "third party beneficiaries": [
+      "Indemnified Parties",
+      "Company Related Parties",
+      "Parent Related Parties"
+    ],
+    "to the best of knowledge": [
+      "Knowledge",
+      "Knowledge of the Company",
+      "Company’s Knowledge"
+    ],
+    "total price": [
+      "Aggregate Merger Consideration",
+      "Merger Consideration"
+    ],
+    "trade secrets": [
+      "Trade Secrets",
+      "Intellectual Property"
+    ],
+    "trademarks": [
+      "Trademarks",
+      "Domain Names",
+      "Registered IP"
+    ],
+    "transfer taxes": [
+      "Transfer Taxes",
+      "Taxes"
+    ],
+    "treasury shares": [
+      "Excluded Shares",
+      "Cancelled Shares"
+    ],
+    "two step deal": [
+      "Offer to Purchase",
+      "Offer Conditions",
+      "Minimum Condition",
+      "Merger"
+    ],
+    "unclaimed money": [
+      "Exchange Fund",
+      "Payment Fund",
+      "Exchange Agent"
+    ],
+    "underwater options": [
+      "Company Option",
+      "Company Stock Option",
+      "Company Equity Awards"
+    ],
+    "undisclosed liabilities": [
+      "Company Balance Sheet",
+      "Company Balance Sheet Date",
+      "GAAP"
+    ],
+    "union contract": [
+      "Collective Bargaining Agreement"
+    ],
+    "unions": [
+      "Collective Bargaining Agreement"
+    ],
+    "vesting acceleration": [
+      "Company Equity Awards",
+      "Company RSU",
+      "Company Option",
+      "Effective Time"
+    ],
+    "viruses": [
+      "Malicious Code"
+    ],
+    "waiver": [
+      "Agreement",
+      "Consent"
+    ],
+    "walk away": [
+      "Termination Date",
+      "End Date",
+      "Outside Date"
+    ],
+    "warn": [
+      "WARN",
+      "WARN Act"
+    ],
+    "warrants": [
+      "Company Securities",
+      "Equity Interests"
+    ],
+    "what shareholders get": [
+      "Merger Consideration",
+      "Per Share Merger Consideration",
+      "Exchange Ratio"
+    ],
+    "when the deal closes": [
+      "Closing",
+      "Closing Date",
+      "Effective Time"
+    ],
+    "willful breach": [
+      "Willful Breach",
+      "Willful and Material Breach",
+      "Fraud"
+    ],
+    "withdraw recommendation": [
+      "Change of Recommendation",
+      "Company Board Recommendation"
+    ],
+    "withholding": [
+      "Taxes",
+      "Code",
+      "Paying Agent",
+      "Exchange Agent"
+    ]
+  }
+}

@@ -68,3 +68,50 @@ def test_text_with_no_headings_is_still_covered_and_bounded():
 
 def test_empty_text_gives_no_passages():
     assert segment("c5", "") == []
+
+
+PATH_DOC = (
+    "TABLE OF CONTENTS\n"
+    "ARTICLE I DEFINITIONS\nSection 1.1 Definitions 1\n"
+    "ARTICLE II THE MERGER\nSection 2.1 The Merger 5\nSection 3.1 Stray 9\n\n"
+    "ARTICLE I\nDEFINITIONS\n\n"
+    "Section 1.1 Definitions. “Company” means Acme Corp.\n\n"
+    "ARTICLE II\nTHE MERGER\n\n"
+    "Section 2.1 The Merger. At the Effective Time: (a) Merger Sub shall merge with and into the Company and cease to exist; "
+    "(b) the Company shall survive the Merger as a wholly owned subsidiary of Parent; "
+    "(c) the certificate of incorporation of the Company shall be amended in its entirety.\n\n"
+    "Section 3.1 Stray. This section has no article heading of its own.\n"
+)
+
+
+def test_section_path_carries_article_section_and_clause():
+    ps = segment("c", PATH_DOC, max_chars=120)
+    s21 = [p for p in ps if p.section_id == "2.1"]
+    assert len(s21) >= 3
+    assert s21[0].section_path == "Article II › 2.1"
+    for p in s21[1:]:
+        marker = PATH_DOC[p.start:].lstrip()[:3]
+        assert marker.startswith("(")
+        assert p.section_path == f"Article II › 2.1 › {marker}"
+
+
+def test_section_path_uses_the_body_article_and_omits_a_missing_one():
+    ps = segment("c", PATH_DOC, max_chars=2400)
+    by_id = {p.section_id: p.section_path for p in ps if p.kind == "section"}
+    assert by_id["1.1"] == "Article I › 1.1"
+    assert by_id["3.1"] == "3.1"
+    assert all(p.section_path == "" for p in ps if p.kind in ("front", "toc"))
+
+
+def test_section_path_reads_arabic_article_numbers_and_skips_clause_on_sentence_cuts():
+    doc = ("Article 4\nCOVENANTS\n\nSection 4.1 Conduct. " + "The Company shall operate in the ordinary course. " * 6 + "\n")
+    ps = [p for p in segment("c", doc, max_chars=120) if p.section_id == "4.1"]
+    assert len(ps) >= 2
+    assert all(p.section_path == "Article 4 › 4.1" for p in ps)
+
+
+def test_passages_with_paths_still_tile_the_text():
+    # Boundaries are guarded for real by `dtd facts --check` on MAUD (Step 5); this pins the invariant.
+    ps = segment("c", PATH_DOC, max_chars=120)
+    assert ps[0].start == 0 and ps[-1].end == len(PATH_DOC)
+    assert all(a.end == b.start for a, b in zip(ps, ps[1:]))

@@ -67,7 +67,8 @@ def test_run_is_deterministic(tmp_path):
     db, csvs, cdir, out = setup(tmp_path)
     a = run(db, csvs, cdir, out, n_boot=100)
     b = run(db, csvs, cdir, out, n_boot=100)
-    a.pop("latency_ms"); b.pop("latency_ms")
+    for r in (a, b):
+        r.pop("latency_ms"); r.pop("load")
     assert a == b
 
 
@@ -78,7 +79,8 @@ def test_run_writes_one_result_line_per_item(tmp_path):
     assert len(lines) == result["overall"]["recall@5"]["n_items"] == 8
     assert [l["item_id"] for l in lines] == sorted(l["item_id"] for l in lines)
     first = lines[0]
-    assert set(first) == {"item_id", "contract_id", "split", "category", "gold", "top_passage_ids", *METRICS}
+    assert set(first) == {"item_id", "contract_id", "split", "category", "gold", "top_passage_ids", "query", "latency_ms",
+                         "context_tokens", *METRICS}
     assert first["item_id"] == "contract_0|Termination Fee" and first["contract_id"] == "contract_0"
     assert 1 <= len(first["top_passage_ids"]) <= 10 and all(isinstance(p, int) for p in first["top_passage_ids"])
     assert first["recall@5"] == 1.0

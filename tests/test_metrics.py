@@ -2,7 +2,8 @@ import math
 
 import pytest
 
-from evals.metrics import is_relevant, mrr, ndcg_at_k, recall_at_k
+from evals.run_rung import isolate_foreign
+from evals.metrics import char_precision_at_k, char_recall_at_k, is_relevant, mrr, ndcg_at_k, recall_at_k
 from retrieval.bm25 import Hit
 
 
@@ -56,3 +57,31 @@ def test_ndcg_discounts_a_late_relevant_hit():
 
 def test_ndcg_is_zero_when_nothing_is_relevant_in_the_corpus():
     assert ndcg_at_k([hit(0, 50)], GOLD, n_relevant=0) == 0.0
+
+
+
+def test_char_recall_counts_gold_characters_covered_once():
+    hits = [hit(0, 50), hit(40, 60), hit(500, 600)]
+    gold = [(30, 70), (1000, 1010)]
+    assert char_recall_at_k(hits, gold, 2) == pytest.approx(30 / 50)
+    assert char_recall_at_k(hits, gold, 1) == pytest.approx(20 / 50)
+
+
+def test_char_precision_is_gold_share_of_retrieved_characters():
+    hits = [hit(0, 50), hit(40, 60)]
+    assert char_precision_at_k(hits, [(30, 70)], 2) == pytest.approx(30 / 60)
+    assert char_precision_at_k([], [(30, 70)], 2) == 0.0
+
+
+def test_foreign_hit_counts_against_char_precision_but_never_as_relevant():
+    own = Hit(1, "a", 0, 50, 1.0)
+    foreign = Hit(2, "b", 30, 70, 1.0)
+    hits = isolate_foreign([own, foreign], "a")
+    assert hits[0] == own and hits[1].end - hits[1].start == 40 and hits[1].end <= 0
+    foreign = Hit(2, "b", 0, 50, 1.0)
+    hits = isolate_foreign([own, foreign], "a")
+    assert char_precision_at_k(hits, [(30, 70)], 2) == pytest.approx(20 / 100)
+    assert char_recall_at_k(hits[1:], [(30, 70)], 1) == 0.0
+    own_half = Hit(1, "a", 0, 40, 1.0)
+    half = isolate_foreign([own_half, Hit(2, "b", 0, 40, 1.0)], "a")
+    assert char_precision_at_k(half, [(20, 60)], 2) == pytest.approx(0.25)
