@@ -7,7 +7,7 @@ from pipeline.target import TECH_SIC
 
 GATE_AGREEMENTS = 100
 GATE_FAMILY_SHARE = 0.5
-COPIED = ("search_docs", "ex21_docs", "candidates", "fetched", "missing", "fetch_errors", "not_merger", "keyed",
+COPIED = ("search_docs", "ex21_docs", "ex2_bare_docs", "candidates", "fetched", "missing", "fetch_errors", "not_merger", "keyed",
           "company_parsed", "amendment_docs", "deals", "orphan_restated", "deals_resolved", "tech_deals", "tech_targets",
           "tech_multi_copy", "tech_amended", "sample", "press_fee", "press_release", "press_both",
           "press_restated", "press_unusable", "passages_total", "passages_mean", "passages_median", "lead_model")

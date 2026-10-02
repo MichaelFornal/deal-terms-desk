@@ -12,7 +12,7 @@ _Q = "[“\"]"
 _QE = "[”\"]"
 # A party name is a run of capitalised words (with "of", "and", "de", "la", "the" inside), so a match cannot
 # start back in the preamble's prose ("dated as of March 1, 2016, ... among Big Buyer Corp.").
-NAME = r"(?P<name>[A-Z0-9][\w.&'’\-]*(?:,?\s+(?:[A-Z0-9&][\w.&'’\-]*|of|and|de|la|the))*)"
+NAME = r"(?P<name>[A-Z0-9][\w.&+'’\-]*(?:,?\s+(?:[A-Z0-9&][\w.&+'’\-]*|of|and|de|la|the))*)"
 PARTY = re.compile(
     NAME + r",?\s+(?:a|an)\s+[A-Za-z .’'\-]{0,80}?"
     r"(?:corporation|company|partnership|trust|N\.V\.|B\.V\.|S\.A\.|plc|Ltd\.?|limited)\b[^()“”\"]{0,120}?"

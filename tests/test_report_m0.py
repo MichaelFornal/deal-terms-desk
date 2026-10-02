@@ -10,7 +10,7 @@ class Every(dict):
         return SENTINEL
 
 
-ALLOWED = re.compile(r"\bM\d\b|§\d+(?:\.\d+)?|EX-2\.1|EX-99\b|\b8-K\b")
+ALLOWED = re.compile(r"\bM\d\b|§\d+(?:\.\d+)?|EX-2(?:\.1)?\b|EX-99\b|\b8-K\b")
 
 
 def test_every_digit_in_the_report_comes_from_facts():

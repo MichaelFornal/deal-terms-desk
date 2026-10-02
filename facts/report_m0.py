@@ -57,6 +57,7 @@ Selection rule (PRD §2.2): an EX-2.1 exhibit to an 8-K whose text is an agreeme
 |---|---|
 | Documents found by full-text search for "agreement and plan of merger" in 8-K filings | {f['m0_search_docs']} |
 | Of those, EX-2.1 exhibits | {f['m0_ex21_docs']} |
+| Exhibits typed EX-2 without a sub-number (not counted; the selection rule is EX-2.1) | {f['m0_ex2_bare_docs']} |
 | Filed by a company with a tech SIC (candidates) | {f['m0_candidates']} |
 | Fetched (the rest were missing) | {f['m0_fetched']} ({f['m0_missing']} missing) |
 | Fetch errors (counted, not used) | {f['m0_fetch_errors']} |

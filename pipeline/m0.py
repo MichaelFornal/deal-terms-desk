@@ -346,6 +346,7 @@ def stage_measure(out: Path = M0_DIR) -> dict:
     m = {
         "search_docs": len(search),
         "ex21_docs": sum(is_ex21(r["file_type"]) for r in search),
+        "ex2_bare_docs": sum(r["file_type"].strip().upper() == "EX-2" for r in search),
         "candidates": len(docs),
         "fetched": len(fetched),
         "missing": sum(1 for d in docs if d["missing"] and "error" not in d),

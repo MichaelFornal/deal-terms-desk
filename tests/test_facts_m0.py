@@ -6,7 +6,7 @@ FAM = ("equity_awards", "termination_fee", "contingent_consideration")
 
 
 def measure(tmp_path, tech=150, present=(30, 29, 4), sample=30):
-    m = {"search_docs": 9000, "ex21_docs": 4000, "candidates": 600, "fetched": 590, "missing": 10,
+    m = {"search_docs": 9000, "ex21_docs": 4000, "ex2_bare_docs": 55, "candidates": 600, "fetched": 590, "missing": 10,
          "fetch_errors": 3, "not_merger": 20, "keyed": 540, "tech_targets": 140,
          "company_parsed": 560, "amendment_docs": 40, "orphan_restated": 7, "deals": 300, "deals_resolved": 240, "tech_deals": tech,
          "tech_multi_copy": 90, "tech_amended": 12, "sample": sample,
