@@ -22,7 +22,8 @@ def _access(f) -> str:
                else "there were too few requests to measure a gap between request starts")
     return (f"Requests made to sec.gov and answered: {f['m0_sec_requests']}; {spacing}; "
             f"refusals met: {f['m0_blocked_events']}; "
-            f"server errors met (each retried after a wait): {f['m0_server_errors']}.")
+            f"server errors met (retried up to twice after a wait): {f['m0_server_errors']}, "
+            f"of which recorded after the fact: {f['m0_server_errors_recorded_later']}.")
 
 
 def render_m0(f) -> str:

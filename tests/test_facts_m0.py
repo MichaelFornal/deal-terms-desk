@@ -68,13 +68,27 @@ def test_the_sec_access_record_comes_from_the_ledger(tmp_path):
     assert f["m0_server_errors"] == 2
 
 
+def test_the_gap_counts_server_error_starts_and_skips_recorded_later_rows(tmp_path):
+    sec = tmp_path / "sec"
+    sec.mkdir()
+    rows = [{"url": "a", "status": "ok", "at": 100.0}, {"url": "b", "status": "ok", "at": 103.0}]
+    (sec / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    errs = [{"at": 101.0, "status": 500, "url": "x"},
+            {"at": 100.1, "status": 500, "url": "y", "recorded_later": True}]
+    (sec / "server_errors.jsonl").write_text("".join(json.dumps(r) + "\n" for r in errs))
+    f = build_m0(measure(tmp_path), sec_dir=sec)
+    assert f["m0_min_request_gap_s"] == 1.0
+    assert f["m0_server_errors"] == 2
+    assert f["m0_server_errors_recorded_later"] == 1
+
+
 def test_the_access_record_without_refusals_or_a_second_request(tmp_path):
     sec = tmp_path / "sec"
     sec.mkdir()
     (sec / "ledger.jsonl").write_text(json.dumps({"url": "a", "status": "ok", "at": 1.0}) + "\n")
     f = build_m0(measure(tmp_path), sec_dir=sec)
     assert (f["m0_sec_requests"], f["m0_min_request_gap_s"], f["m0_blocked_events"]) == (1, None, 0)
-    assert f["m0_server_errors"] == 0
+    assert f["m0_server_errors"] == 0 and f["m0_server_errors_recorded_later"] == 0
 
 
 def test_no_ledger_means_no_access_facts(tmp_path):

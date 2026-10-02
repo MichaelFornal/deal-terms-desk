@@ -33,12 +33,16 @@ def access(sec_dir: Path) -> dict:
     if not (sec_dir / "ledger.jsonl").exists():
         return {}
     rows = [r for r in _rows(sec_dir / "ledger.jsonl") if r.get("status") in ("ok", "missing")]
-    starts = sorted(r["at"] for r in rows if "at" in r)
+    errors = _rows(sec_dir / "server_errors.jsonl")
+    # Every request start counts, answered or not. Hand-appended rows carry approximate times: left out of the gaps.
+    starts = sorted([r["at"] for r in rows if "at" in r]
+                    + [r["at"] for r in errors if "at" in r and not r.get("recorded_later")])
     gaps = [b - a for a, b in zip(starts, starts[1:])]
     return {"m0_sec_requests": len(rows),
             "m0_min_request_gap_s": round(min(gaps), 3) if gaps else None,
             "m0_blocked_events": len(_rows(sec_dir / "blocked_events.jsonl")),
-            "m0_server_errors": len(_rows(sec_dir / "server_errors.jsonl"))}
+            "m0_server_errors": len(errors),
+            "m0_server_errors_recorded_later": sum(1 for r in errors if r.get("recorded_later"))}
 
 
 def build_m0(m0_dir: Path, facts: dict | None = None, sec_dir: Path | None = None) -> dict:
