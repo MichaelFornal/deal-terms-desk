@@ -74,3 +74,13 @@ def test_party_names_do_not_swallow_prose():
     p = _p('THIS AGREEMENT, DATED AS OF MARCH 1, 2016, Big Co, a Delaware corporation (“Parent”), and '
            'Acme Inc., a Delaware corporation (the “Company”).')
     assert p.parent == "Big Co" and p.company == "Acme Inc."
+
+
+def test_trim_keeps_names_with_numbers_and_abbreviations():
+    from pipeline.target import _trim
+    assert _trim("Company 2000 Ltd.") == "Company 2000 Ltd."
+    assert _trim("Acme 2000, Inc.") == "Acme 2000, Inc."
+    assert _trim("Foo Corp. Holdings") == "Foo Corp. Holdings"
+    p = _p("by and among Company 2000 Ltd., a Delaware corporation (“Parent”), and Acme Inc., a Delaware "
+           "corporation (the “Company”).")
+    assert p.parent == "Company 2000 Ltd."

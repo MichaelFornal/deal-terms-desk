@@ -19,7 +19,9 @@ PARENT_ROLES = ("Parent", "Acquiror", "Acquirer", "Buyer", "Purchaser")
 MONTH = "(" + "|".join(MONTHS) + ")"
 DATED_AS_OF = re.compile(r"dated\s+as\s+of\s+" + MONTH + r"\s+(\d{1,2}),?\s+(\d{4})", re.I)
 DATED = re.compile(r"dated\s+(?:as\s+of\s+)?" + MONTH + r"\s+(\d{1,2}),?\s+(\d{4})", re.I)
-PROSE_END = re.compile(r"[.;:]\s+|\d{4},?\s+|\b(?:by\s+and\s+among|by\s+and\s+between|among|between)\s+", re.I)
+PROSE_END = re.compile(r"[.;:]\s+|" + MONTH + r"\s+\d{1,2},\s+\d{4},?\s+|"
+                       r"\b(?:by\s+and\s+among|by\s+and\s+between|among|between)\s+", re.I)
+ABBREVIATIONS = ("corp", "inc", "co", "ltd", "llc", "l.p", "lp", "n.v", "b.v", "s.a", "bros", "no")
 DAY_OF = re.compile(r"(\d{1,2})(?:st|nd|rd|th)?\s+day\s+of\s+" + MONTH + r",?\s+(\d{4})", re.I)
 AMENDMENT = re.compile(r"\bAmendment\s+No\.?\s*\d|\b(?:First|Second|Third)\s+Amendment\b|"
                        r"\bAmendment\s+to\s+(?:the\s+)?Agreement\s+and\s+Plan\s+of\s+Merger", re.I)
@@ -63,6 +65,8 @@ def _date(year: int, month: str, day: int) -> date | None:
 def _trim(name: str) -> str:
     end = 0
     for m in PROSE_END.finditer(name):
+        if name[m.start()] == "." and name[:m.start()].lower().split(" ")[-1].split(",")[-1] in ABBREVIATIONS:
+            continue
         end = m.end()
     return name[end:].strip(" ,")
 
