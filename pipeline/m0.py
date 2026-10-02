@@ -201,7 +201,7 @@ def _json_object(s: str, keys: tuple = ()) -> dict:
     at least one of `keys` (a nested object inside a truncated reply never qualifies)."""
     try:
         obj = json.loads(s)
-        if isinstance(obj, dict):
+        if isinstance(obj, dict) and (not keys or any(k in obj for k in keys)):
             return obj
     except json.JSONDecodeError:
         pass

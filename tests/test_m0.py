@@ -129,7 +129,7 @@ def test_each_family_gets_its_own_budget():
     text = "".join(_sec(f"2.{i}", "Each Company Option vests. " + "x " * 1500) for i in range(30))
     text += _sec("8.3", "The Company shall pay a termination fee of $5,000,000. " + "y " * 1500)
     text += _sec("3.1", "Part of the price is an earn-out payable later.")
-    runner = fake_claude(json.dumps({}))
+    runner = fake_claude(json.dumps({"equity_awards": {"present": False, "quote": ""}}))
     out = lead_families(text, runner, "m")
     assert "earn-out payable later" in runner.calls[0][0]
     assert out["equity_awards"]["truncated"] is True and out["contingent_consideration"]["truncated"] is False
@@ -415,3 +415,24 @@ def test_an_amended_and_restated_agreement_with_its_original_stays_an_amendment(
     row = json.loads((tmp_path / "deals.jsonl").read_text().splitlines()[0])
     assert row["amendments"] == 1 and row["copies"] == 1
     assert stage_measure_for(tmp_path)["orphan_restated"] == 0
+
+
+def test_a_whole_reply_without_an_asked_key_raises_and_is_not_ledgered(tmp_path):
+    from pipeline.m0 import _json_object
+    text = PRE.format(d="March 1, 2016", p="P Corp.", c="C Inc.")
+    for bad in ("{}", '{"note": "x"}'):
+        with pytest.raises(RuntimeError):
+            lead_families(text, fake_claude(bad), "m")
+        with pytest.raises(RuntimeError):
+            _json_object(bad, keys=("termination_fee",))
+    assert _json_object('{"termination_fee": {"present": false}}', keys=("termination_fee",))
+    edgar = FakeEdgar()
+    stage_search(edgar, tmp_path, today=date(2016, 4, 30))
+    stage_candidates(edgar, tmp_path)
+    stage_fetch(edgar, tmp_path)
+    stage_deals(edgar, tmp_path)
+    for bad in ("{}", '{"note": "x"}'):
+        with pytest.raises(RuntimeError):
+            stage_sample(tmp_path, runner=fake_claude(bad), model="m")
+    ledger = tmp_path / "sample_ledger.jsonl"
+    assert not ledger.exists() or ledger.read_text() == ""
