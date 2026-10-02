@@ -17,7 +17,29 @@ def _rate(a: int, b: int) -> float | None:
     return round(a / b, 4) if b else None
 
 
-def build_m0(m0_dir: Path, facts: dict | None = None) -> dict:
+def _rows(path: Path) -> list[dict]:
+    """Complete JSONL rows; a torn last line (a kill mid-append) is ignored, as the Ledger does."""
+    if not path.exists():
+        return []
+    data = path.read_text(encoding="utf-8")
+    lines = data.split("\n")[:-1]  # the last piece is "" after a final newline, or a torn line
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def access(sec_dir: Path) -> dict:
+    """What the sec.gov client's own logs show: requests answered, the smallest spacing, refusals met."""
+    sec_dir = Path(sec_dir)
+    if not (sec_dir / "ledger.jsonl").exists():
+        return {}
+    rows = [r for r in _rows(sec_dir / "ledger.jsonl") if r.get("status") in ("ok", "missing")]
+    starts = sorted(r["at"] for r in rows if "at" in r)
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    return {"m0_sec_requests": len(rows),
+            "m0_min_request_gap_s": round(min(gaps), 3) if gaps else None,
+            "m0_blocked_events": len(_rows(sec_dir / "blocked_events.jsonl"))}
+
+
+def build_m0(m0_dir: Path, facts: dict | None = None, sec_dir: Path | None = None) -> dict:
     m = json.loads((Path(m0_dir) / "measure.json").read_text(encoding="utf-8"))
     f = {f"m0_{k}": m[k] for k in COPIED}
     f["m0_company_parsed_rate"] = _rate(m["company_parsed"], m["fetched"])
@@ -41,4 +63,6 @@ def build_m0(m0_dir: Path, facts: dict | None = None) -> dict:
     f["m0_gate_pass"] = f["m0_gate_count_ok"] and f["m0_gate_families_ok"]
     if facts and facts.get("m2_index_bytes") and facts.get("m2_vec_passages"):
         f["m0_estimate_index_bytes"] = round(m["passages_total"] * facts["m2_index_bytes"] / facts["m2_vec_passages"])
+    if sec_dir is not None:
+        f |= access(sec_dir)
     return dict(sorted(f.items()))

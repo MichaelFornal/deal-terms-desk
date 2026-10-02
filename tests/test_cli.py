@@ -424,3 +424,96 @@ def test_m0_stops_with_exit_3_when_blocked(data, monkeypatch, capsys):
     monkeypatch.setattr(cli.m0, "stage_search", blocked)
     assert cli.entry(["m0", "search"]) == 3
     assert "403" in capsys.readouterr().err
+
+
+class _FakeSec:
+    made = []
+
+    def __init__(self, root, contact):
+        self.root, self.contact, self.closed = root, contact, False
+        _FakeSec.made.append(self)
+
+    def close(self):
+        self.closed = True
+
+
+def _m0_fakes(monkeypatch, tmp_path, blocked_at=None):
+    from pipeline.sec_client import Blocked
+    _FakeSec.made = []
+    ran = []
+    monkeypatch.setattr(cli, "DATA", tmp_path)
+    monkeypatch.setattr(cli, "SecClient", _FakeSec)
+    monkeypatch.setattr(cli, "sec_contact", lambda: "tester@example.com")
+    for stage in cli.M0_STAGES:
+        def fn(*args, _stage=stage, **kw):
+            ran.append((_stage, args, kw))
+            if _stage == blocked_at:
+                raise Blocked("sec.gov answered 403; stopped, no retry")
+            return {}
+        monkeypatch.setattr(cli.m0, f"stage_{stage}", fn)
+    return ran
+
+
+def test_m0_all_runs_every_stage_in_order_with_one_client(tmp_path, monkeypatch):
+    ran = _m0_fakes(monkeypatch, tmp_path)
+    assert cli.entry(["m0", "all"]) == 0
+    assert [s for s, _, _ in ran] == ["search", "candidates", "fetch", "deals", "sample", "press", "measure"]
+    assert len(_FakeSec.made) == 1 and _FakeSec.made[0].closed
+    client = _FakeSec.made[0]
+    for stage, args, _ in ran:
+        assert (args[0] is client) == (stage not in ("sample", "measure"))
+
+
+@pytest.mark.parametrize("stage", ["search", "fetch", "press"])
+def test_m0_all_stops_at_the_first_block_and_closes_the_client(tmp_path, monkeypatch, capsys, stage):
+    ran = _m0_fakes(monkeypatch, tmp_path, blocked_at=stage)
+    assert cli.entry(["m0", "all"]) == 3
+    order = list(cli.M0_STAGES)
+    assert [s for s, _, _ in ran] == order[:order.index(stage) + 1]
+    assert len(_FakeSec.made) == 1 and _FakeSec.made[0].closed
+    assert "403" in capsys.readouterr().err
+
+
+def test_m0_closes_the_client_on_any_error(tmp_path, monkeypatch):
+    _m0_fakes(monkeypatch, tmp_path)
+
+    def boom(*a, **kw):
+        raise KeyError("x")
+    monkeypatch.setattr(cli.m0, "stage_candidates", boom)
+    with pytest.raises(KeyError):
+        cli.entry(["m0", "all"])
+    assert len(_FakeSec.made) == 1 and _FakeSec.made[0].closed
+
+
+@pytest.mark.parametrize("stage", ["sample", "measure"])
+def test_m0_sample_and_measure_never_open_a_client(tmp_path, monkeypatch, stage):
+    ran = _m0_fakes(monkeypatch, tmp_path)
+    assert cli.entry(["m0", stage]) == 0
+    assert _FakeSec.made == [] and [s for s, _, _ in ran] == [stage]
+
+
+def test_m0_search_reuses_the_recorded_end_date(tmp_path, monkeypatch):
+    from datetime import date
+    ran = _m0_fakes(monkeypatch, tmp_path)
+    assert cli.entry(["m0", "search"]) == 0
+    assert ran[-1][2].get("today") is None
+    (tmp_path / "m0").mkdir()
+    (tmp_path / "m0" / "search_meta.json").write_text(json.dumps({"end": "2026-09-30"}))
+    assert cli.entry(["m0", "search"]) == 0
+    assert ran[-1][2]["today"] == date(2026, 9, 30)
+
+
+def test_m0_facts_read_the_sec_logs(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_build(m0_dir, facts=None, sec_dir=None):
+        seen["sec_dir"] = sec_dir
+        return {}
+    monkeypatch.setattr(cli, "DATA", tmp_path)
+    monkeypatch.setattr(cli, "build_facts", lambda *a: {})
+    monkeypatch.setattr(cli, "m2_present", lambda out: False)
+    monkeypatch.setattr(cli, "build_m0", fake_build)
+    (tmp_path / "m0").mkdir()
+    (tmp_path / "m0" / "measure.json").write_text("{}")
+    cli._all_facts()
+    assert seen["sec_dir"] == tmp_path / "sec"

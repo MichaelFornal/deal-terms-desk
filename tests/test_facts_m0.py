@@ -52,3 +52,27 @@ def test_empty_sample_fails_families_without_dividing_by_zero(tmp_path):
 def test_index_estimate_uses_m2_bytes_per_passage(tmp_path):
     f = build_m0(measure(tmp_path), {"m2_index_bytes": 1000, "m2_vec_passages": 10})
     assert f["m0_estimate_index_bytes"] == 40000 * 100
+
+
+def test_the_sec_access_record_comes_from_the_ledger(tmp_path):
+    sec = tmp_path / "sec"
+    sec.mkdir()
+    rows = [{"url": "a", "status": "ok", "at": 100.0}, {"url": "b", "status": "missing", "at": 100.5004},
+            {"url": "c", "status": "ok", "at": 101.6}]
+    (sec / "ledger.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows) + '{"url": "d", "sta')
+    (sec / "blocked_events.jsonl").write_text(json.dumps({"at": 102.0, "status": 403, "url": "d"}) + "\n")
+    f = build_m0(measure(tmp_path), sec_dir=sec)
+    assert (f["m0_sec_requests"], f["m0_min_request_gap_s"], f["m0_blocked_events"]) == (3, 0.5, 1)
+
+
+def test_the_access_record_without_refusals_or_a_second_request(tmp_path):
+    sec = tmp_path / "sec"
+    sec.mkdir()
+    (sec / "ledger.jsonl").write_text(json.dumps({"url": "a", "status": "ok", "at": 1.0}) + "\n")
+    f = build_m0(measure(tmp_path), sec_dir=sec)
+    assert (f["m0_sec_requests"], f["m0_min_request_gap_s"], f["m0_blocked_events"]) == (1, None, 0)
+
+
+def test_no_ledger_means_no_access_facts(tmp_path):
+    f = build_m0(measure(tmp_path), sec_dir=tmp_path / "nowhere")
+    assert "m0_sec_requests" not in f and "m0_sec_requests" not in build_m0(measure(tmp_path))

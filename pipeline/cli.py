@@ -24,9 +24,11 @@ from pipeline import m0
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
+from pipeline.env import sec_contact
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
 from pipeline.paths import CACHE, DATA, CSV_NAMES, INDEX, INDEX_FIXED, OUT, RAW
+from pipeline.sec_client import Blocked, SecClient
 from retrieval import vectors
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
@@ -276,7 +278,7 @@ def _all_facts() -> dict:
     if m2_present(OUT):
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
     if (DATA / "m0" / "measure.json").exists():
-        facts |= build_m0(DATA / "m0", facts)
+        facts |= build_m0(DATA / "m0", facts, DATA / "sec")
     return facts
 
 
@@ -326,8 +328,6 @@ def _cmd_failures(args) -> int:
 
 
 def _cmd_m0(args) -> int:
-    from pipeline.env import sec_contact
-    from pipeline.sec_client import Blocked, SecClient
     stages = M0_STAGES if args.stage == "all" else (args.stage,)
     client = None
     try:
@@ -336,7 +336,12 @@ def _cmd_m0(args) -> int:
         out = DATA / "m0"
         for stage in stages:
             fn = getattr(m0, f"stage_{stage}")
-            summary = fn(out) if stage in ("sample", "measure") else fn(client, out)
+            if stage in ("sample", "measure"):
+                summary = fn(out)
+            elif stage == "search":
+                summary = fn(client, out, today=m0.search_end(out))  # a rerun asks the same windows
+            else:
+                summary = fn(client, out)
             print(json.dumps({stage: summary}), flush=True)
         return 0
     except Blocked as e:
