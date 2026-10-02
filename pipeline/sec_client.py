@@ -35,6 +35,13 @@ def _atomic_write(path: Path, text: str) -> None:
     os.replace(part, path)
 
 
+def _append(path: Path, rec: dict) -> None:
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, sort_keys=True) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
 class SecClient:
     """The only code that talks to sec.gov. One process, at most 2 requests per second, nothing twice,
     and a full stop on a refusal."""
@@ -58,7 +65,7 @@ class SecClient:
         try:
             self._last_wall = float(self._last_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            self._last_wall = self._wall()
+            self._last_wall = started = self._wall()
         self._mutex = threading.Lock()
         self._pid = os.getpid()
         self._closed = False
@@ -116,7 +123,7 @@ class SecClient:
             if wait > 0:
                 self._sleep(wait)
             self._last = self._clock()
-            self._last_wall = self._wall()
+            self._last_wall = started = self._wall()
             _atomic_write(self._last_file, repr(self._last_wall))
             self.requests += 1
             req = urllib.request.Request(url, headers={"User-Agent": self._ua, "Accept-Encoding": "gzip"})
@@ -127,11 +134,12 @@ class SecClient:
                         body = gzip.decompress(body)
             except urllib.error.HTTPError as e:
                 if e.code in STOP_CODES:
-                    _atomic_write(self.root / "blocked.json",
-                                  json.dumps({"at": self._wall(), "status": e.code, "url": url}))
+                    event = {"at": self._wall(), "status": e.code, "url": url}
+                    _append(self.root / "blocked_events.jsonl", event)
+                    _atomic_write(self.root / "blocked.json", json.dumps(event))
                     raise Blocked(f"sec.gov answered {e.code} for {url}; stopped, no retry") from e
                 if e.code == 404:
-                    self.ledger.put({"url": url, "status": "missing"})
+                    self.ledger.put({"url": url, "status": "missing", "at": started})
                     return None
                 if 300 <= e.code < 400:
                     raise RuntimeError(f"sec.gov answered a redirect ({e.code}) for {url}; not followed") from e
@@ -139,7 +147,7 @@ class SecClient:
             part = path.with_name(path.name + ".part")
             part.write_bytes(body)
             os.replace(part, path)
-            self.ledger.put({"url": url, "status": "ok", "bytes": len(body),
+            self.ledger.put({"url": url, "status": "ok", "at": started, "bytes": len(body),
                              "sha256": hashlib.sha256(body).hexdigest()})
             return body
 

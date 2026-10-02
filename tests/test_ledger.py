@@ -44,3 +44,26 @@ def test_ledger_key_is_configurable(tmp_path):
     led = Ledger(tmp_path / "l.jsonl", key="query")
     led.put({"query": "fee", "rewrite": "termination fee"})
     assert Ledger(tmp_path / "l.jsonl", key="query").get("fee")["rewrite"] == "termination fee"
+
+
+def test_the_torn_line_rewrite_is_atomic(tmp_path, monkeypatch):
+    from pathlib import Path
+    p = tmp_path / "ledger.jsonl"
+    good = '{"url": "u1", "status": "ok", "bytes": 5}\n'
+    p.write_text(good + '{"url": "u2", "sta')
+    real = Path.write_text
+
+    def torn(self, text, **kw):
+        real(self, text[:7], **kw)
+        raise OSError("disk full")
+    monkeypatch.setattr(Path, "write_text", torn)
+    try:
+        Ledger(p)
+    except OSError:
+        pass
+    monkeypatch.setattr(Path, "write_text", real)
+    assert p.read_text().startswith(good)
+    led = Ledger(p)
+    assert led.get("u1") is not None and led.get("u2") is None
+    assert p.read_text() == good
+    assert [x.name for x in tmp_path.iterdir()] == ["ledger.jsonl"]

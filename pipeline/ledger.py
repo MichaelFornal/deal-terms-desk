@@ -21,9 +21,15 @@ class Ledger:
                 if line.strip():
                     rec = json.loads(line)
                     self._recs[rec[self.key]] = rec
-            # Truncate file to remove any torn last line, preventing corruption on next append
+            # Rewrite without the torn last line, so the next append starts on a fresh line. The rewrite goes
+            # through a .part file and a rename, so a kill during it leaves the old ledger, never a shorter one.
             if torn:
-                self.path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+                part = self.path.with_name(self.path.name + ".part")
+                try:
+                    part.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+                    os.replace(part, self.path)
+                finally:
+                    part.unlink(missing_ok=True)
 
     def get(self, key_value: str) -> dict | None:
         return self._recs.get(key_value)

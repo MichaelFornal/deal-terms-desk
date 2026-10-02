@@ -245,3 +245,28 @@ def test_close_in_a_forked_child_does_not_unlock(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "getpid", lambda: -1)
     c.close()
     assert calls == []
+
+
+def test_ledger_rows_carry_the_request_start_time(tmp_path):
+    net = Net({A: b"a", B: 404})
+    c, clock = client(tmp_path, net)
+    c.get(A)
+    t_a = clock.t
+    c.get(B)
+    rows = [json.loads(x) for x in (tmp_path / "sec" / "ledger.jsonl").read_text().splitlines()]
+    assert [r["url"] for r in rows] == [A, B]
+    assert rows[0]["at"] == t_a and rows[1]["at"] - rows[0]["at"] >= MIN_INTERVAL
+
+
+@pytest.mark.parametrize("code", [403, 429])
+def test_each_refusal_is_appended_to_the_blocked_events(tmp_path, code):
+    net = Net({A: code})
+    c, clock = client(tmp_path, net)
+    with pytest.raises(Blocked):
+        c.get(A)
+    clock.t += COOLDOWN_S + 1
+    with pytest.raises(Blocked):
+        c.get(A)
+    events = [json.loads(x) for x in (tmp_path / "sec" / "blocked_events.jsonl").read_text().splitlines()]
+    assert [(e["status"], e["url"]) for e in events] == [(code, A), (code, A)]
+    assert events[1]["at"] > events[0]["at"] and CONTACT not in json.dumps(events)
