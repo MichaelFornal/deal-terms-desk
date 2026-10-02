@@ -51,7 +51,7 @@ class SecClient:
             raise RuntimeError("another sec.gov client holds data/sec/.lock; M0 runs as one process")
         self.ledger = Ledger(self.root / "ledger.jsonl")
         self._ua = f"deal-terms-desk/0.1 {contact}"
-        self._opener = opener or urllib.request.build_opener(_NoRedirect()).open
+        self._opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open
         self._clock, self._wall, self._sleep = clock, wall, sleep
         self._last: float | None = None
         self._last_file = self.root / "last_request"
@@ -68,8 +68,9 @@ class SecClient:
         if self._closed:
             return
         self._closed = True
-        fcntl.flock(self._lock, fcntl.LOCK_UN)
-        self._lock.close()
+        if os.getpid() == self._pid:
+            fcntl.flock(self._lock, fcntl.LOCK_UN)
+        self._lock.close()  # in a forked child: only this copy of the fd; the parent keeps its lock
 
     def __enter__(self) -> "SecClient":
         return self

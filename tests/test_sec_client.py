@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 import socket
@@ -225,3 +226,22 @@ def test_close_is_idempotent_and_a_context_manager(tmp_path):
         pass
     c.close()
     client(tmp_path, Net({}))[0].close()
+
+
+def test_the_default_opener_ignores_environment_proxies(tmp_path, monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+    c = SecClient(tmp_path / "sec", CONTACT)
+    proxies = [h for h in c._opener.__self__.handlers if isinstance(h, urllib.request.ProxyHandler)]
+    assert proxies == []  # the empty ProxyHandler registers nothing, so the environment default is not installed
+    with pytest.raises(AssertionError, match="sec.gov"):
+        c.get(A)
+
+
+def test_close_in_a_forked_child_does_not_unlock(tmp_path, monkeypatch):
+    c, _ = client(tmp_path, Net({}))
+    calls = []
+    monkeypatch.setattr(fcntl, "flock", lambda *a: calls.append(a))
+    monkeypatch.setattr(os, "getpid", lambda: -1)
+    c.close()
+    assert calls == []

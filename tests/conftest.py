@@ -10,6 +10,9 @@ SEC_HOSTS = {"www.sec.gov", "efts.sec.gov", "data.sec.gov"}
 @pytest.fixture(autouse=True)
 def no_real_sec_requests(monkeypatch):
     """No test may reach sec.gov: the access rules forbid it and CI would hammer it."""
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(var, raising=False)
+        monkeypatch.delenv(var.lower(), raising=False)
     real = urllib.request.urlopen
 
     def guarded(req, *args, **kwargs):
