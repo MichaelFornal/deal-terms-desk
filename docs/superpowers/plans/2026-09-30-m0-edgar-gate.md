@@ -26,9 +26,9 @@
 
 ## What is known before M0 runs
 
-Nothing about the tech half has been measured (PRD §2.2). sec.gov blocked the development machine for 40+ minutes on 2026-09-30 after parallel agents hit it. This plan was written without any request to sec.gov, so the response shapes below come from public knowledge of EDGAR's endpoints, not from a probe. **Task 1 is a probe:** three requests, one per endpoint, recorded as test fixtures. Every later task codes against those recorded fixtures. If a recorded shape differs from what this plan assumes, the implementer adapts the parser to the fixture and says so.
+Nothing about the tech half has been measured (PRD §2.2). sec.gov blocked the development machine for 40+ minutes on 2026-09-30 after parallel agents hit it. This plan was written without any request to sec.gov, so the response shapes below come from public knowledge of EDGAR's endpoints, not from a probe. **Task 2 is a probe:** four requests (a search page, a submissions JSON, an exhibit and its filing index), recorded as test fixtures. Every later task codes against those recorded fixtures. If a recorded shape differs from what this plan assumes, the implementer adapts the parser to the fixture and says so.
 
-Assumed shapes (to be confirmed by Task 1):
+Assumed shapes (to be confirmed by Task 2):
 - **Full-text search:** `https://efts.sec.gov/LATEST/search-index?q="agreement and plan of merger"&forms=8-K&dateRange=custom&startdt=YYYY-MM-DD&enddt=YYYY-MM-DD&from=N`. JSON `hits.total.value` and `hits.total.relation` (`"gte"` at the 10,000 cap), and `hits.hits[]` with `_id` = `"<accession>:<filename>"` and `_source` with `ciks`, `display_names`, `file_type`, `file_date`, `form`, `adsh`, `sics`. Pages of 100.
 - **Submissions:** `https://data.sec.gov/submissions/CIK##########.json` with `name`, `sic`, `sicDescription`.
 - **Archive document:** `https://www.sec.gov/Archives/edgar/data/<cik>/<accession without dashes>/<filename>`, and the filing index `…/<accession>-index.htm` listing each document's type.
@@ -65,7 +65,7 @@ If it fails, PRD §10's fallback applies before M3 is planned: index whatever te
 | `pipeline/m0.py` | The stages: search, candidates, fetch, measure; `dtd m0 …` |
 | `pipeline/claude.py` | `claude -p` runner (shared with M2; created here if M2 is not merged yet) |
 | `facts/m0.py`, `facts/report_m0.py` | M0 named facts; `docs/m0/REPORT.md` |
-| `tests/fixtures/sec/` | The three recorded probe responses, trimmed |
+| `tests/fixtures/sec/` | The four recorded probe responses, trimmed |
 | `tests/conftest.py` | An autouse guard: any real request to a sec.gov host in tests fails |
 
 Branch: `m0`, cut from `main` when execution starts. If M2 has merged by then, `pipeline/claude.py` and the generalised `Ledger(key=...)` already exist, so reuse them. If not, Task 2 adds `Ledger(key=...)` exactly as M2's Task 8 specifies, and Task 6 adds `pipeline/claude.py` as M2's Task 7 specifies, so the two branches merge cleanly.
@@ -1796,6 +1796,28 @@ Run `uv run dtd m0 search` in the background. After about 50 lines in `data/sec/
 Expected: the rerun's first requests are cache hits (the ledger grows only past the kill point), and `search.jsonl` is written once at the end. At 2 per second, a page count of P takes about P/2 seconds. Note P in the ledger.
 
 If any stage exits with code 3 (blocked), stop everything and tell Michael. Do not rerun within the hour, and never from another identity or machine.
+
+The search records its end date in `data/m0/search_meta.json`, and `dtd m0 search` reuses it, so the rerun asks exactly the same windows.
+
+**Stall A: `search_window` raises "expected N hits, paged M" for a window.** Stop. The message names the window's start and end dates (it may be a part-month window from the cap split). With no `dtd` process running, delete that window's cache files and ledger rows: the rows are those in `data/sec/ledger.jsonl` whose `url` contains both `startdt=<start>` and `enddt=<end>`, and each row's cache file is `data/sec/cache/<sha1 of the url>`. For example:
+
+```python
+# uv run python clear_window.py, with <start> and <end> filled in
+import hashlib, json, pathlib
+root, start, end = pathlib.Path("data/sec"), "<start>", "<end>"
+led, keep = root / "ledger.jsonl", []
+for line in led.read_text(encoding="utf-8").splitlines():
+    url = json.loads(line)["url"]
+    if f"startdt={start}" in url and f"enddt={end}" in url:
+        (root / "cache" / hashlib.sha1(url.encode("utf-8")).hexdigest()).unlink(missing_ok=True)
+    else:
+        keep.append(line)
+led.write_text("".join(l + "\n" for l in keep), encoding="utf-8")
+```
+
+Then rerun `uv run dtd m0 search` once. If the same window fails again, do not retry: record the window as unreadable in the run's ledger notes (start, end, the expected and paged counts) and tell Michael.
+
+**Stall B: one URL is refused again after the hour's cooldown.** If a single URL answers 403 again once the cooldown has passed, while www.sec.gov still loads in a browser, stop the run and tell Michael. Never retry in a loop, and never change the User-Agent, the contact, the machine or the network. `data/sec/blocked_events.jsonl` keeps every refusal with its time and URL.
 
 - [ ] **Step 3: Candidates, fetch and deals, with a kill on fetch**
 
