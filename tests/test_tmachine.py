@@ -279,3 +279,54 @@ def test_a_changed_prompt_is_a_cache_miss_and_a_legacy_record_is_accepted(tmp_pa
                               for r in (json.loads(l) for l in path.read_text().splitlines())))
     label_contract("edgar_1", TEXT, big_outline(), TOPICS, "m", runner, Ledger(legacy, key="key"), "a")
     assert len(runner.calls) == n + 1  # records without a hash are trusted as before
+
+
+def _keys(path):
+    return [json.loads(l)["key"] for l in path.read_text().splitlines()]
+
+
+def test_a_group_over_the_cap_is_split_into_one_call_per_topic(tmp_path, monkeypatch):
+    import evals.tmachine as tm
+    ol = big_outline()
+    size = {k: e - s for k, (s, e) in ol.sections.items()}
+    cap = max(size["2.3"], size["6.9"], size["8.3"]) + 1
+    assert size["2.3"] + size["6.9"] + size["8.3"] > cap and size["8.3"] + size["9.1"] > cap
+    monkeypatch.setattr(tm, "STEP2_CAP", cap)
+    ids = {"equity_awards": ["2.3"], "termination_fee": ["8.3", "9.1"], "employee_benefits": ["6.9"]}
+    runner = FakeRunner(QUOTES, ids)
+    path = tmp_path / "l.jsonl"
+    got = label_contract("edgar_1", TEXT, ol, tm.TOPICS, "m", runner, Ledger(path, key="key"), "a")
+    assert _keys(path) == ["a|m|edgar_1|outline"] + [f"a|m|edgar_1|sections|0|{t}" for t in
+                                                     ("equity_awards", "termination_fee", "employee_benefits")]
+    for t, sid in (("equity_awards", "2.3"), ("termination_fee", "8.3"), ("employee_benefits", "6.9")):
+        s, e = ol.sections[sid]
+        assert got[t]["found"] and got[t]["spans"] and all(s <= a < b <= e for a, b in got[t]["spans"]), t
+        assert got[t]["split"]
+    # truncation is per topic: only termination_fee's own sections overflow the cap
+    assert [t for t in got if got[t]["truncated"]] == ["termination_fee"]
+    n = len(runner.calls)
+    label_contract("edgar_1", TEXT, ol, tm.TOPICS, "m", runner, Ledger(path, key="key"), "a")
+    assert len(runner.calls) == n
+
+
+def test_a_group_under_the_cap_keeps_its_key_and_its_cached_reply(tmp_path):
+    from evals.tmachine import TOPICS
+    path = tmp_path / "l.jsonl"
+    runner = FakeRunner(QUOTES)
+    got = label_contract("edgar_1", TEXT, big_outline(), TOPICS, "m", runner, Ledger(path, key="key"), "a")
+    assert _keys(path) == ["a|m|edgar_1|outline", "a|m|edgar_1|sections|0"]
+    assert not any(v["truncated"] or v["split"] for v in got.values())
+    # a ledger written before the hash existed still serves the run with no new call
+    path.write_text("".join(json.dumps({k: v for k, v in json.loads(l).items() if k != "prompt_sha"}) + "\n"
+                            for l in path.read_text().splitlines()))
+    boom = lambda p, m: pytest.fail("model called for a cached contract")
+    label_contract("edgar_1", TEXT, big_outline(), TOPICS, "m", boom, Ledger(path, key="key"), "a")
+
+
+def test_label_all_counts_truncated_topics_and_split_contracts(tmp_path, deals_conn, monkeypatch):
+    import evals.tmachine as tm
+    monkeypatch.setattr(tm, "STEP2_CAP", 10)
+    runner = FakeRunner(QUOTES, CHUNK_IDS)
+    rows, summary = label_all(deals_conn, {"edgar_1": TEXT}, [("edgar_1", "Acme")], tm.TOPICS, tm.PASSES, runner,
+                              tmp_path / "l.jsonl", workers=1)
+    assert summary["split_groups"] == 1 and summary["truncated_topics"] == len(rows) == 3

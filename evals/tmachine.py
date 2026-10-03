@@ -148,7 +148,7 @@ def label_contract(cid, text, ol: Outline, topics: dict[str, str], model, runner
                                                               outline="\n".join(ol.lines)), model, runner)
     picked = _parse(reply, topics)
     out = {t: {"found": False, "sections": [], "spans": [], "answer": "", "unlocated": 0, "truncated": False,
-               "error": picked is None} for t in topics}
+               "split": False, "error": picked is None} for t in topics}
     if picked is None:
         return out
     for t in topics:
@@ -166,42 +166,56 @@ def label_contract(cid, text, ol: Outline, topics: dict[str, str], model, runner
     names = list(topics)
     for g, start in enumerate(range(0, len(names), group)):
         chunk = names[start:start + group]
-        shown_ids = sorted({i for t in chunk for i in out[t]["sections"]}, key=lambda i: ol.sections[i][0])
+        shown_ids = _in_order({i for t in chunk for i in out[t]["sections"]}, ol)
         if not shown_ids:
             continue
-        parts, used, truncated, shown = [], 0, False, []
-        for i in shown_ids:
-            s, e = ol.sections[i]
-            room = STEP2_CAP - used
-            if room <= 0:
-                truncated = True
-                break
-            if e - s > room:
-                e, truncated = s + room, True
-            parts.append(f"[{i}]\n{text[s:e]}")
-            shown.append((s, e))
-            used += e - s
-        example2 = json.dumps({t: {"found": True, "quotes": ["..."], "answer": "..."} for t in chunk})
-        prompt = STEP2.format(topics=_topics_block({t: topics[t] for t in chunk}), example=example2,
-                              sections="\n\n".join(parts))
-        got = _parse(_ask(ledger, lock, f"{base}|sections|{g}", prompt, model, runner), chunk)
-        for t in chunk:
-            if out[t]["error"]:
-                continue
-            out[t]["truncated"] = truncated
-            if got is None:
-                out[t]["error"] = True
-                continue
-            if not isinstance(got.get(t), dict):
-                if out[t]["sections"]:
-                    out[t]["error"] = True  # the model skipped a topic it was shown sections for
-                continue
-            r = got[t]
-            quotes = [q for q in r.get("quotes", []) if isinstance(q, str)][:3]
-            located = [locate(q, text, shown) for q in quotes]
-            out[t].update(found=bool(r.get("found")), spans=[list(sp) for got in located for sp in got],
-                          answer=str(r.get("answer", "")), unlocated=sum(1 for got in located if not got))
+        if sum(ol.sections[i][1] - ol.sections[i][0] for i in shown_ids) <= STEP2_CAP:
+            calls = [(f"{base}|sections|{g}", chunk, shown_ids, False)]  # the key and prompt the cache already holds
+        else:  # one call per topic rather than cutting the group's sections off at the cap
+            calls = [(f"{base}|sections|{g}|{t}", [t], _in_order(set(out[t]["sections"]), ol), True)
+                     for t in chunk if out[t]["sections"]]
+        for key, asked, ids, split in calls:
+            _step2(key, asked, ids, split, text, ol, topics, out, model, runner, ledger, lock)
     return out
+
+
+def _in_order(ids, ol: Outline) -> list[str]:
+    return sorted(ids, key=lambda i: ol.sections[i][0])
+
+
+def _step2(key, chunk, shown_ids, split, text, ol, topics, out, model, runner, ledger, lock) -> None:
+    parts, used, truncated, shown = [], 0, False, []
+    for i in shown_ids:
+        s, e = ol.sections[i]
+        room = STEP2_CAP - used
+        if room <= 0:
+            truncated = True
+            break
+        if e - s > room:
+            e, truncated = s + room, True
+        parts.append(f"[{i}]\n{text[s:e]}")
+        shown.append((s, e))
+        used += e - s
+    example2 = json.dumps({t: {"found": True, "quotes": ["..."], "answer": "..."} for t in chunk})
+    prompt = STEP2.format(topics=_topics_block({t: topics[t] for t in chunk}), example=example2,
+                          sections="\n\n".join(parts))
+    got = _parse(_ask(ledger, lock, key, prompt, model, runner), chunk)
+    for t in chunk:
+        if out[t]["error"]:
+            continue
+        out[t]["truncated"], out[t]["split"] = truncated, split
+        if got is None:
+            out[t]["error"] = True
+            continue
+        if not isinstance(got.get(t), dict):
+            if out[t]["sections"]:
+                out[t]["error"] = True  # the model skipped a topic it was shown sections for
+            continue
+        r = got[t]
+        quotes = [q for q in r.get("quotes", []) if isinstance(q, str)][:3]
+        located = [locate(q, text, shown) for q in quotes]
+        out[t].update(found=bool(r.get("found")), spans=[list(sp) for hit in located for sp in hit],
+                      answer=str(r.get("answer", "")), unlocated=sum(1 for hit in located if not hit))
 
 
 def status(a: dict, b: dict, section_at) -> str:
@@ -295,7 +309,10 @@ def label_all(conn, texts, contracts, topics, passes, runner, ledger_path, worke
                          "gold": gold, "fallback": outlines[cid].fallback, "a": a, "b": b})
     done = {r["contract_id"] for r in rows}
     summary = {"contracts": len(contracts), "complete": len(done), "calls_made": len(calls),
-               "fallback_contracts": sum(1 for cid in done if outlines[cid].fallback)}
+               "fallback_contracts": sum(1 for cid in done if outlines[cid].fallback),
+               "truncated_topics": sum(1 for r in rows if r["a"]["truncated"] or r["b"]["truncated"]),
+               "split_groups": sum(1 for cid in done if any(v.get("split") for p in results[cid].values()
+                                                             for v in p.values()))}
     summary |= {st: sum(1 for r in rows if r["status"] == st) for st in STATUSES}
     summary["by_family"] = {t: {st: sum(1 for r in rows if r["family"] == t and r["status"] == st) for st in STATUSES}
                             for t in dict.fromkeys(t for cid in done for t in tps[cid])}
