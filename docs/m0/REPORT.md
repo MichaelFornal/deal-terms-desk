@@ -64,4 +64,4 @@ Of the sampled deals, 27 state a fee amount in the agreement and 21 have an EX-9
 
 ## Size for M3
 
-Passages in the tech agreements, cut by the same section-aware segmenter as MAUD: 66469 in all, 208.4 per agreement on average, median 207. Estimated index size from M2's bytes per passage: 955330770 bytes.
+Passages in the tech agreements, cut by the same section-aware segmenter as MAUD: 66469 in all, 208.4 per agreement on average, median 207. Estimated index size from M2's bytes per passage: 385656632 bytes.
