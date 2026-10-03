@@ -549,7 +549,9 @@ def test_m0_facts_read_the_sec_logs(tmp_path, monkeypatch):
         return {}
     monkeypatch.setattr(cli, "DATA", tmp_path)
     monkeypatch.setattr(cli, "build_facts", lambda *a: {})
+    monkeypatch.setattr(cli, "OUT", tmp_path / "out")
     monkeypatch.setattr(cli, "m2_present", lambda out: False)
+    monkeypatch.setattr(cli, "present_m3", lambda out: False)
     monkeypatch.setattr(cli, "build_m0", fake_build)
     (tmp_path / "m0").mkdir()
     (tmp_path / "m0" / "measure.json").write_text("{}")
