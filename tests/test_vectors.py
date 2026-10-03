@@ -126,3 +126,12 @@ def test_fill_cache_killed_mid_run_keeps_committed_batches_and_resumes(index):
     out = fill_cache(open_cache(cache_path), emb, texts, batch=1)
     assert out == {"embedded": len(set(texts)) - 1, "cached": 1}
     assert emb.embedded == len(set(texts)) - 1
+
+
+def test_vec_table_declares_a_chunk_size(index):
+    db, cache_path = index
+    conn, cache, emb = connect(db), open_cache(cache_path), FakeEmbedder()
+    fill_cache(cache, emb, [t for _, _, t in indexed_passages(conn)])
+    build_vectors(conn, cache, emb.name)
+    ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'passages_vec'").fetchone()[0]
+    assert "chunk_size=128" in ddl.replace(" ", "")

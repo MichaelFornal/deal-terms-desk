@@ -62,9 +62,12 @@ def test_passages_carry_definitions_of_terms_they_use(tmp_path):
     conn = sqlite3.connect(db)
     rows = conn.execute("SELECT p.section_id, d.term FROM passage_defs d JOIN passages p USING (passage_id)").fetchall()
     assert rows == [("8.3", "Company Termination Fee")]
-    [x] = conn.execute("SELECT x.text FROM passages_x_fts x JOIN passages p ON p.passage_id = x.rowid"
-                       " WHERE p.section_id = '8.3'").fetchall()
-    assert "amount in cash" in x[0]
+    # Contentless: the definition text is searchable but not stored; the 8.3 passage matches on its definition's words.
+    def hits(table):
+        return {r[0] for r in conn.execute(
+            f"SELECT p.section_id FROM {table} x JOIN passages p ON p.passage_id = x.rowid"
+            f" WHERE {table} MATCH '\"cash\"'")}
+    assert hits("passages_x_fts") == {"1.1", "8.3"} and hits("passages_fts") == {"1.1"}
     assert conn.execute("SELECT COUNT(*) FROM passages_x_fts").fetchone() == conn.execute(
         "SELECT COUNT(*) FROM passages_fts").fetchone()
 
@@ -104,3 +107,16 @@ def test_max_defs_caps_at_six_in_first_use_order(tmp_path):
     build_index(db, {"c": "".join(parts)})
     got = _defs_by_section(db)
     assert got == [("2.1", f"Term {c}") for c in "HGFEDC"]
+
+
+def test_contracts_record_their_passage_id_range_and_x_fts_is_contentless(tmp_path):
+    import sqlite3
+    from retrieval.index import build_index
+    db = tmp_path / "i.db"
+    build_index(db, {"a": "Section 1.1 A. One.\n\nSection 1.2 B. Two.\n", "b": "Section 1.1 C. Three.\n"})
+    conn = sqlite3.connect(db)
+    for cid, lo, hi in conn.execute("SELECT contract_id, first_passage_id, last_passage_id FROM contracts"):
+        ids = [r[0] for r in conn.execute("SELECT passage_id FROM passages WHERE contract_id = ? ORDER BY passage_id", (cid,))]
+        assert ids == list(range(lo, hi + 1))
+    ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'passages_x_fts'").fetchone()[0]
+    assert "content=''" in ddl.replace('"', "'")

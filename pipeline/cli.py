@@ -132,9 +132,9 @@ def _ladder(db: Path, texts: dict[str, str]) -> Ladder:
     return Ladder(vectors.connect(db), texts, embedder, reranker, lexicon, settings)
 
 
-def _eval_rung(rung: str, db: Path, name: str, ctx, **kw) -> dict:
+def _eval_rung(rung: str, db: Path, name: str, ctx, out: Path = OUT, **kw) -> dict:
     ladder = _ladder(db, ctx.texts)
-    return evaluate(ctx, name, lambda q, c, k: ladder.run(rung, q, c, k), OUT,
+    return evaluate(ctx, name, lambda q, c, k: ladder.run(rung, q, c, k), out,
                     count_tokens=ladder.embedder.count_tokens,
                     extra={"settings": asdict(ladder.settings)}, **kw)
 
@@ -144,6 +144,7 @@ def _cmd_eval(args) -> int:
         print("index or label CSVs missing; run `dtd fetch` then `dtd build` first", file=sys.stderr)
         return 2
     rung = args.rung
+    out = Path(args.out) if args.out else OUT
     if rung not in RUNGS + ("R5-llm", "R3-fixed", "corpus"):
         print(f"unknown rung {rung}", file=sys.stderr)
         return 2
@@ -172,7 +173,7 @@ def _cmd_eval(args) -> int:
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 2
-        result = evaluate(ctx, "R5-llm", retrieve, OUT, count_tokens=ladder.embedder.count_tokens, extra={
+        result = evaluate(ctx, "R5-llm", retrieve, out, count_tokens=ladder.embedder.count_tokens, extra={
             "settings": asdict(ladder.settings), "model": model, "queries": n,
             "input_tokens_mean": sum(r["input_tokens"] for r in rewrites.values()) / n,
             "output_tokens_mean": sum(r["output_tokens"] for r in rewrites.values()) / n})
@@ -181,19 +182,19 @@ def _cmd_eval(args) -> int:
             print("fixed-size index or its vectors missing; run `dtd build --fixed` then `dtd embed --fixed`",
                   file=sys.stderr)
             return 2
-        result = _eval_rung("R3", INDEX_FIXED, "R3-fixed", with_passages(ctx, INDEX_FIXED))
+        result = _eval_rung("R3", INDEX_FIXED, "R3-fixed", with_passages(ctx, INDEX_FIXED), out)
     elif rung == "corpus":
         best = _best_rung() or "R1"
         if best in ("R5", "R6") and not LEXICON_PATH.exists():
             print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
             return 2
-        _eval_rung("R1", INDEX, "R1-corpus", ctx, scope="corpus-wide", k=max(CHAR_KS), char_ks=CHAR_KS)
+        _eval_rung("R1", INDEX, "R1-corpus", ctx, out, scope="corpus-wide", k=max(CHAR_KS), char_ks=CHAR_KS)
         ladder = _ladder(INDEX, ctx.texts)
-        result = evaluate(ctx, "best-corpus", lambda q, c, k: ladder.run(best, q, c, k), OUT,
+        result = evaluate(ctx, "best-corpus", lambda q, c, k: ladder.run(best, q, c, k), out,
                           count_tokens=ladder.embedder.count_tokens, scope="corpus-wide", k=max(CHAR_KS),
                           char_ks=CHAR_KS, extra={"rung": best, "settings": asdict(ladder.settings)})
     else:
-        result = _eval_rung(rung, INDEX, rung, ctx)
+        result = _eval_rung(rung, INDEX, rung, ctx, out)
     print(json.dumps(result["overall"], indent=2))
     return 0
 
@@ -392,6 +393,7 @@ def entry(argv: list[str] | None = None) -> int:
     embed.set_defaults(fn=_cmd_embed)
     ev = sub.add_parser("eval")
     ev.add_argument("--rung", default="R1")
+    ev.add_argument("--out", default=None, help="write results here instead of data/out")
     ev.set_defaults(fn=_cmd_eval)
     sub.add_parser("rewrite").set_defaults(fn=_cmd_rewrite)
     sub.add_parser("tune").set_defaults(fn=_cmd_tune)

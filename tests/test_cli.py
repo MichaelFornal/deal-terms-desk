@@ -551,3 +551,11 @@ def test_m3_corpus_writes_the_summary_under_the_patched_edgar(data, capsys):
     assert cli.entry(["m3", "corpus"]) == 0
     summary = json.loads((data / "raw" / "edgar" / "summary.json").read_text())
     assert summary["kept"] == 2 and json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
+
+
+def test_eval_out_writes_elsewhere_and_leaves_the_default_untouched(data, tmp_path):
+    assert cli.entry(["build"]) == 0
+    other = tmp_path / "parity"
+    assert cli.entry(["eval", "--rung", "R1", "--out", str(other)]) == 0
+    assert (other / "r1.json").exists()
+    assert not (cli.OUT / "r1.json").exists()

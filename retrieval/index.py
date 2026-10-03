@@ -9,7 +9,8 @@ from pipeline.segment import segment
 from pipeline.terms import extract_terms
 
 SCHEMA = """
-CREATE TABLE contracts(contract_id TEXT PRIMARY KEY, n_chars INTEGER NOT NULL);
+CREATE TABLE contracts(contract_id TEXT PRIMARY KEY, n_chars INTEGER NOT NULL,
+    first_passage_id INTEGER, last_passage_id INTEGER);
 CREATE TABLE passages(
     passage_id INTEGER PRIMARY KEY,
     contract_id TEXT NOT NULL,
@@ -38,7 +39,7 @@ CREATE TABLE passage_defs(
     def_end INTEGER NOT NULL
 );
 CREATE INDEX passage_defs_passage ON passage_defs(passage_id);
-CREATE VIRTUAL TABLE passages_x_fts USING fts5(text, tokenize='porter unicode61');
+CREATE VIRTUAL TABLE passages_x_fts USING fts5(text, content='', tokenize='porter unicode61');
 """
 
 
@@ -53,7 +54,7 @@ def build_index(db_path: Path, contracts: dict[str, str], chunker=segment) -> di
     summary = {"contracts": 0, "passages": 0, "indexed": 0, "terms": 0}
     for contract_id in sorted(contracts):
         text = contracts[contract_id]
-        conn.execute("INSERT INTO contracts VALUES (?, ?)", (contract_id, len(text)))
+        conn.execute("INSERT INTO contracts(contract_id, n_chars) VALUES (?, ?)", (contract_id, len(text)))
         summary["contracts"] += 1
         terms = extract_terms(text)
         spans = definition_spans(text, terms)
@@ -63,12 +64,14 @@ def build_index(db_path: Path, contracts: dict[str, str], chunker=segment) -> di
         # A term's own defining passage does not count as a use of it.
         uses = Counter(t for p in passages for t in used[p.ordinal] if not (p.start <= spans[t][0] < p.end))
         n = max(1, len(passages))
+        ids = []
         for p in passages:
             cur = conn.execute(
                 "INSERT INTO passages(contract_id, ordinal, start_char, end_char, section_id, section_title, kind,"
                 " section_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (p.contract_id, p.ordinal, p.start, p.end, p.section_id, p.section_title, p.kind, p.section_path),
             )
+            ids.append(cur.lastrowid)
             summary["passages"] += 1
             if p.kind == "toc":
                 continue
@@ -82,6 +85,9 @@ def build_index(db_path: Path, contracts: dict[str, str], chunker=segment) -> di
             conn.execute("INSERT INTO passages_x_fts(rowid, text) VALUES (?, ?)",
                          (pid, "\n\n".join([body] + [text[s:e] for s, e in (spans[t] for t in defs)])))
             summary["indexed"] += 1
+        if ids:
+            conn.execute("UPDATE contracts SET first_passage_id = ?, last_passage_id = ? WHERE contract_id = ?",
+                         (min(ids), max(ids), contract_id))
         for t in terms:
             conn.execute("INSERT INTO terms VALUES (?, ?, ?, ?, ?)", (contract_id, t.term, t.start, t.end, t.style))
             summary["terms"] += 1
