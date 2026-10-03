@@ -18,7 +18,10 @@ def test_bare_numbered_headings_are_joined():
 
 
 def test_unicode_spaces_become_plain_spaces():
-    assert normalise_edgar("Company Options vest") == "Company Options vest"
+    assert normalise_edgar("Company\u202fOptions\u00a0vest") == "Company Options vest"
+    for c in "\u00a0\u1680\u2000\u2005\u200a\u200b\u202f\u205f\u3000":
+        assert normalise_edgar(f"a{c}b") == "a b", hex(ord(c))
+    assert normalise_edgar("a\u200cb") == "a\u200cb"  # the class stops at the zero-width space
 
 
 def test_running_lines_are_dropped_but_headings_and_body_kept():

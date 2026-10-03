@@ -63,7 +63,7 @@ def _fallback(f) -> str:
 
 def render_m0(f) -> str:
     verdict = "PASS" if f["m0_gate_pass"] else "FAIL"
-    estimate = (f"Estimated index size from M2's bytes per passage: {f['m0_estimate_index_bytes']} bytes."
+    estimate = (f"Estimated index size from the current section-aware index's bytes per passage: {f['m0_estimate_index_bytes']} bytes."
                 if "m0_estimate_index_bytes" in f else "No index-size estimate: M2's index measurements are not in the facts.")
     return f"""# M0 report: the EDGAR gate
 

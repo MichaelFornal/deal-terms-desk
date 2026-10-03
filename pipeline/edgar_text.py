@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 
-UNICODE_SPACES = re.compile(r"[   -​  　]")
+UNICODE_SPACES = re.compile(r"[\u00a0\u1680\u2000-\u200b\u202f\u205f\u3000]")
 SPLIT_HEADING = re.compile(r"(?m)^([ \t]*(?:(?:Section|SECTION)[ \t]+)?\d{1,2}\.\d{1,2}\.?)[ \t]*\n+[ \t]*(?=[A-Z])")
 HEADING_LINE = re.compile(r"(?i)^(?:section|article)\b|^\(?[a-z0-9]{1,4}\)")
 RUNNING_MIN = 8
