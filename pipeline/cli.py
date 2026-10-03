@@ -31,6 +31,7 @@ from pipeline.paths import CACHE, DATA, CSV_NAMES, DEALS_INDEX, EDGAR, INDEX, IN
 from pipeline.sec_client import Blocked, SecClient
 from pipeline.tech_corpus import assemble
 from retrieval import vectors
+from retrieval.deals import add_deals
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
@@ -75,7 +76,30 @@ def _cmd_fetch(args) -> int:
     return 0
 
 
+def _deals_texts() -> tuple[dict[str, str], dict[str, str]]:
+    """(MAUD + tech contract texts, amendment texts) for the combined deals index."""
+    def read(d: Path) -> dict[str, str]:
+        return {p.stem: load_contract(p) for p in sorted(d.glob("*.txt"))} if d.exists() else {}
+    return read(RAW / "contracts") | read(EDGAR / "contracts"), read(EDGAR / "amendments")
+
+
+def _build_deals() -> int:
+    if not (EDGAR / "deals.jsonl").exists():
+        print(f"{EDGAR / 'deals.jsonl'} missing; run `dtd m3 corpus` first", file=sys.stderr)
+        return 2
+    deals = [json.loads(line) for line in (EDGAR / "deals.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    contracts, amendment_texts = _deals_texts()
+    summary = build_index(DEALS_INDEX, contracts)
+    summary |= add_deals(DEALS_INDEX, deals, contracts, amendment_texts)
+    (DATA / "m3").mkdir(parents=True, exist_ok=True)
+    _write_atomic(DATA / "m3" / "deals_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
 def _cmd_build(args) -> int:
+    if args.deals:
+        return _build_deals()
     files = sorted((RAW / "contracts").glob("*.txt")) if (RAW / "contracts").exists() else []
     if not files:
         print(f"no contracts under {RAW / 'contracts'}; run `dtd fetch` first", file=sys.stderr)
@@ -387,6 +411,7 @@ def entry(argv: list[str] | None = None) -> int:
     sub.add_parser("fetch").set_defaults(fn=_cmd_fetch)
     build = sub.add_parser("build")
     build.add_argument("--fixed", action="store_true")
+    build.add_argument("--deals", action="store_true")
     build.set_defaults(fn=_cmd_build)
     embed = sub.add_parser("embed")
     embed.add_argument("--fixed", action="store_true")

@@ -10,3 +10,4 @@ class Retrieved:
     hits: list[Hit]
     ms: float
     context: list[str]
+    amended: tuple[str, ...] = ()

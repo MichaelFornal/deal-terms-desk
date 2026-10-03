@@ -559,3 +559,19 @@ def test_eval_out_writes_elsewhere_and_leaves_the_default_untouched(data, tmp_pa
     assert cli.entry(["eval", "--rung", "R1", "--out", str(other)]) == 0
     assert (other / "r1.json").exists()
     assert not (cli.OUT / "r1.json").exists()
+
+
+def test_build_deals_writes_index_and_summary(data, capsys):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    summary = json.loads((data / "data" / "m3" / "deals_summary.json").read_text())
+    assert (data / "index" / "deals.db").exists()
+    assert summary["deals"] >= 2 and summary["maud_deals"] == 3
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
+
+
+def test_build_deals_without_corpus_names_the_command(data, capsys):
+    assert cli.entry(["build", "--deals"]) == 2
+    assert "dtd m3 corpus" in capsys.readouterr().err

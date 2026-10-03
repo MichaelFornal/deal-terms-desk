@@ -97,3 +97,32 @@ def test_r6_shows_definitions_and_matches_through_them(ladder):
     assert fee and "amount in cash equal to $50,000,000" in fee[0]
     r5 = ladder.run("R5", "amount in cash", "big", k=5)
     assert all(not c.startswith("Section 8.3") or "$50,000,000" not in c for c in r5.context)
+
+
+@pytest.fixture
+def deals_ladder(tmp_path):
+    from retrieval.deals import add_deals
+    from tests.test_amendments import AMEND
+    from tests.test_deals import deals_inputs
+    db = tmp_path / "deals.db"
+    deals, texts, _ = deals_inputs(tmp_path)
+    build_index(db, texts)
+    add_deals(db, deals, texts, {"edgar_0002": AMEND})
+    conn, cache, emb = connect(db), open_cache(tmp_path / "emb.db"), FakeEmbedder()
+    fill_cache(cache, emb, [t for _, _, t in indexed_passages(conn)])
+    build_vectors(conn, cache, emb.name)
+    rr = CachedReranker(FakeReranker(ms=7.0), tmp_path / "rerank.db")
+    return Ladder(conn, texts, emb, rr, {}, Settings(depth=10, rrf_k0=60, reranker="fake-reranker", rerank_depth=3),
+                  amendment_texts={"edgar_0002": AMEND})
+
+
+def test_superseded_hit_carries_the_amending_text(deals_ladder):
+    got = deals_ladder.run("R1", "Outside Date June 30", "edgar_0001", k=5)
+    assert got.amended == ("edgar_0002",)
+    shown = next(c for c in got.context if "Outside Date" in c)
+    assert "[Amended by Amendment No. 2, filed 2020-02-01]" in shown and "September 30" in shown
+
+
+def test_maud_index_has_no_amendments(ladder):
+    got = ladder.run("R1", "termination fee", None, k=5)
+    assert got.amended == ()

@@ -30,24 +30,36 @@ def load_settings(path: Path = SETTINGS_PATH) -> Settings:
 
 class Ladder:
     def __init__(self, conn, texts: dict[str, str], embedder=None, reranker=None, lexicon: dict | None = None,
-                 settings: Settings = Settings()):
+                 settings: Settings = Settings(), amendment_texts: dict[str, str] | None = None):
         self.conn = conn
         self.texts = texts
         self.embedder = embedder
         self.reranker = reranker
         self.lexicon = lexicon
         self.settings = settings
+        self.amendment_texts = amendment_texts or {}
+        self.has_amendments = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'superseded'").fetchone() is not None
 
     def _passage(self, h) -> str:
         return self.texts[h.contract_id][h.start:h.end]
 
+    def _amendments(self, h) -> list[tuple]:
+        if not self.has_amendments:
+            return []
+        return self.conn.execute(
+            "SELECT amendment_id, amendment_no, file_date, amend_start, amend_end FROM superseded"
+            " WHERE passage_id = ? ORDER BY file_date, amendment_id", (h.passage_id,)).fetchall()
+
     def _shown(self, h, with_defs: bool) -> str:
         text = self._passage(h)
-        if not with_defs:
-            return text
-        defs = [self.texts[h.contract_id][s:e] for s, e in self.conn.execute(
-            "SELECT def_start, def_end FROM passage_defs WHERE passage_id = ? ORDER BY rank", (h.passage_id,))]
-        return "\n\n".join([text] + defs)
+        if with_defs:
+            defs = [self.texts[h.contract_id][s:e] for s, e in self.conn.execute(
+                "SELECT def_start, def_end FROM passage_defs WHERE passage_id = ? ORDER BY rank", (h.passage_id,))]
+            text = "\n\n".join([text] + defs)
+        for aid, no, filed, a0, a1 in self._amendments(h):
+            text += f"\n\n[Amended by Amendment No. {no}, filed {filed}]\n" + self.amendment_texts[aid][a0:a1]
+        return text
 
     def _dense(self, q: str, contract_id: str | None, k: int):
         if not bm25.TOKEN.search(q):
@@ -83,4 +95,5 @@ class Ladder:
                 order = sorted(range(len(head)), key=lambda i: (-scores[i], head[i].passage_id))
                 hits = ([replace(head[i], score=scores[i]) for i in order] + fused[len(head):])[:k]
         ms = (time.perf_counter() - t0) * 1000.0 + adjust
-        return Retrieved(hits, ms, [self._shown(h, n == 6) for h in hits[:CONTEXT_K]])
+        amended = tuple(dict.fromkeys(a[0] for h in hits[:CONTEXT_K] for a in self._amendments(h)))
+        return Retrieved(hits, ms, [self._shown(h, n == 6) for h in hits[:CONTEXT_K]], amended)
