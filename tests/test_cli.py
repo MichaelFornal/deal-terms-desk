@@ -34,6 +34,8 @@ def data(tmp_path, monkeypatch):
     from tests.fakes import FakeEmbedder, FakeReranker
     monkeypatch.setattr(cli, "INDEX_FIXED", tmp_path / "index" / "maud_fixed.db")
     monkeypatch.setattr(cli, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(cli, "EDGAR", tmp_path / "raw" / "edgar")
+    monkeypatch.setattr(cli, "DEALS_INDEX", tmp_path / "index" / "deals.db")
     monkeypatch.setattr(cli, "SETTINGS_PATH", tmp_path / "settings.json")
     monkeypatch.setattr(cli, "LEXICON_PATH", tmp_path / "lexicon.json")
     monkeypatch.setattr(cli, "_models", lambda: (FakeEmbedder(), lambda name: FakeReranker()))
@@ -541,3 +543,11 @@ def test_m0_candidate_sample_makes_no_sec_client(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.m0, "stage_candidates_sample", lambda out: calls.append(out) or {"sample": 0})
     assert cli.entry(["m0", "candidate-sample"]) == 0
     assert calls == [tmp_path / "m0"]
+
+
+def test_m3_corpus_writes_the_summary_under_the_patched_edgar(data, capsys):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")  # builds <DATA>/m0
+    assert cli.entry(["m3", "corpus"]) == 0
+    summary = json.loads((data / "raw" / "edgar" / "summary.json").read_text())
+    assert summary["kept"] == 2 and json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary

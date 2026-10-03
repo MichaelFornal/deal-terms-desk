@@ -27,8 +27,9 @@ from pipeline.claude import run_claude
 from pipeline.env import sec_contact
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
-from pipeline.paths import CACHE, DATA, CSV_NAMES, INDEX, INDEX_FIXED, OUT, RAW
+from pipeline.paths import CACHE, DATA, CSV_NAMES, DEALS_INDEX, EDGAR, INDEX, INDEX_FIXED, OUT, RAW
 from pipeline.sec_client import Blocked, SecClient
+from pipeline.tech_corpus import assemble
 from retrieval import vectors
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
@@ -327,6 +328,14 @@ def _cmd_failures(args) -> int:
     return 0
 
 
+def _cmd_m3(args) -> int:
+    if args.stage == "corpus":
+        summary = assemble(DATA / "m0", EDGAR)
+        _write_atomic(EDGAR / "summary.json", json.dumps(summary, indent=2, sort_keys=True))
+        print(json.dumps(summary))
+    return 0
+
+
 def _cmd_m0(args) -> int:
     stages = M0_STAGES if args.stage == "all" else (args.stage,)
     client = None
@@ -396,6 +405,9 @@ def entry(argv: list[str] | None = None) -> int:
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
+    m3p = sub.add_parser("m3")
+    m3p.add_argument("stage", choices=("corpus",))
+    m3p.set_defaults(fn=_cmd_m3)
     args = parser.parse_args(argv)
     return args.fn(args)
 
