@@ -469,6 +469,12 @@ def _m3_tier(args) -> int:
     if not rows:
         print("no tier items were labelled", file=sys.stderr)
         return 2
+    need = {keymap[(r["contract_id"], r["family"])] for r in rows if r["status"] == "kept"}
+    short = [r for r in RUNG_NAMES if need - rung_rows[r].keys()]
+    if short:
+        print(f"kept items missing from M2 results for {', '.join(short)}; re-run "
+              + ", ".join(f"`dtd eval --rung {r}`" for r in short), file=sys.stderr)
+        return 2
     report = tier_report(rows, keymap, rung_rows, spans)
     _write_atomic(out / "tier_rows.jsonl", "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
     (OUT / "m3").mkdir(parents=True, exist_ok=True)

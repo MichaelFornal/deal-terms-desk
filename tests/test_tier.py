@@ -55,3 +55,11 @@ def test_report_match_rate_and_tau():
     assert got["kept"] == 4 and got["match"]["mean"] == 0.5
     assert got["rungs"]["R1"]["human"] == 0.0 and got["rungs"]["R6"]["machine"] == 1.0
     assert got["tau"] == pytest.approx(1.0)
+
+
+def test_report_with_no_kept_items_does_not_crash():
+    rows = [{"contract_id": "contract_1", "family": "T1", "status": s, "gold": []} for s in ("absent", "disagree")]
+    got = tier_report(rows, {}, {}, {}, n_boot=50)
+    assert got["kept"] == 0 and got["absent"] == 1 and got["kept_rate"] == 0.0
+    assert got["match"] is None and got["tau"] is None and got["tau_lo"] is None and got["tau_defined"] == 0
+    assert got["rungs"]["R1"] == {"human": None, "machine": None} and got["human_order"] == []

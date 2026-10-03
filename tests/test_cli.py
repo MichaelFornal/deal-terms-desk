@@ -697,3 +697,14 @@ def test_m3_tier_writes_the_report_and_names_a_missing_rung(data, monkeypatch, c
     capsys.readouterr()
     assert cli.entry(["m3", "tier"]) == 2
     assert "dtd eval --rung R6" in capsys.readouterr().err
+
+
+def test_m3_tier_with_kept_items_missing_from_a_rung_exits_2(data, monkeypatch, capsys):
+    _m2_chain(data, monkeypatch)
+    f = data / "out" / "r4_items.jsonl"
+    f.write_text("".join(l + "\n" for l in f.read_text().splitlines()[:0]), encoding="utf-8")
+    monkeypatch.setattr(cli, "run_claude", _tier_runner)
+    capsys.readouterr()
+    assert cli.entry(["m3", "tier"]) == 2
+    err = capsys.readouterr().err
+    assert "dtd eval --rung R4" in err and "dtd eval --rung R1" not in err

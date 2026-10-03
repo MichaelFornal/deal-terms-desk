@@ -70,11 +70,20 @@ def tier_report(rows, keymap, rung_rows, spans, n_boot: int = 2000, seed: int = 
         hv, mv = [], []
         for rung in RUNG_NAMES:
             row = rung_rows[rung][item_id]
+            # top_passage_ids are within-agreement (R1-R6), so isolate_foreign is not needed
             hits = [SimpleNamespace(start=spans[p][0], end=spans[p][1]) for p in row["top_passage_ids"][:5]]
             hv.append(row["recall@5"])
             mv.append(recall_at_k(hits, machine_gold, 5))
         per_contract[r["contract_id"]].append((hv, mv))
     cids = sorted(per_contract)
+    if not kept:
+        return {
+            "contracts": len({r["contract_id"] for r in rows}), "items": len(rows), **status,
+            "kept_rate": status["kept"] / len(rows) if rows else None, "match": None,
+            "rungs": {r: {"human": None, "machine": None} for r in RUNG_NAMES},
+            "tau": None, "tau_lo": None, "tau_hi": None, "tau_defined": 0, "n_boot": n_boot,
+            "human_order": [], "machine_order": [],
+        }
     human, machine = _means(per_contract, cids)
     rng, taus = random.Random(seed), []
     for _ in range(n_boot):
