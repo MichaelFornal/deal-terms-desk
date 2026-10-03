@@ -330,3 +330,19 @@ def test_label_all_counts_truncated_topics_and_split_contracts(tmp_path, deals_c
     rows, summary = label_all(deals_conn, {"edgar_1": TEXT}, [("edgar_1", "Acme")], tm.TOPICS, tm.PASSES, runner,
                               tmp_path / "l.jsonl", workers=1)
     assert summary["split_groups"] == 1 and summary["truncated_topics"] == len(rows) == 3
+
+
+def test_bare_items_ask_the_same_question_without_the_company():
+    from evals.tmachine import BARE_TEMPLATES, FAMILIES
+    assert set(BARE_TEMPLATES) == set(FAMILIES)
+    assert BARE_TEMPLATES["equity_awards"] == "What happens to employees' stock options and RSUs in the merger?"
+    assert BARE_TEMPLATES["termination_fee"] == ("How much does the company have to pay if the merger agreement "
+                                                 "is terminated?")
+    assert BARE_TEMPLATES["employee_benefits"] == "Will employees keep their pay and benefits after the merger?"
+    rows = [{"contract_id": "edgar_1", "family": f, "target": "Acme Software, Inc.", "status": "kept",
+             "gold": [[0, 5]]} for f in FAMILIES] + [
+            {"contract_id": "edgar_2", "family": "equity_awards", "target": "Zeta", "status": "absent", "gold": []}]
+    named, bare = items_from_rows(rows), items_from_rows(rows, bare=True)
+    assert [i.item_id for i in bare] == [i.item_id for i in named]
+    assert all("Acme" not in i.query for i in bare) and all("Acme" in i.query for i in named)
+    assert [i.gold for i in bare] == [i.gold for i in named]

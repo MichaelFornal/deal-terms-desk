@@ -436,6 +436,9 @@ def _m3_eval() -> int:
                            "extra": {"settings": asdict(ladder.settings)}}
     for rung in RUNGS:
         evaluate(ctx, f"T-{rung}", lambda q, c, k, r=rung: ladder.run(r, q, c, k), out, **kw)
+    bare = replace(ctx, items=items_from_rows(rows, bare=True))  # the same items, the company's name left out
+    for rung in RUNGS:
+        evaluate(bare, f"T-bare-{rung}", lambda q, c, k, r=rung: ladder.run(r, q, c, k), out, **kw)
     evaluate(ctx, "T-R6-corpus", lambda q, c, k: ladder.run("R6", q, None, k), out, scope="corpus-wide", **kw)
     evaluate(ctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), out, scope="corpus-wide", **kw)
     _write_atomic(out / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))

@@ -678,10 +678,14 @@ def test_m3_chain_embed_lexicon_label_eval_writes_every_result(data, monkeypatch
     assert cli.entry(["m3", "label"]) == 0
     assert cli.entry(["m3", "eval"]) == 0
     out = data / "out" / "m3"
-    for name in [f"t_r{i}.json" for i in range(1, 7)] + ["t_r6_corpus.json", "t_r7_corpus.json", "r7_scope.json"]:
+    for name in ([f"t_r{i}.json" for i in range(1, 7)] + [f"t_bare_r{i}.json" for i in range(1, 7)]
+                 + ["t_r6_corpus.json", "t_r7_corpus.json", "r7_scope.json"]):
         assert (out / name).exists(), name
     assert json.loads((out / "t_r7_corpus.json").read_text())["scope"] == "corpus-wide"
     assert json.loads((out / "r7_scope.json").read_text())["items"]
+    bare = json.loads((out / "t_bare_r1_items.jsonl").read_text().splitlines()[0])
+    named = json.loads((out / "t_r1_items.jsonl").read_text().splitlines()[0])
+    assert bare["item_id"] == named["item_id"] and bare["query"] != named["query"]
 
 
 def test_m3_eval_before_embed_deals_exits_2_and_names_it(data, capsys):

@@ -18,6 +18,9 @@ TOPICS = {"equity_awards": LEAD_TOPICS["equity_awards"], "termination_fee": LEAD
 TEMPLATES = {"equity_awards": "What happens to {target} employees' stock options and RSUs in the merger?",
              "termination_fee": "How much does {target} have to pay if the merger agreement is terminated?",
              "employee_benefits": "Will {target} employees keep their pay and benefits after the merger?"}
+BARE_TEMPLATES = {"equity_awards": "What happens to employees' stock options and RSUs in the merger?",
+                  "termination_fee": "How much does the company have to pay if the merger agreement is terminated?",
+                  "employee_benefits": "Will employees keep their pay and benefits after the merger?"}
 PASSES = (("a", "claude-opus-5-5"), ("b", "claude-sonnet-5-5"))
 MIN_SECTIONS = 10
 CHUNK = 6000
@@ -319,9 +322,11 @@ def label_all(conn, texts, contracts, topics, passes, runner, ledger_path, worke
     return rows, summary
 
 
-def items_from_rows(rows: list[dict]) -> list[Item]:
+def items_from_rows(rows: list[dict], bare: bool = False) -> list[Item]:
+    """Kept rows as eval items; bare=True asks the same question without naming the company."""
     return [Item(f"{r['contract_id']}|{r['family']}", r["contract_id"], r["family"], r["family"],
-                 TEMPLATES[r["family"]].format(target=r["target"]), tuple(tuple(g) for g in r["gold"]))
+                 BARE_TEMPLATES[r["family"]] if bare else TEMPLATES[r["family"]].format(target=r["target"]),
+                 tuple(tuple(g) for g in r["gold"]))
             for r in rows if r["status"] == "kept"]
 
 
