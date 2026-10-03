@@ -3,6 +3,7 @@ import pytest
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, Ladder, Settings
 from retrieval.rerank_cache import CachedReranker
+from retrieval.scope import Resolver, Scope
 from retrieval.vectors import build_vectors, connect, fill_cache, indexed_passages, open_cache
 from tests.fakes import FakeEmbedder, FakeReranker
 
@@ -112,8 +113,9 @@ def deals_ladder(tmp_path):
     fill_cache(cache, emb, [t for _, _, t in indexed_passages(conn)])
     build_vectors(conn, cache, emb.name)
     rr = CachedReranker(FakeReranker(ms=7.0), tmp_path / "rerank.db")
-    return Ladder(conn, texts, emb, rr, {}, Settings(depth=10, rrf_k0=60, reranker="fake-reranker", rerank_depth=3),
-                  amendment_texts={"edgar_0002": AMEND})
+    return Ladder(conn, texts, emb, rr, {"walk-away payment": ["Termination Fee"]},
+                  Settings(depth=10, rrf_k0=60, reranker="fake-reranker", rerank_depth=3),
+                  amendment_texts={"edgar_0002": AMEND}, resolver=Resolver(conn))
 
 
 def test_superseded_hit_carries_the_amending_text(deals_ladder):
@@ -126,3 +128,19 @@ def test_superseded_hit_carries_the_amending_text(deals_ladder):
 def test_maud_index_has_no_amendments(ladder):
     got = ladder.run("R1", "termination fee", None, k=5)
     assert got.amended == ()
+
+
+def test_r7_scopes_to_the_named_deal_and_falls_back_corpus_wide(deals_ladder):
+    got = deals_ladder.run("R7", "Acme Software outside date", k=5)
+    assert got.hits and all(h.contract_id == "edgar_0001" for h in got.hits)
+    assert got.scope.contract_id == "edgar_0001"
+    q = "outside date"
+    free = deals_ladder.run("R7", q, k=5)
+    base = deals_ladder.run("R6", q, None, k=5)
+    assert [h.passage_id for h in free.hits] == [h.passage_id for h in base.hits]
+    assert free.scope == Scope(None, None, ())
+
+
+def test_r7_needs_a_resolver(ladder):
+    with pytest.raises(ValueError):
+        ladder.run("R7", "termination fee")

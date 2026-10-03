@@ -10,6 +10,7 @@ from retrieval.lexicon import rewrite
 from retrieval.result import CONTEXT_K, Retrieved
 
 RUNGS = ("R1", "R2", "R3", "R4", "R5", "R6")
+DEAL_RUNGS = RUNGS + ("R7",)
 SETTINGS_PATH = Path(__file__).with_name("settings.json")
 
 
@@ -30,7 +31,7 @@ def load_settings(path: Path = SETTINGS_PATH) -> Settings:
 
 class Ladder:
     def __init__(self, conn, texts: dict[str, str], embedder=None, reranker=None, lexicon: dict | None = None,
-                 settings: Settings = Settings(), amendment_texts: dict[str, str] | None = None):
+                 settings: Settings = Settings(), amendment_texts: dict[str, str] | None = None, resolver=None):
         self.conn = conn
         self.texts = texts
         self.embedder = embedder
@@ -38,6 +39,7 @@ class Ladder:
         self.lexicon = lexicon
         self.settings = settings
         self.amendment_texts = amendment_texts or {}
+        self.resolver = resolver
         self.has_amendments = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'superseded'").fetchone() is not None
 
@@ -68,8 +70,14 @@ class Ladder:
 
     def run(self, rung: str, query: str, contract_id: str | None = None, k: int = 10,
             rewritten: str | None = None) -> Retrieved:
-        if rung not in RUNGS:
-            raise ValueError(f"unknown rung {rung!r}; expected one of {RUNGS}")
+        if rung not in DEAL_RUNGS:
+            raise ValueError(f"unknown rung {rung!r}; expected one of {DEAL_RUNGS}")
+        if rung == "R7":
+            if self.resolver is None:
+                raise ValueError("R7 needs a resolver over the deals index")
+            scope = self.resolver.resolve(query)
+            got = self.run("R6", query, scope.contract_id, k, rewritten)
+            return replace(got, scope=scope)
         n = RUNGS.index(rung) + 1
         if n >= 5 and rewritten is None and self.lexicon is None:
             raise ValueError("R5 and R6 need the lexicon; run `dtd lexicon` first")
