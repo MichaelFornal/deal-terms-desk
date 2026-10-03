@@ -595,6 +595,23 @@ def test_build_deals_writes_index_and_summary(data, capsys):
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
 
 
+def test_build_deals_leaves_out_the_maud_copy_of_a_tech_deal(data, capsys):
+    import sqlite3
+    from tests.test_deals import ACME_MAUD
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    (data / "raw" / "maud" / "contracts" / "contract_7.txt").write_text(ACME_MAUD, encoding="utf-8")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    summary = json.loads((data / "data" / "m3" / "deals_summary.json").read_text())
+    edgar = json.loads((data / "raw" / "edgar" / "deals.jsonl").read_text().splitlines()[0])["contract_id"]
+    assert summary["maud_duplicates"] == 1 and summary["maud_duplicate_pairs"] == [["contract_7", edgar]]
+    assert summary["maud_deals"] == 3
+    conn = sqlite3.connect(data / "index" / "deals.db")
+    assert conn.execute("SELECT COUNT(*) FROM passages WHERE contract_id = 'contract_7'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM deals WHERE contract_id = ?", (edgar,)).fetchone()[0] == 1
+
+
 def test_build_deals_without_corpus_names_the_command(data, capsys):
     assert cli.entry(["build", "--deals"]) == 2
     assert "dtd m3 corpus" in capsys.readouterr().err

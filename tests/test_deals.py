@@ -57,3 +57,17 @@ def test_an_amendment_with_no_explicit_form_is_counted_not_linked(tmp_path):
 def test_add_deals_is_idempotent(tmp_path):
     db, first = make_deals_db(tmp_path)
     assert add_deals(db, *deals_inputs(tmp_path)) == first
+
+
+ACME_MAUD = ("AGREEMENT AND PLAN OF MERGER\n\nThis Agreement is made as of January 2, 2020, by and among Big Parent, "
+             "Inc., a Delaware corporation (“Parent”), and Acme Software, Inc., a Delaware corporation (the "
+             "“Company”).\n\nSection 1.1 Closing. The closing shall occur on the Closing Date.\n")
+
+
+def test_a_maud_copy_of_a_tech_deal_is_a_duplicate():
+    from retrieval.deals import maud_duplicates
+    deals, _, _ = deals_inputs(None)
+    texts = {"contract_1": MAUD, "contract_7": ACME_MAUD}
+    assert maud_duplicates(deals, texts) == [["contract_7", "edgar_0001"]]
+    other = dict(deals[0], parent="Someone Else, Inc.")  # same target, another buyer: a different agreement
+    assert maud_duplicates([other], texts) == []

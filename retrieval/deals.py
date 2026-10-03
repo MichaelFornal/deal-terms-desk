@@ -32,6 +32,23 @@ def _maud_row(cid: str, text: str) -> tuple[dict, list[tuple[str, str]]]:
             [(a, k) for a, k in aliases if len(a) >= MIN_ALIAS])
 
 
+def maud_duplicates(deals: list[dict], maud_texts: dict[str, str]) -> list[list[str]]:
+    """[maud_id, edgar_id] for each MAUD agreement whose preamble names the same target and parent as a tech deal.
+    The tech rows' target and parent normalise to M0's deal key[:2]; the tech copy is the one kept."""
+    by_key: dict[tuple[str, str], str] = {}
+    for d in sorted(deals, key=lambda d: d["contract_id"]):
+        k = (norm(d.get("target") or ""), norm(d.get("parent") or ""))
+        if all(k):
+            by_key.setdefault(k, d["contract_id"])
+    pairs = []
+    for cid in sorted(maud_texts):
+        p = preamble(maud_texts[cid])
+        k = (norm(p.company or ""), norm(p.parent or ""))
+        if all(k) and k in by_key:
+            pairs.append([cid, by_key[k]])
+    return pairs
+
+
 def add_deals(db_path: Path, deals: list[dict], texts: dict[str, str], amendment_texts: dict[str, str]) -> dict:
     conn = sqlite3.connect(db_path)
     tech = {d["contract_id"]: d for d in deals}

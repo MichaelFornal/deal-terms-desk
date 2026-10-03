@@ -35,7 +35,7 @@ from pipeline.paths import CACHE, DATA, CSV_NAMES, DEALS_INDEX, EDGAR, INDEX, IN
 from pipeline.sec_client import Blocked, SecClient
 from pipeline.tech_corpus import assemble
 from retrieval import vectors
-from retrieval.deals import add_deals
+from retrieval.deals import add_deals, maud_duplicates
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
@@ -94,8 +94,13 @@ def _build_deals() -> int:
         return 2
     deals = [json.loads(line) for line in (EDGAR / "deals.jsonl").read_text(encoding="utf-8").splitlines() if line]
     contracts, amendment_texts = _deals_texts()
+    tech = {d["contract_id"] for d in deals}
+    pairs = maud_duplicates(deals, {cid: t for cid, t in contracts.items() if cid not in tech})
+    dropped = {m for m, _ in pairs}  # one canonical copy per agreement: the tech copy stays, maud.db is untouched
+    contracts = {cid: t for cid, t in contracts.items() if cid not in dropped}
     summary = build_index(DEALS_INDEX, contracts)
     summary |= add_deals(DEALS_INDEX, deals, contracts, amendment_texts)
+    summary |= {"maud_duplicates": len(pairs), "maud_duplicate_pairs": pairs}
     (DATA / "m3").mkdir(parents=True, exist_ok=True)
     _write_atomic(DATA / "m3" / "deals_summary.json", json.dumps(summary, indent=2, sort_keys=True))
     print(json.dumps(summary))
