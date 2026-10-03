@@ -532,3 +532,12 @@ def test_m0_facts_read_the_sec_logs(tmp_path, monkeypatch):
     (tmp_path / "m0" / "measure.json").write_text("{}")
     cli._all_facts()
     assert seen["sec_dir"] == tmp_path / "sec"
+
+
+def test_m0_candidate_sample_makes_no_sec_client(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "DATA", tmp_path)
+    monkeypatch.setattr(cli, "SecClient", lambda *a, **k: pytest.fail("SecClient constructed"))
+    monkeypatch.setattr(cli.m0, "stage_candidates_sample", lambda out: calls.append(out) or {"sample": 0})
+    assert cli.entry(["m0", "candidate-sample"]) == 0
+    assert calls == [tmp_path / "m0"]

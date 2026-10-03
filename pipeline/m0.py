@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import re
 from datetime import date
@@ -451,5 +452,8 @@ def stage_candidates_sample(out: Path = M0_DIR, runner=run_claude, model: str = 
                "family_regex": {f: sum(1 for r in rows if r[f]["regex"]) for f in names},
                "family_truncated": {f: sum(1 for r in rows if r[f]["truncated"]) for f in names},
                "model": model}
-    (out / "candidate_measure.json").write_text(json.dumps(measure, indent=2, sort_keys=True), encoding="utf-8")
+    path = out / "candidate_measure.json"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(measure, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
     return measure

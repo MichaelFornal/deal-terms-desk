@@ -94,3 +94,39 @@ def test_the_access_record_without_refusals_or_a_second_request(tmp_path):
 def test_no_ledger_means_no_access_facts(tmp_path):
     f = build_m0(measure(tmp_path), sec_dir=tmp_path / "nowhere")
     assert "m0_sec_requests" not in f and "m0_sec_requests" not in build_m0(measure(tmp_path))
+
+
+CAND = ("employee_benefits", "financing", "go_shop")
+
+
+def candidate_measure(tmp_path, present=(29, 20, 4), sample=30):
+    (tmp_path / "candidate_measure.json").write_text(json.dumps(
+        {"sample": sample, "family_present": dict(zip(CAND, present)), "family_regex": dict(zip(CAND, (30, 20, 6))),
+         "family_truncated": dict(zip(CAND, (6, 15, 3))), "model": "m"}))
+
+
+def test_no_candidate_file_means_no_candidate_facts(tmp_path):
+    f = build_m0(measure(tmp_path))
+    assert not [k for k in f if k.startswith("m0_candidate_") or "adopted" in k]
+
+
+def test_candidate_facts_and_the_adopted_gate(tmp_path):
+    measure(tmp_path, present=(30, 29, 4))
+    candidate_measure(tmp_path)
+    f = build_m0(tmp_path)
+    assert f["m0_candidate_sample"] == 30 and f["m0_adopted_family"] == "employee_benefits"
+    assert f["m0_candidate_employee_benefits_present"] == 29
+    assert f["m0_candidate_employee_benefits_share"] == round(29 / 30, 4)
+    assert f["m0_candidate_financing_regex"] == 20 and f["m0_candidate_go_shop_truncated"] == 3
+    assert f["m0_gate_families_ok_adopted"] is True and f["m0_gate_pass_adopted"] is True
+    assert f["m0_gate_pass"] is False and f["m0_gate_families_ok"] is False  # the original verdict stays
+
+
+def test_adopted_gate_fails_on_a_low_adopted_share_or_count(tmp_path):
+    measure(tmp_path, present=(30, 29, 4))
+    candidate_measure(tmp_path, present=(10, 20, 4))
+    assert build_m0(tmp_path)["m0_gate_pass_adopted"] is False
+    measure(tmp_path, tech=GATE_AGREEMENTS - 1, present=(30, 29, 4))
+    candidate_measure(tmp_path)
+    f = build_m0(tmp_path)
+    assert f["m0_gate_families_ok_adopted"] is True and f["m0_gate_pass_adopted"] is False

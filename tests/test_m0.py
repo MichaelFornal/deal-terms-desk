@@ -487,3 +487,15 @@ def test_the_original_families_ignore_candidate_hints():
     from pipeline.m0 import hint_passages, CANDIDATE_SPECS
     t = "Section 6.9 Employee Matters. Continuing Employees keep pay.\n\n"
     assert hint_passages(t)["equity_awards"] == [] and hint_passages(t, CANDIDATE_SPECS)["employee_benefits"]
+
+
+def test_candidate_measure_is_written_atomically(tmp_path, monkeypatch):
+    import os
+    from pipeline.m0 import stage_candidates_sample
+    _cand_fixture(tmp_path)
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda a, b: seen.append((str(a), str(b))) or real(a, b))
+    stage_candidates_sample(tmp_path, runner=fake_claude(CAND), model="m")
+    assert any(b.endswith("candidate_measure.json") and a != b for a, b in seen)
+    assert not list(tmp_path.glob("*.tmp"))

@@ -1,7 +1,9 @@
-from pipeline.m0 import FAMILIES
+from pipeline.m0 import CANDIDATE_SPECS, FAMILIES
 
 LABELS = {"equity_awards": "Employee equity awards", "termination_fee": "Termination (break-up) fee",
           "contingent_consideration": "Earn-out or other contingent consideration"}
+CANDIDATE_LABELS = {"employee_benefits": "Employees' pay and benefits after the deal (adopted)",
+                    "financing": "Buyer financing", "go_shop": "Go-shop period"}
 
 
 def _ok(v) -> str:
@@ -12,6 +14,28 @@ def _families(f) -> str:
     return "\n".join(
         f"| {LABELS[fam]} | {f[f'm0_sample_{fam}_present']} | {f[f'm0_sample_{fam}_share']} "
         f"| {f[f'm0_sample_{fam}_regex']} | {f[f'm0_sample_{fam}_truncated']} |" for fam in FAMILIES)
+
+
+def _replacement(f) -> str:
+    if "m0_candidate_sample" not in f:
+        return ""
+    rows = "\n".join(
+        f"| {CANDIDATE_LABELS[sp.name]} | {f[f'm0_candidate_{sp.name}_present']} | {f[f'm0_candidate_{sp.name}_share']} "
+        f"| {f[f'm0_candidate_{sp.name}_regex']} | {f[f'm0_candidate_{sp.name}_truncated']} |" for sp in CANDIDATE_SPECS)
+    verdict = "PASS" if f["m0_gate_pass_adopted"] else "FAIL"
+    return f"""## Replacement lead family (decided 2026-10-02)
+
+The original gate failed on earn-outs, which were not found in the sampled agreements. The PRD records the decision to replace them as a lead family with employees' pay and benefits after the deal; earn-out questions stay as abstention items.
+
+Candidates were measured on the same sample of {f['m0_candidate_sample']} agreements (machine-built). Presence is judged by a model and counts only when its supporting quote occurs verbatim in the passages it was shown. Financing counts include bare buyer termination-fee quotes, so that row reads wider than the financing documents alone.
+
+| Candidate | Present | Share | Pattern matched | Passages cut to fit the prompt |
+|---|---|---|---|---|
+{rows}
+
+Gate with the adopted family: {verdict}. This is the original gate re-evaluated with the adopted family in place of earn-outs; the original verdict above stays on record.
+
+"""
 
 
 def _access(f) -> str:
@@ -51,7 +75,7 @@ Presence is judged by `{f['m0_lead_model']}` on passages a broad pattern picked 
 |---|---|---|---|---|
 {_families(f)}
 
-## How the corpus was found
+{_replacement(f)}## How the corpus was found
 
 Selection rule (PRD §2.2): an EX-2.1 exhibit to an 8-K whose text is an agreement and plan of merger, signed on or after {f['m0_start']}, whose target is an EDGAR registrant with SIC in {f['m0_sic_ranges']}. {_access(f)}
 
