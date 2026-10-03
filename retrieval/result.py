@@ -10,3 +10,5 @@ class Retrieved:
     hits: list[Hit]
     ms: float
     context: list[str]
+    amended: tuple[str, ...] = ()
+    scope: object = None  # retrieval.scope.Scope | None; set by R7 only (object avoids an import cycle)

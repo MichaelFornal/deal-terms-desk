@@ -102,7 +102,7 @@ Not applicable to these items:
 
 ## Index
 
-Vectors: 22789 passages embedded with `BAAI/bge-small-en-v1.5`; 529 were longer than the model's window and embedded truncated. Definitions attached per passage, mean: 3.3; share of passages with at least one: 0.9016. Index file: 327536640 bytes.
+Vectors: 22789 passages embedded with `BAAI/bge-small-en-v1.5`; 529 were longer than the model's window and embedded truncated. Definitions attached per passage, mean: 3.3; share of passages with at least one: 0.9016. Index file: 132222976 bytes.
 
 ## Against LegalBench-RAG
 

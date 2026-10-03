@@ -114,12 +114,13 @@ def test_unicode_spaces_become_plain_spaces():
 
 
 def test_running_lines_are_dropped_but_headings_and_body_kept():
-    page = "Body text of the agreement continues here.\n[Signature Page to Agreement and Plan of Merger]\n"
-    raw = page * 9 + "Section 2.1 Effect. Each share converts.\n" * 9
+    pages = "".join(f"Body text on page {i} of the agreement.\n[Signature Page to Agreement and Plan of Merger]\n"
+                    for i in range(9))
+    raw = pages + "Section 2.1 Effect. Each share converts.\n" * 9
     t = normalise_edgar(raw)
     assert "Signature Page" not in t
     assert t.count("Section 2.1 Effect.") == 9
-    assert "Body text of the agreement continues here." in t
+    assert all(f"Body text on page {i} of the agreement." in t for i in range(9))
 
 
 def test_own_title_and_merger_check():

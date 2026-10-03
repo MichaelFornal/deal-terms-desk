@@ -82,3 +82,9 @@ def test_candidate_section_is_labelled_and_has_no_stray_digits():
     assert "Gate with the adopted family: FAIL" in render_m0(EveryWithCandidates(False))
     lines = [l for l in text.replace(str(SENTINEL), "").splitlines() if re.search(r"\d", ALLOWED.sub("", l))]
     assert lines == []
+
+
+def test_the_index_size_estimate_names_the_current_index():
+    text = render_m0(Every(m0_estimate_index_bytes=SENTINEL))
+    assert "Estimated index size from the current section-aware index's bytes per passage" in text
+    assert "M2's bytes per passage" not in text

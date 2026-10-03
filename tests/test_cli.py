@@ -31,9 +31,12 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "DATA", tmp_path / "data")
     monkeypatch.setattr(cli, "REPORT_M0", tmp_path / "docs" / "m0" / "REPORT.md")
     monkeypatch.setattr(cli, "REPORT_M2", tmp_path / "docs" / "m2" / "REPORT.md")
+    monkeypatch.setattr(cli, "REPORT_M3", tmp_path / "docs" / "m3" / "REPORT.md")
     from tests.fakes import FakeEmbedder, FakeReranker
     monkeypatch.setattr(cli, "INDEX_FIXED", tmp_path / "index" / "maud_fixed.db")
     monkeypatch.setattr(cli, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(cli, "EDGAR", tmp_path / "raw" / "edgar")
+    monkeypatch.setattr(cli, "DEALS_INDEX", tmp_path / "index" / "deals.db")
     monkeypatch.setattr(cli, "SETTINGS_PATH", tmp_path / "settings.json")
     monkeypatch.setattr(cli, "LEXICON_PATH", tmp_path / "lexicon.json")
     monkeypatch.setattr(cli, "_models", lambda: (FakeEmbedder(), lambda name: FakeReranker()))
@@ -52,13 +55,17 @@ def test_build_eval_facts_report_chain(data, capsys):
 
 
 def test_the_cli_chain_does_not_touch_the_real_m0_report_or_data(data):
-    real = Path(__file__).resolve().parent.parent / "docs" / "m0" / "REPORT.md"
+    root = Path(__file__).resolve().parent.parent
+    real, real_m3 = root / "docs" / "m0" / "REPORT.md", root / "docs" / "m3" / "REPORT.md"
     before = real.stat().st_mtime_ns if real.exists() else None
+    before_m3 = real_m3.stat().st_mtime_ns if real_m3.exists() else None
     for cmd in (["build"], ["eval"], ["facts"], ["report"]):
         assert cli.entry(cmd) == 0
     assert (real.stat().st_mtime_ns if real.exists() else None) == before
+    assert (real_m3.stat().st_mtime_ns if real_m3.exists() else None) == before_m3
     facts = json.loads((data / "facts.json").read_text())
-    assert not [k for k in facts if k.startswith("m0_")]
+    assert not [k for k in facts if k.startswith("m0_") or k.startswith("m3_")]
+    assert not (data / "docs" / "m3").exists()
     assert not (data / "docs" / "m0").exists()
 
 
@@ -192,6 +199,22 @@ def test_r5_llm_runs_after_rewrite(data, monkeypatch):
     assert cli.entry(["eval", "--rung", "R5-llm"]) == 0
     result = json.loads((data / "out" / "r5_llm.json").read_text())
     assert result["extra"]["input_tokens_mean"] == 100 and result["latency_ms"]["p50"] >= 50
+
+
+def test_r5_llm_append_appends_the_cached_rewrite_and_makes_no_call(data, monkeypatch):
+    from tests.fakes import fake_claude
+    monkeypatch.setattr(cli, "run_claude", fake_claude("Type of Consideration cash"))
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["rewrite"]) == 0
+    monkeypatch.setattr(cli, "run_claude", lambda *a, **k: pytest.fail("no model call allowed"))
+    seen = []
+    real_run = cli.Ladder.run
+    monkeypatch.setattr(cli.Ladder, "run", lambda self, rung, q, c=None, k=10, rewritten=None:
+                        seen.append((q, rewritten)) or real_run(self, rung, q, c, k, rewritten))
+    assert cli.entry(["eval", "--rung", "R5-llm-append"]) == 0
+    assert seen and all(r.startswith(q + " ") and len(r) > len(q) + 1 for q, r in seen)
+    assert (data / "out" / "r5_llm_append.json").exists()
+    assert (data / "out" / "r5_llm_append_items.jsonl").exists()
 
 
 def test_rewrite_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys):
@@ -526,7 +549,9 @@ def test_m0_facts_read_the_sec_logs(tmp_path, monkeypatch):
         return {}
     monkeypatch.setattr(cli, "DATA", tmp_path)
     monkeypatch.setattr(cli, "build_facts", lambda *a: {})
+    monkeypatch.setattr(cli, "OUT", tmp_path / "out")
     monkeypatch.setattr(cli, "m2_present", lambda out: False)
+    monkeypatch.setattr(cli, "present_m3", lambda out: False)
     monkeypatch.setattr(cli, "build_m0", fake_build)
     (tmp_path / "m0").mkdir()
     (tmp_path / "m0" / "measure.json").write_text("{}")
@@ -541,3 +566,189 @@ def test_m0_candidate_sample_makes_no_sec_client(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.m0, "stage_candidates_sample", lambda out: calls.append(out) or {"sample": 0})
     assert cli.entry(["m0", "candidate-sample"]) == 0
     assert calls == [tmp_path / "m0"]
+
+
+def test_m3_corpus_writes_the_summary_under_the_patched_edgar(data, capsys):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")  # builds <DATA>/m0
+    assert cli.entry(["m3", "corpus"]) == 0
+    summary = json.loads((data / "raw" / "edgar" / "summary.json").read_text())
+    assert summary["kept"] == 2 and json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
+
+
+def test_eval_out_writes_elsewhere_and_leaves_the_default_untouched(data, tmp_path):
+    assert cli.entry(["build"]) == 0
+    other = tmp_path / "parity"
+    assert cli.entry(["eval", "--rung", "R1", "--out", str(other)]) == 0
+    assert (other / "r1.json").exists()
+    assert not (cli.OUT / "r1.json").exists()
+
+
+def test_build_deals_writes_index_and_summary(data, capsys):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    summary = json.loads((data / "data" / "m3" / "deals_summary.json").read_text())
+    assert (data / "index" / "deals.db").exists()
+    assert summary["deals"] >= 2 and summary["maud_deals"] == 3
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
+
+
+def test_build_deals_leaves_out_the_maud_copy_of_a_tech_deal(data, capsys):
+    import sqlite3
+    from tests.test_deals import ACME_MAUD
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    (data / "raw" / "maud" / "contracts" / "contract_7.txt").write_text(ACME_MAUD, encoding="utf-8")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    summary = json.loads((data / "data" / "m3" / "deals_summary.json").read_text())
+    edgar = json.loads((data / "raw" / "edgar" / "deals.jsonl").read_text().splitlines()[0])["contract_id"]
+    assert summary["maud_duplicates"] == 1 and summary["maud_duplicate_pairs"] == [["contract_7", edgar]]
+    assert summary["maud_deals"] == 3
+    conn = sqlite3.connect(data / "index" / "deals.db")
+    assert conn.execute("SELECT COUNT(*) FROM passages WHERE contract_id = 'contract_7'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM deals WHERE contract_id = ?", (edgar,)).fetchone()[0] == 1
+
+
+def test_build_deals_without_corpus_names_the_command(data, capsys):
+    assert cli.entry(["build", "--deals"]) == 2
+    assert "dtd m3 corpus" in capsys.readouterr().err
+
+
+def _fake_label_runner(calls):
+    def runner(prompt, model):
+        calls.append(model)
+        if prompt.startswith("Below is the outline"):
+            reply = {"equity_awards": [], "termination_fee": [], "employee_benefits": []}
+        else:
+            reply = {}
+        return {"result": json.dumps(reply), "usage": {"input_tokens": 1, "output_tokens": 1}}
+    return runner
+
+
+def test_m3_label_writes_rows_and_summary_and_resumes_from_the_ledger(data, capsys, monkeypatch):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    calls = []
+    monkeypatch.setattr(cli, "run_claude", _fake_label_runner(calls))
+    assert cli.entry(["m3", "label", "--workers", "2"]) == 0
+    out = data / "data" / "m3"
+    rows = [json.loads(line) for line in (out / "tmachine.jsonl").read_text().splitlines()]
+    summary = json.loads((out / "tmachine_summary.json").read_text())
+    assert calls and rows and summary["complete"] == summary["contracts"] and summary["absent"] == len(rows)
+    assert (out / "tmachine_ledger.jsonl").exists()
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
+
+    def boom(prompt, model):
+        raise AssertionError("model called on a fully cached run")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    assert cli.entry(["m3", "label"]) == 0
+
+
+def test_m3_label_runner_error_exits_2_and_missing_inputs_name_the_step(data, capsys, monkeypatch):
+    assert cli.entry(["m3", "label"]) == 2
+    assert "dtd build --deals" in capsys.readouterr().err
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+
+    def fail(prompt, model):
+        raise RuntimeError("claude down")
+    monkeypatch.setattr(cli, "run_claude", fail)
+    assert cli.entry(["m3", "label"]) == 2
+    assert "claude down" in capsys.readouterr().err
+
+
+def _kept_runner(prompt, model):
+    quote = "The parties agree. The parties agree."
+    if prompt.startswith("Below is the outline"):
+        reply = {t: ["C1"] for t in ("equity_awards", "termination_fee", "employee_benefits")}
+    else:
+        reply = {t: {"found": True, "quotes": [quote], "answer": "yes"}
+                 for t in ("equity_awards", "termination_fee", "employee_benefits")}
+    return {"result": json.dumps(reply), "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+
+def _m3_setup(data, monkeypatch):
+    from tests.fakes import fake_claude
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    _add_tune_contract(data)
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    return fake_claude
+
+
+def test_m3_chain_embed_lexicon_label_eval_writes_every_result(data, monkeypatch):
+    fake_claude = _m3_setup(data, monkeypatch)
+    assert cli.entry(["embed", "--deals"]) == 0
+    monkeypatch.setattr(cli, "run_claude", fake_claude('{"cash deal": ["Type of Consideration"]}'))
+    assert cli.entry(["embed"]) == 0
+    assert cli.entry(["lexicon"]) == 0
+    monkeypatch.setattr(cli, "run_claude", _kept_runner)
+    assert cli.entry(["m3", "label"]) == 0
+    assert cli.entry(["m3", "eval"]) == 0
+    out = data / "out" / "m3"
+    for name in ([f"t_r{i}.json" for i in range(1, 7)] + [f"t_bare_r{i}.json" for i in range(1, 7)]
+                 + ["t_r6_corpus.json", "t_r7_corpus.json", "r7_scope.json"]):
+        assert (out / name).exists(), name
+    assert json.loads((out / "t_r7_corpus.json").read_text())["scope"] == "corpus-wide"
+    assert json.loads((out / "r7_scope.json").read_text())["items"]
+    bare = json.loads((out / "t_bare_r1_items.jsonl").read_text().splitlines()[0])
+    named = json.loads((out / "t_r1_items.jsonl").read_text().splitlines()[0])
+    assert bare["item_id"] == named["item_id"] and bare["query"] != named["query"]
+
+
+def test_m3_eval_before_embed_deals_exits_2_and_names_it(data, capsys):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    assert cli.entry(["m3", "eval"]) == 2
+    assert "dtd embed --deals" in capsys.readouterr().err
+
+
+def _tier_runner(prompt, model):
+    if prompt.startswith("Below is the outline"):
+        reply = {"T1": ["C1"]}
+    else:
+        reply = {"T1": {"found": True, "quotes": ["Each Company Share shall be converted into the right to receive cash"], "answer": "x"}}
+    return {"result": json.dumps(reply), "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+
+def test_m3_tier_writes_the_report_and_names_a_missing_rung(data, monkeypatch, capsys):
+    _m2_chain(data, monkeypatch)
+    monkeypatch.setattr(cli, "run_claude", _tier_runner)
+    assert cli.entry(["m3", "tier", "--workers", "2"]) == 0
+    rep = json.loads((data / "out" / "m3" / "tier.json").read_text())
+    assert {"match", "tau", "rungs"} <= set(rep) and set(rep["rungs"]) == {f"R{i}" for i in range(1, 7)}
+    assert rep["kept"] >= 1 and rep["match"]["mean"] == 1.0
+    rows = [json.loads(x) for x in (data / "data" / "m3" / "tier_rows.jsonl").read_text().splitlines()]
+    assert rows and (data / "data" / "m3" / "tier_ledger.jsonl").exists()
+    assert not (data / "out" / "tier.json").exists()
+
+    def boom(prompt, model):
+        raise AssertionError("model called on a fully cached run")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    assert cli.entry(["m3", "tier"]) == 0
+    (data / "out" / "r6_items.jsonl").unlink()
+    capsys.readouterr()
+    assert cli.entry(["m3", "tier"]) == 2
+    assert "dtd eval --rung R6" in capsys.readouterr().err
+
+
+def test_m3_tier_with_kept_items_missing_from_a_rung_exits_2(data, monkeypatch, capsys):
+    _m2_chain(data, monkeypatch)
+    f = data / "out" / "r4_items.jsonl"
+    f.write_text("".join(l + "\n" for l in f.read_text().splitlines()[:0]), encoding="utf-8")
+    monkeypatch.setattr(cli, "run_claude", _tier_runner)
+    capsys.readouterr()
+    assert cli.entry(["m3", "tier"]) == 2
+    err = capsys.readouterr().err
+    assert "dtd eval --rung R4" in err and "dtd eval --rung R1" not in err

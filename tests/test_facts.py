@@ -150,10 +150,14 @@ def test_committed_facts_file_has_exactly_the_named_queries():
     path = ROOT / "facts.json"
     if path.exists():
         keys = set(json.loads(path.read_text()))
-        assert {k for k in keys if not k.startswith(("m2_", "m0_"))} == set(QUERIES)
+        assert {k for k in keys if not k.startswith(("m2_", "m0_", "m3_"))} == set(QUERIES)
         m2 = {k for k in keys if k.startswith("m2_")}
         if m2:
             assert {"m2_r1_report_recall_at_5", "m2_r6_report_recall_at_5"} <= m2
+        m3 = {k for k in keys if k.startswith("m3_")}
+        if m3:
+            assert {"m3_t_r1_report_recall_at_5", "m3_t_r7_corpus_report_recall_at_5",
+                    "m3_tier_tau"} <= m3
 
 
 def test_committed_report_is_rendered_from_committed_facts():

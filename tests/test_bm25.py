@@ -56,3 +56,32 @@ def test_equal_scores_are_ordered_by_passage_id(tmp_path):
     hits = search(sqlite3.connect(db), "buyer indemnify seller losses", contract_id="c", k=5)
     assert len({round(h.score, 9) for h in hits}) == 1
     assert [h.passage_id for h in hits] == [1, 2, 3, 4, 5]
+
+
+def test_contract_filter_runs_inside_fts_with_identical_results(tmp_path):
+    import sqlite3
+    from retrieval.index import build_index
+    from retrieval.bm25 import search
+    docs = {f"c{i}": f"Section 1.1 Fees. The Company shall pay a termination fee of {i} dollars.\n\n"
+                      f"Section 1.2 Closing. The closing shall occur on the closing date.\n" for i in range(5)}
+    db = tmp_path / "i.db"
+    build_index(db, docs)
+    conn = sqlite3.connect(db)
+    for cid in docs:
+        old = conn.execute(
+            "SELECT p.passage_id, -bm25(passages_fts) FROM passages_fts JOIN passages p ON p.passage_id = passages_fts.rowid"
+            " WHERE passages_fts MATCH ? AND p.contract_id = ? ORDER BY bm25(passages_fts), p.passage_id LIMIT 10",
+            ('"termination" OR "fee"', cid)).fetchall()
+        new = [(h.passage_id, h.score) for h in search(conn, "termination fee", contract_id=cid)]
+        assert new == old and new
+
+
+def test_contract_filter_is_safe_for_operator_like_ids(tmp_path):
+    import sqlite3
+    from retrieval.index import build_index
+    from retrieval.bm25 import search
+    db = tmp_path / "i.db"
+    build_index(db, {'AND "x" OR': "Section 1.1 Fees. A termination fee applies.\n"})
+    conn = sqlite3.connect(db)
+    assert len(search(conn, "fee", contract_id='AND "x" OR')) == 1
+    assert search(conn, "fee", contract_id="unknown") == []

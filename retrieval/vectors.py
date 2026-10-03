@@ -9,6 +9,8 @@ from retrieval.models import EMBED_DIM, MAX_TOKENS
 CACHE_SCHEMA = ("CREATE TABLE IF NOT EXISTS emb(model TEXT NOT NULL, sha1 TEXT NOT NULL, n_tokens INTEGER NOT NULL,"
                 " vec BLOB NOT NULL, PRIMARY KEY(model, sha1))")
 
+VEC_CHUNK = 128
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
@@ -75,7 +77,8 @@ def build_vectors(conn: sqlite3.Connection, cache: sqlite3.Connection, model: st
     try:
         conn.execute("DROP TABLE IF EXISTS passages_vec")
         conn.execute(f"CREATE VIRTUAL TABLE passages_vec USING vec0(passage_id integer primary key,"
-                     f" contract_id text partition key, embedding float[{dim}] distance_metric=cosine)")
+                     f" contract_id text partition key, embedding float[{dim}] distance_metric=cosine,"
+                     f" chunk_size={VEC_CHUNK})")
         conn.executemany("INSERT INTO passages_vec(passage_id, contract_id, embedding) VALUES (?, ?, ?)", rows)
         conn.execute("CREATE TABLE IF NOT EXISTS vec_meta(model TEXT NOT NULL, vectors INTEGER NOT NULL,"
                      " truncated INTEGER NOT NULL)")

@@ -2,7 +2,7 @@ import argparse
 import json
 import sqlite3
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from evals.bootstrap import split_of
@@ -10,16 +10,20 @@ from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
-from evals.run_rung import evaluate, load_context, with_passages
+from evals.run_rung import Context, evaluate, load_context, with_passages
+from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
+from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
 from evals.tune import tune
 from facts.build import build as build_facts
 from facts.build import UNSTABLE
 from facts.m0 import build_m0
 from facts.m2 import build_m2, is_unstable
+from facts.m3 import build_m3, present_m3
 from facts.m2 import present as m2_present
 from facts.report import render
 from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
+from facts.report_m3 import render_m3
 from pipeline import m0
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
@@ -27,21 +31,24 @@ from pipeline.claude import run_claude
 from pipeline.env import sec_contact
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
-from pipeline.paths import CACHE, DATA, CSV_NAMES, INDEX, INDEX_FIXED, OUT, RAW
+from pipeline.paths import CACHE, DATA, CSV_NAMES, DEALS_INDEX, EDGAR, INDEX, INDEX_FIXED, OUT, RAW
 from pipeline.sec_client import Blocked, SecClient
+from pipeline.tech_corpus import assemble
 from retrieval import vectors
+from retrieval.deals import add_deals, maud_duplicates
 from retrieval.index import build_index
 from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
-from retrieval.result import Retrieved
+from retrieval.scope import Resolver
 
 FACTS = Path("facts.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
+REPORT_M3 = Path("docs/m3/REPORT.md")
 M0_STAGES = ("search", "candidates", "fetch", "deals", "sample", "press", "measure")
 NEEDS_SEC = {"search", "candidates", "fetch", "deals", "press"}
 REWRITES = "llm_rewrites.jsonl"
@@ -74,7 +81,35 @@ def _cmd_fetch(args) -> int:
     return 0
 
 
+def _deals_texts() -> tuple[dict[str, str], dict[str, str]]:
+    """(MAUD + tech contract texts, amendment texts) for the combined deals index."""
+    def read(d: Path) -> dict[str, str]:
+        return {p.stem: load_contract(p) for p in sorted(d.glob("*.txt"))} if d.exists() else {}
+    return read(RAW / "contracts") | read(EDGAR / "contracts"), read(EDGAR / "amendments")
+
+
+def _build_deals() -> int:
+    if not (EDGAR / "deals.jsonl").exists():
+        print(f"{EDGAR / 'deals.jsonl'} missing; run `dtd m3 corpus` first", file=sys.stderr)
+        return 2
+    deals = [json.loads(line) for line in (EDGAR / "deals.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    contracts, amendment_texts = _deals_texts()
+    tech = {d["contract_id"] for d in deals}
+    pairs = maud_duplicates(deals, {cid: t for cid, t in contracts.items() if cid not in tech})
+    dropped = {m for m, _ in pairs}  # one canonical copy per agreement: the tech copy stays, maud.db is untouched
+    contracts = {cid: t for cid, t in contracts.items() if cid not in dropped}
+    summary = build_index(DEALS_INDEX, contracts)
+    summary |= add_deals(DEALS_INDEX, deals, contracts, amendment_texts)
+    summary |= {"maud_duplicates": len(pairs), "maud_duplicate_pairs": pairs}
+    (DATA / "m3").mkdir(parents=True, exist_ok=True)
+    _write_atomic(DATA / "m3" / "deals_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
 def _cmd_build(args) -> int:
+    if args.deals:
+        return _build_deals()
     files = sorted((RAW / "contracts").glob("*.txt")) if (RAW / "contracts").exists() else []
     if not files:
         print(f"no contracts under {RAW / 'contracts'}; run `dtd fetch` first", file=sys.stderr)
@@ -108,9 +143,10 @@ def _has_vectors(db: Path) -> bool:
 
 
 def _cmd_embed(args) -> int:
-    db = INDEX_FIXED if args.fixed else INDEX
+    db = DEALS_INDEX if args.deals else INDEX_FIXED if args.fixed else INDEX
     if not db.exists():
-        print(f"{db} missing; run `dtd build{' --fixed' if args.fixed else ''}` first", file=sys.stderr)
+        flag = " --deals" if args.deals else " --fixed" if args.fixed else ""
+        print(f"{db} missing; run `dtd build{flag}` first", file=sys.stderr)
         return 2
     embedder, _ = _models()
     conn = vectors.connect(db)
@@ -131,9 +167,19 @@ def _ladder(db: Path, texts: dict[str, str]) -> Ladder:
     return Ladder(vectors.connect(db), texts, embedder, reranker, lexicon, settings)
 
 
-def _eval_rung(rung: str, db: Path, name: str, ctx, **kw) -> dict:
+def _deals_ladder(contracts: dict[str, str], amendment_texts: dict[str, str]) -> Ladder:
+    embedder, make_reranker = _models()
+    settings = load_settings(SETTINGS_PATH)
+    reranker = CachedReranker(make_reranker(settings.reranker), CACHE / "rerank.db")
+    lexicon = load_lexicon(LEXICON_PATH) if LEXICON_PATH.exists() else None
+    conn = vectors.connect(DEALS_INDEX)
+    return Ladder(conn, contracts, embedder, reranker, lexicon, settings, amendment_texts=amendment_texts,
+                  resolver=Resolver(conn))
+
+
+def _eval_rung(rung: str, db: Path, name: str, ctx, out: Path = OUT, **kw) -> dict:
     ladder = _ladder(db, ctx.texts)
-    return evaluate(ctx, name, lambda q, c, k: ladder.run(rung, q, c, k), OUT,
+    return evaluate(ctx, name, lambda q, c, k: ladder.run(rung, q, c, k), out,
                     count_tokens=ladder.embedder.count_tokens,
                     extra={"settings": asdict(ladder.settings)}, **kw)
 
@@ -143,7 +189,8 @@ def _cmd_eval(args) -> int:
         print("index or label CSVs missing; run `dtd fetch` then `dtd build` first", file=sys.stderr)
         return 2
     rung = args.rung
-    if rung not in RUNGS + ("R5-llm", "R3-fixed", "corpus"):
+    out = Path(args.out) if args.out else OUT
+    if rung not in RUNGS + ("R5-llm", "R5-llm-append", "R3-fixed", "corpus"):
         print(f"unknown rung {rung}", file=sys.stderr)
         return 2
     if rung != "R1" and not _has_vectors(INDEX):
@@ -153,7 +200,7 @@ def _cmd_eval(args) -> int:
         print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
         return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
-    if rung == "R5-llm":
+    if rung in ("R5-llm", "R5-llm-append"):
         path = CACHE / REWRITES
         if not path.exists():
             print("no LLM rewrites; run `dtd rewrite` first", file=sys.stderr)
@@ -163,15 +210,16 @@ def _cmd_eval(args) -> int:
 
         def retrieve(q, c, k):
             r = rewrites[q]
-            got = ladder.run("R5", q, c, k, rewritten=r["rewrite"])
-            return Retrieved(got.hits, got.ms + r["api_ms"], got.context)
+            text = r["rewrite"] if rung == "R5-llm" else f"{q} {r['rewrite']}"
+            got = ladder.run("R5", q, c, k, rewritten=text)
+            return replace(got, ms=got.ms + r["api_ms"])
         n = len(rewrites)
         try:
             model = _rewrite_model(rewrites)
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 2
-        result = evaluate(ctx, "R5-llm", retrieve, OUT, count_tokens=ladder.embedder.count_tokens, extra={
+        result = evaluate(ctx, rung, retrieve, out, count_tokens=ladder.embedder.count_tokens, extra={
             "settings": asdict(ladder.settings), "model": model, "queries": n,
             "input_tokens_mean": sum(r["input_tokens"] for r in rewrites.values()) / n,
             "output_tokens_mean": sum(r["output_tokens"] for r in rewrites.values()) / n})
@@ -180,19 +228,19 @@ def _cmd_eval(args) -> int:
             print("fixed-size index or its vectors missing; run `dtd build --fixed` then `dtd embed --fixed`",
                   file=sys.stderr)
             return 2
-        result = _eval_rung("R3", INDEX_FIXED, "R3-fixed", with_passages(ctx, INDEX_FIXED))
+        result = _eval_rung("R3", INDEX_FIXED, "R3-fixed", with_passages(ctx, INDEX_FIXED), out)
     elif rung == "corpus":
         best = _best_rung() or "R1"
         if best in ("R5", "R6") and not LEXICON_PATH.exists():
             print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
             return 2
-        _eval_rung("R1", INDEX, "R1-corpus", ctx, scope="corpus-wide", k=max(CHAR_KS), char_ks=CHAR_KS)
+        _eval_rung("R1", INDEX, "R1-corpus", ctx, out, scope="corpus-wide", k=max(CHAR_KS), char_ks=CHAR_KS)
         ladder = _ladder(INDEX, ctx.texts)
-        result = evaluate(ctx, "best-corpus", lambda q, c, k: ladder.run(best, q, c, k), OUT,
+        result = evaluate(ctx, "best-corpus", lambda q, c, k: ladder.run(best, q, c, k), out,
                           count_tokens=ladder.embedder.count_tokens, scope="corpus-wide", k=max(CHAR_KS),
                           char_ks=CHAR_KS, extra={"rung": best, "settings": asdict(ladder.settings)})
     else:
-        result = _eval_rung(rung, INDEX, rung, ctx)
+        result = _eval_rung(rung, INDEX, rung, ctx, out)
     print(json.dumps(result["overall"], indent=2))
     return 0
 
@@ -277,6 +325,8 @@ def _all_facts() -> dict:
     facts = build_facts(INDEX, OUT / "r1.json", _csv_paths())
     if m2_present(OUT):
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
+    if present_m3(OUT / "m3"):
+        facts |= build_m3(OUT / "m3", OUT, DATA / "m3", EDGAR, DEALS_INDEX)
     if (DATA / "m0" / "measure.json").exists():
         facts |= build_m0(DATA / "m0", facts, DATA / "sec")
     return facts
@@ -327,6 +377,125 @@ def _cmd_failures(args) -> int:
     return 0
 
 
+def _cmd_m3(args) -> int:
+    if args.stage == "corpus":
+        summary = assemble(DATA / "m0", EDGAR)
+        _write_atomic(EDGAR / "summary.json", json.dumps(summary, indent=2, sort_keys=True))
+        print(json.dumps(summary))
+    elif args.stage == "label":
+        return _m3_label(args)
+    elif args.stage == "eval":
+        return _m3_eval()
+    elif args.stage == "tier":
+        return _m3_tier(args)
+    return 0
+
+
+def _m3_label(args) -> int:
+    if not DEALS_INDEX.exists():
+        print(f"{DEALS_INDEX} missing; run `dtd build --deals` first", file=sys.stderr)
+        return 2
+    if not (EDGAR / "deals.jsonl").exists():
+        print(f"{EDGAR / 'deals.jsonl'} missing; run `dtd m3 corpus` first", file=sys.stderr)
+        return 2
+    deals = [json.loads(line) for line in (EDGAR / "deals.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    texts = {p.stem: load_contract(p) for p in sorted((EDGAR / "contracts").glob("*.txt"))}
+    contracts = sorted((d["contract_id"], d["target"] or d["aliases"][0]) for d in deals)
+    out = DATA / "m3"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        rows, summary = label_all(sqlite3.connect(DEALS_INDEX, check_same_thread=False), texts, contracts, TOPICS,
+                                  PASSES, run_claude, out / "tmachine_ledger.jsonl", workers=args.workers,
+                                  max_new=args.max_new)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    _write_atomic(out / "tmachine.jsonl", "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    _write_atomic(out / "tmachine_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
+def _m3_eval() -> int:
+    tm = DATA / "m3" / "tmachine.jsonl"
+    if not DEALS_INDEX.exists() or not _has_vectors(DEALS_INDEX):
+        print("deals index missing or has no vectors; run `dtd build --deals` then `dtd embed --deals` first",
+              file=sys.stderr)
+        return 2
+    if not tm.exists():
+        print(f"{tm} missing; run `dtd m3 label` first", file=sys.stderr)
+        return 2
+    if not LEXICON_PATH.exists():
+        print("lexicon missing; run `dtd lexicon` first", file=sys.stderr)
+        return 2
+    contracts, amendment_texts = _deals_texts()
+    rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
+    items = items_from_rows(rows)
+    if not items:
+        print("no kept T-machine items to evaluate", file=sys.stderr)
+        return 2
+    ctx = with_passages(Context(items, {"source": "T-machine (machine-built)", "items": len(items)}, contracts, {}),
+                        DEALS_INDEX)
+    ladder = _deals_ladder(contracts, amendment_texts)
+    out, kw = OUT / "m3", {"count_tokens": ladder.embedder.count_tokens,
+                           "extra": {"settings": asdict(ladder.settings)}}
+    for rung in RUNGS:
+        evaluate(ctx, f"T-{rung}", lambda q, c, k, r=rung: ladder.run(r, q, c, k), out, **kw)
+    bare = replace(ctx, items=items_from_rows(rows, bare=True))  # the same items, the company's name left out
+    for rung in RUNGS:
+        evaluate(bare, f"T-bare-{rung}", lambda q, c, k, r=rung: ladder.run(r, q, c, k), out, **kw)
+    evaluate(ctx, "T-R6-corpus", lambda q, c, k: ladder.run("R6", q, None, k), out, scope="corpus-wide", **kw)
+    evaluate(ctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), out, scope="corpus-wide", **kw)
+    _write_atomic(out / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
+    print(json.dumps({"items": len(items), "written": sorted(p.name for p in out.iterdir())}))
+    return 0
+
+
+def _m3_tier(args) -> int:
+    missing = [r for r in RUNG_NAMES if not (OUT / f"{r.lower()}_items.jsonl").exists()]
+    if not INDEX.exists():
+        print(f"{INDEX} missing; run `dtd build` first", file=sys.stderr)
+        return 2
+    if missing:
+        print(f"missing M2 items for {', '.join(missing)}; run " + ", ".join(f"`dtd eval --rung {r}`" for r in missing),
+              file=sys.stderr)
+        return 2
+    rung_rows = {r: load_items(OUT / f"{r.lower()}_items.jsonl") for r in RUNG_NAMES}
+    cids = tier_sample(rung_rows["R1"])
+    topics_by_contract, keymap = {}, {}
+    for cid in cids:
+        topics, ids = tier_topics(rung_rows["R1"], cid)
+        topics_by_contract[cid] = topics
+        keymap |= {(cid, key): item_id for key, item_id in ids.items()}
+    texts = {cid: load_contract(RAW / "contracts" / f"{cid}.txt") for cid in cids}
+    conn = sqlite3.connect(INDEX, check_same_thread=False)
+    out = DATA / "m3"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        rows, _ = label_all(conn, texts, [(cid, cid) for cid in cids], {}, PASSES, run_claude,
+                            out / "tier_ledger.jsonl", workers=args.workers, topics_by_contract=topics_by_contract)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    spans = {pid: (s, e) for pid, s, e in conn.execute("SELECT passage_id, start_char, end_char FROM passages")}
+    rows = [r for r in rows if (r["contract_id"], r["family"]) in keymap]
+    if not rows:
+        print("no tier items were labelled", file=sys.stderr)
+        return 2
+    need = {keymap[(r["contract_id"], r["family"])] for r in rows if r["status"] == "kept"}
+    short = [r for r in RUNG_NAMES if need - rung_rows[r].keys()]
+    if short:
+        print(f"kept items missing from M2 results for {', '.join(short)}; re-run "
+              + ", ".join(f"`dtd eval --rung {r}`" for r in short), file=sys.stderr)
+        return 2
+    report = tier_report(rows, keymap, rung_rows, spans)
+    _write_atomic(out / "tier_rows.jsonl", "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    (OUT / "m3").mkdir(parents=True, exist_ok=True)
+    _write_atomic(OUT / "m3" / "tier.json", json.dumps(report, indent=2, sort_keys=True))
+    print(json.dumps({k: report[k] for k in ("match", "tau", "tau_lo", "tau_hi")}))
+    return 0
+
+
 def _cmd_m0(args) -> int:
     stages = M0_STAGES if args.stage == "all" else (args.stage,)
     client = None
@@ -365,6 +534,9 @@ def _cmd_report(args) -> int:
     if "m2_r1_report_recall_at_5" in facts:
         REPORT_M2.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M2.write_text(render_m2(facts), encoding="utf-8")
+    if "m3_t_r1_report_recall_at_5" in facts:
+        REPORT_M3.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M3.write_text(render_m3(facts), encoding="utf-8")
     if "m0_gate_pass" in facts:
         REPORT_M0.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M0.write_text(render_m0(facts), encoding="utf-8")
@@ -377,12 +549,15 @@ def entry(argv: list[str] | None = None) -> int:
     sub.add_parser("fetch").set_defaults(fn=_cmd_fetch)
     build = sub.add_parser("build")
     build.add_argument("--fixed", action="store_true")
+    build.add_argument("--deals", action="store_true")
     build.set_defaults(fn=_cmd_build)
     embed = sub.add_parser("embed")
     embed.add_argument("--fixed", action="store_true")
+    embed.add_argument("--deals", action="store_true")
     embed.set_defaults(fn=_cmd_embed)
     ev = sub.add_parser("eval")
     ev.add_argument("--rung", default="R1")
+    ev.add_argument("--out", default=None, help="write results here instead of data/out")
     ev.set_defaults(fn=_cmd_eval)
     sub.add_parser("rewrite").set_defaults(fn=_cmd_rewrite)
     sub.add_parser("tune").set_defaults(fn=_cmd_tune)
@@ -396,6 +571,11 @@ def entry(argv: list[str] | None = None) -> int:
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
+    m3p = sub.add_parser("m3")
+    m3p.add_argument("stage", choices=("corpus", "label", "eval", "tier"))
+    m3p.add_argument("--workers", type=int, default=4)
+    m3p.add_argument("--max-new", type=int, default=None)
+    m3p.set_defaults(fn=_cmd_m3)
     args = parser.parse_args(argv)
     return args.fn(args)
 

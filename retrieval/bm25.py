@@ -23,6 +23,12 @@ def fts_query(q: str) -> str:
 FTS_TABLES = ("passages_fts", "passages_x_fts")
 
 
+def _range(conn: sqlite3.Connection, contract_id: str) -> tuple[int, int] | None:
+    row = conn.execute("SELECT first_passage_id, last_passage_id FROM contracts WHERE contract_id = ?",
+                       (contract_id,)).fetchone()
+    return (row[0], row[1]) if row and row[0] is not None else None
+
+
 def search(conn: sqlite3.Connection, query: str, contract_id: str | None = None, k: int = 10,
            table: str = "passages_fts") -> list[Hit]:
     if table not in FTS_TABLES:
@@ -30,15 +36,16 @@ def search(conn: sqlite3.Connection, query: str, contract_id: str | None = None,
     match = fts_query(query)
     if not match:
         return []
-    sql = (
-        f"SELECT p.passage_id, p.contract_id, p.start_char, p.end_char, -bm25({table})"
-        f" FROM {table} JOIN passages p ON p.passage_id = {table}.rowid"
-        f" WHERE {table} MATCH ?"
-    )
-    params: list = [match]
+    where, params = f"{table} MATCH ?", [match]
     if contract_id is not None:
-        sql += " AND p.contract_id = ?"
-        params.append(contract_id)
-    sql += f" ORDER BY bm25({table}), p.passage_id LIMIT ?"
+        rng = _range(conn, contract_id)
+        if rng is None:
+            return []
+        where += f" AND {table}.rowid BETWEEN ? AND ?"
+        params += list(rng)
+    sql = (f"SELECT p.passage_id, p.contract_id, p.start_char, p.end_char, s.score FROM"
+           f" (SELECT rowid AS rid, -bm25({table}) AS score FROM {table} WHERE {where}"
+           f"  ORDER BY bm25({table}), rowid LIMIT ?) s JOIN passages p ON p.passage_id = s.rid"
+           f" ORDER BY s.score DESC, p.passage_id")
     params.append(k)
     return [Hit(*row) for row in conn.execute(sql, params)]
