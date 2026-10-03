@@ -68,7 +68,7 @@ def test_candidate_section_absent_without_candidate_facts():
 
 def test_candidate_section_is_labelled_and_has_no_stray_digits():
     text = render_m0(EveryWithCandidates())
-    assert text.index("## Gate") < text.index("## Replacement lead family (decided 2026-10-02)") < text.index("## How the corpus")
+    assert text.index("## Gate") < text.index("## Replacement lead family (decided 7777.0)") < text.index("## How the corpus")
     sec = text.split("## Replacement lead family")[1].split("\n## ")[0]
     assert "machine-built" in sec and "verbatim" in sec and "earn-out" in sec
     assert "Gate with the adopted family: PASS" in sec
@@ -76,6 +76,5 @@ def test_candidate_section_is_labelled_and_has_no_stray_digits():
         assert sum(1 for l in sec.splitlines() if l.startswith("|") and SENTINEL.__str__() in l) >= 3
     assert "bare buyer termination-fee" in sec
     assert "Gate with the adopted family: FAIL" in render_m0(EveryWithCandidates(False))
-    lines = [l for l in text.replace(str(SENTINEL), "").splitlines() if re.search(r"\d", ALLOWED.sub("", l))
-             and "decided 2026-10-02" not in l]
+    lines = [l for l in text.replace(str(SENTINEL), "").splitlines() if re.search(r"\d", ALLOWED.sub("", l))]
     assert lines == []

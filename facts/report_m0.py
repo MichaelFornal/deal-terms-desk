@@ -23,7 +23,7 @@ def _replacement(f) -> str:
         f"| {CANDIDATE_LABELS[sp.name]} | {f[f'm0_candidate_{sp.name}_present']} | {f[f'm0_candidate_{sp.name}_share']} "
         f"| {f[f'm0_candidate_{sp.name}_regex']} | {f[f'm0_candidate_{sp.name}_truncated']} |" for sp in CANDIDATE_SPECS)
     verdict = "PASS" if f["m0_gate_pass_adopted"] else "FAIL"
-    return f"""## Replacement lead family (decided 2026-10-02)
+    return f"""## Replacement lead family (decided {f['m0_adopted_on']})
 
 The original gate failed on earn-outs, which were not found in the sampled agreements. The PRD records the decision to replace them as a lead family with employees' pay and benefits after the deal; earn-out questions stay as abstention items.
 

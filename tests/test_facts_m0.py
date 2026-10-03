@@ -114,6 +114,7 @@ def test_candidate_facts_and_the_adopted_gate(tmp_path):
     measure(tmp_path, present=(30, 29, 4))
     candidate_measure(tmp_path)
     f = build_m0(tmp_path)
+    assert f["m0_adopted_on"] == "2026-10-02"
     assert f["m0_candidate_sample"] == 30 and f["m0_adopted_family"] == "employee_benefits"
     assert f["m0_candidate_employee_benefits_present"] == 29
     assert f["m0_candidate_employee_benefits_share"] == round(29 / 30, 4)

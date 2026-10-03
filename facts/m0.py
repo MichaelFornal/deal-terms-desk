@@ -8,6 +8,7 @@ from pipeline.target import TECH_SIC
 GATE_AGREEMENTS = 100
 GATE_FAMILY_SHARE = 0.5
 ADOPTED_FAMILY = "employee_benefits"  # replaces earn-outs as the third lead family; see the PRD note before §10
+ADOPTED_ON = "2026-10-02"  # the date of that decision
 COPIED = ("search_docs", "ex21_docs", "ex2_bare_docs", "candidates", "fetched", "missing", "fetch_errors", "not_merger", "keyed",
           "company_parsed", "amendment_docs", "deals", "orphan_restated", "deals_resolved", "tech_deals", "tech_targets",
           "tech_multi_copy", "tech_amended", "sample", "press_fee", "press_release", "press_both",
@@ -79,6 +80,7 @@ def build_m0(m0_dir: Path, facts: dict | None = None, sec_dir: Path | None = Non
             f[f"m0_candidate_{n}_truncated"] = c["family_truncated"][n]
         f["m0_candidate_sample"] = c["sample"]
         f["m0_adopted_family"] = ADOPTED_FAMILY
+        f["m0_adopted_on"] = ADOPTED_ON
         kept = [(m["family_present"][fam], m["sample"]) for fam in FAMILIES if fam != "contingent_consideration"]
         kept.append((c["family_present"][ADOPTED_FAMILY], c["sample"]))
         f["m0_gate_families_ok_adopted"] = all(s > 0 and p / s >= GATE_FAMILY_SHARE for p, s in kept)
