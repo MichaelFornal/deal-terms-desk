@@ -3,11 +3,40 @@ import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
 
-WORD = re.compile(r"[a-z0-9]+")
+RAW_WORD = re.compile(r"[A-Za-z0-9]+|&")
+
+
+def _words(s: str) -> list[tuple[str, str]]:
+    """(raw word, token) pairs; the tokens are exactly `tokens(s)`."""
+    return [(w, "and" if w == "&" else w.lower()) for w in RAW_WORD.findall(s)]
 
 
 def tokens(s: str) -> tuple[str, ...]:
-    return tuple(WORD.findall(s.lower().replace("&", " and ")))
+    return tuple(t for _, t in _words(s))
+
+
+def _capital(raw: str) -> bool:
+    return raw[0].isupper() or raw.isupper()
+
+
+def strip_alias(query: str, alias: str) -> str:
+    """The query without each run of the alias's tokens, other words kept in order. A one-word alias is dropped
+    only where it is capitalised, as the resolver matched it. Unchanged if the alias is absent; the original
+    query if nothing else is left."""
+    a, words = tokens(alias), _words(query)
+    if not a:
+        return query
+    keep, i, n = [], 0, len(a)
+    while i < len(words):
+        run = tuple(t for _, t in words[i:i + n])
+        if run == a and (n > 1 or _capital(words[i][0])):
+            i += n
+            continue
+        keep.append(words[i][0])
+        i += 1
+    if len(keep) == len(words) or not keep:
+        return query
+    return " ".join(keep)
 
 
 @dataclass(frozen=True)
@@ -32,9 +61,11 @@ class Resolver:
         return any(q[i:i + n] == alias for i in range(len(q) - n + 1))
 
     def resolve(self, query: str) -> Scope:
-        q = tokens(query)
+        words = _words(query)
+        q = tuple(t for _, t in words)
+        capital = {t for w, t in words if _capital(w)}  # "true" or "base" as a plain word is not a company
         for kind in ("target", "parent"):
-            hits = [a for a in self.by_kind[kind] if self._occurs(a, q)]
+            hits = [a for a in self.by_kind[kind] if (len(a) > 1 or a[0] in capital) and self._occurs(a, q)]
             if not hits:
                 continue
             longest = max(len(a) for a in hits)

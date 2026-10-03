@@ -8,6 +8,7 @@ from retrieval.dense import search_dense
 from retrieval.hybrid import rrf
 from retrieval.lexicon import rewrite
 from retrieval.result import CONTEXT_K, Retrieved
+from retrieval.scope import strip_alias
 
 RUNGS = ("R1", "R2", "R3", "R4", "R5", "R6")
 DEAL_RUNGS = RUNGS + ("R7",)
@@ -75,9 +76,13 @@ class Ladder:
         if rung == "R7":
             if self.resolver is None:
                 raise ValueError("R7 needs a resolver over the deals index")
+            t0 = time.perf_counter()
             scope = self.resolver.resolve(query)
-            got = self.run("R6", query, scope.contract_id, k, rewritten)
-            return replace(got, scope=scope)
+            resolve_ms = (time.perf_counter() - t0) * 1000.0
+            # Inside one agreement the company's name is everywhere, so it only misleads the search: drop it.
+            q = strip_alias(query, scope.alias) if scope.contract_id else query
+            got = self.run("R6", q, scope.contract_id, k, rewritten)
+            return replace(got, scope=scope, ms=got.ms + resolve_ms)
         n = RUNGS.index(rung) + 1
         if n >= 5 and rewritten is None and self.lexicon is None:
             raise ValueError("R5 and R6 need the lexicon; run `dtd lexicon` first")

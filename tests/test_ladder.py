@@ -144,3 +144,51 @@ def test_r7_scopes_to_the_named_deal_and_falls_back_corpus_wide(deals_ladder):
 def test_r7_needs_a_resolver(ladder):
     with pytest.raises(ValueError):
         ladder.run("R7", "termination fee")
+
+
+def _spy_r6(ladder):
+    seen, real = [], ladder.run
+
+    def run(rung, query, contract_id=None, k=10, rewritten=None):
+        if rung == "R6":
+            seen.append((query, contract_id))
+        return real(rung, query, contract_id, k, rewritten)
+    ladder.run = run
+    return seen
+
+
+def test_r7_drops_the_company_name_once_it_has_found_the_deal(deals_ladder):
+    seen = _spy_r6(deals_ladder)
+    got = deals_ladder.run("R7", "What is the Acme Software outside date?", k=5)
+    assert seen == [("What is the outside date", "edgar_0001")]
+    assert got.scope.contract_id == "edgar_0001"
+    seen.clear()
+    deals_ladder.run("R7", "outside date for Zeta Labs", k=5)  # no deal found: the question is unchanged
+    assert seen == [("outside date for Zeta Labs", None)]
+    seen.clear()
+    deals_ladder.run("R7", "Acme Software", k=5)  # nothing left once the name is gone: the original
+    assert seen == [("Acme Software", "edgar_0001")]
+
+
+def test_r7_keeps_the_question_when_the_deal_is_ambiguous(deals_ladder):
+    from retrieval.scope import Scope as S
+
+    class Ambiguous:
+        def resolve(self, q):
+            return S(None, "acme software", ("edgar_0001", "edgar_0009"))
+    deals_ladder.resolver = Ambiguous()
+    seen = _spy_r6(deals_ladder)
+    deals_ladder.run("R7", "Acme Software outside date", k=5)
+    assert seen == [("Acme Software outside date", None)]
+
+
+def test_r7_latency_includes_the_resolver(deals_ladder):
+    import time
+    real = deals_ladder.resolver
+
+    class Slow:
+        def resolve(self, q):
+            time.sleep(0.05)
+            return real.resolve(q)
+    deals_ladder.resolver = Slow()
+    assert deals_ladder.run("R7", "Acme Software outside date", k=5).ms >= 50.0
