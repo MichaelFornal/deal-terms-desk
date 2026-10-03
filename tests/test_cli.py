@@ -196,6 +196,22 @@ def test_r5_llm_runs_after_rewrite(data, monkeypatch):
     assert result["extra"]["input_tokens_mean"] == 100 and result["latency_ms"]["p50"] >= 50
 
 
+def test_r5_llm_append_appends_the_cached_rewrite_and_makes_no_call(data, monkeypatch):
+    from tests.fakes import fake_claude
+    monkeypatch.setattr(cli, "run_claude", fake_claude("Type of Consideration cash"))
+    cli.entry(["build"]); cli.entry(["embed"])
+    assert cli.entry(["rewrite"]) == 0
+    monkeypatch.setattr(cli, "run_claude", lambda *a, **k: pytest.fail("no model call allowed"))
+    seen = []
+    real_run = cli.Ladder.run
+    monkeypatch.setattr(cli.Ladder, "run", lambda self, rung, q, c=None, k=10, rewritten=None:
+                        seen.append((q, rewritten)) or real_run(self, rung, q, c, k, rewritten))
+    assert cli.entry(["eval", "--rung", "R5-llm-append"]) == 0
+    assert seen and all(r.startswith(q + " ") and len(r) > len(q) + 1 for q, r in seen)
+    assert (data / "out" / "r5_llm_append.json").exists()
+    assert (data / "out" / "r5_llm_append_items.jsonl").exists()
+
+
 def test_rewrite_command_exits_2_when_the_runner_fails(data, monkeypatch, capsys):
     def boom(prompt, model):
         raise RuntimeError("claude exited 1: nope")

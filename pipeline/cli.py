@@ -2,7 +2,7 @@ import argparse
 import json
 import sqlite3
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from evals.bootstrap import split_of
@@ -39,7 +39,6 @@ from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
-from retrieval.result import Retrieved
 from retrieval.scope import Resolver
 
 FACTS = Path("facts.json")
@@ -183,7 +182,7 @@ def _cmd_eval(args) -> int:
         return 2
     rung = args.rung
     out = Path(args.out) if args.out else OUT
-    if rung not in RUNGS + ("R5-llm", "R3-fixed", "corpus"):
+    if rung not in RUNGS + ("R5-llm", "R5-llm-append", "R3-fixed", "corpus"):
         print(f"unknown rung {rung}", file=sys.stderr)
         return 2
     if rung != "R1" and not _has_vectors(INDEX):
@@ -193,7 +192,7 @@ def _cmd_eval(args) -> int:
         print("no lexicon; run `dtd lexicon` first", file=sys.stderr)
         return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
-    if rung == "R5-llm":
+    if rung in ("R5-llm", "R5-llm-append"):
         path = CACHE / REWRITES
         if not path.exists():
             print("no LLM rewrites; run `dtd rewrite` first", file=sys.stderr)
@@ -203,15 +202,16 @@ def _cmd_eval(args) -> int:
 
         def retrieve(q, c, k):
             r = rewrites[q]
-            got = ladder.run("R5", q, c, k, rewritten=r["rewrite"])
-            return Retrieved(got.hits, got.ms + r["api_ms"], got.context)
+            text = r["rewrite"] if rung == "R5-llm" else f"{q} {r['rewrite']}"
+            got = ladder.run("R5", q, c, k, rewritten=text)
+            return replace(got, ms=got.ms + r["api_ms"])
         n = len(rewrites)
         try:
             model = _rewrite_model(rewrites)
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 2
-        result = evaluate(ctx, "R5-llm", retrieve, out, count_tokens=ladder.embedder.count_tokens, extra={
+        result = evaluate(ctx, rung, retrieve, out, count_tokens=ladder.embedder.count_tokens, extra={
             "settings": asdict(ladder.settings), "model": model, "queries": n,
             "input_tokens_mean": sum(r["input_tokens"] for r in rewrites.values()) / n,
             "output_tokens_mean": sum(r["output_tokens"] for r in rewrites.values()) / n})
