@@ -260,3 +260,22 @@ def test_scope_report_outcomes():
     got = scope_report(items, Resolver(conn))
     assert [r["outcome"] for r in got["items"]] == ["right", "ambiguous", "wrong", "none"]
     assert sum(sum(c.values()) for c in got["by_split"].values()) == 4
+
+
+def test_a_changed_prompt_is_a_cache_miss_and_a_legacy_record_is_accepted(tmp_path):
+    from evals.tmachine import TOPICS, Outline
+    path = tmp_path / "l.jsonl"
+    runner = FakeRunner(QUOTES)
+    label_contract("edgar_1", TEXT, big_outline(), TOPICS, "m", runner, Ledger(path, key="key"), "a")
+    recs = [json.loads(l) for l in path.read_text().splitlines()]
+    assert recs and all(len(r["prompt_sha"]) == 12 for r in recs)
+    n = len(runner.calls)
+    ol = big_outline()
+    changed = Outline(ol.lines[:-1] + ("9.1 Notices to Holders",), ol.sections, ol.fallback)
+    label_contract("edgar_1", TEXT, changed, TOPICS, "m", runner, Ledger(path, key="key"), "a")
+    assert len(runner.calls) == n + 1  # the outline prompt changed; the section prompt did not
+    legacy = tmp_path / "legacy.jsonl"
+    legacy.write_text("".join(json.dumps({k: v for k, v in r.items() if k != "prompt_sha"}) + "\n"
+                              for r in (json.loads(l) for l in path.read_text().splitlines())))
+    label_contract("edgar_1", TEXT, big_outline(), TOPICS, "m", runner, Ledger(legacy, key="key"), "a")
+    assert len(runner.calls) == n + 1  # records without a hash are trusted as before

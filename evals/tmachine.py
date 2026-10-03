@@ -1,3 +1,4 @@
+import hashlib
 import json
 import threading
 from collections import Counter, defaultdict
@@ -102,13 +103,20 @@ def _topics_block(topics: dict[str, str]) -> str:
     return "\n".join(f"- {t}: {d}" for t, d in topics.items())
 
 
+def prompt_sha(prompt: str) -> str:
+    return hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
+
+
 def _ask(ledger, lock, key, prompt, model, runner) -> str:
+    sha = prompt_sha(prompt)
     with lock:
         rec = ledger.get(key)
+    if rec is not None and rec.get("prompt_sha", sha) != sha:
+        rec = None  # the prompt changed since this reply was ledgered; a record without a hash is legacy, trusted
     if rec is None:
         resp = runner(prompt, model)
         usage = resp.get("usage", {})
-        rec = {"key": key, "model": model, "result": resp["result"],
+        rec = {"key": key, "model": model, "prompt_sha": sha, "result": resp["result"],
                "input_tokens": sum(usage.get(k, 0) for k in INPUT_KEYS), "output_tokens": usage.get("output_tokens", 0)}
         with lock:
             ledger.put(rec)
