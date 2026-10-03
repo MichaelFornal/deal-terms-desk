@@ -72,8 +72,12 @@ def test_candidate_section_is_labelled_and_has_no_stray_digits():
     sec = text.split("## Replacement lead family")[1].split("\n## ")[0]
     assert "machine-built" in sec and "verbatim" in sec and "earn-out" in sec
     assert "Gate with the adopted family: PASS" in sec
-    for name in ("employee_benefits", "financing", "go_shop"):
-        assert sum(1 for l in sec.splitlines() if l.startswith("|") and SENTINEL.__str__() in l) >= 3
+    for label in ("Employees' pay and benefits", "Buyer financing", "Go-shop period"):
+        row = next(l for l in sec.splitlines() if l.startswith("| " + label))
+        assert row.count(str(SENTINEL)) == 4
+    gate = text.split("## Gate")[1].split("\n## ")[0]
+    assert "recorded a replacement family" in gate and "fallback applies" not in gate
+    assert "fallback applies" in render_m0(Every())
     assert "bare buyer termination-fee" in sec
     assert "Gate with the adopted family: FAIL" in render_m0(EveryWithCandidates(False))
     lines = [l for l in text.replace(str(SENTINEL), "").splitlines() if re.search(r"\d", ALLOWED.sub("", l))]
