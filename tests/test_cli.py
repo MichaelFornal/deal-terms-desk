@@ -31,6 +31,7 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "DATA", tmp_path / "data")
     monkeypatch.setattr(cli, "REPORT_M0", tmp_path / "docs" / "m0" / "REPORT.md")
     monkeypatch.setattr(cli, "REPORT_M2", tmp_path / "docs" / "m2" / "REPORT.md")
+    monkeypatch.setattr(cli, "REPORT_M3", tmp_path / "docs" / "m3" / "REPORT.md")
     from tests.fakes import FakeEmbedder, FakeReranker
     monkeypatch.setattr(cli, "INDEX_FIXED", tmp_path / "index" / "maud_fixed.db")
     monkeypatch.setattr(cli, "CACHE", tmp_path / "cache")
@@ -54,13 +55,17 @@ def test_build_eval_facts_report_chain(data, capsys):
 
 
 def test_the_cli_chain_does_not_touch_the_real_m0_report_or_data(data):
-    real = Path(__file__).resolve().parent.parent / "docs" / "m0" / "REPORT.md"
+    root = Path(__file__).resolve().parent.parent
+    real, real_m3 = root / "docs" / "m0" / "REPORT.md", root / "docs" / "m3" / "REPORT.md"
     before = real.stat().st_mtime_ns if real.exists() else None
+    before_m3 = real_m3.stat().st_mtime_ns if real_m3.exists() else None
     for cmd in (["build"], ["eval"], ["facts"], ["report"]):
         assert cli.entry(cmd) == 0
     assert (real.stat().st_mtime_ns if real.exists() else None) == before
+    assert (real_m3.stat().st_mtime_ns if real_m3.exists() else None) == before_m3
     facts = json.loads((data / "facts.json").read_text())
-    assert not [k for k in facts if k.startswith("m0_")]
+    assert not [k for k in facts if k.startswith("m0_") or k.startswith("m3_")]
+    assert not (data / "docs" / "m3").exists()
     assert not (data / "docs" / "m0").exists()
 
 
