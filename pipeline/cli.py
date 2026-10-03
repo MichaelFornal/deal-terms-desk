@@ -335,7 +335,7 @@ def _cmd_m0(args) -> int:
             client = SecClient(DATA / "sec", sec_contact())
         out = DATA / "m0"
         for stage in stages:
-            fn = getattr(m0, "stage_" + stage.replace("-", "_"))
+            fn = getattr(m0, "stage_candidates_sample" if stage == "candidate-sample" else f"stage_{stage}")
             if stage in ("sample", "measure", "candidate-sample"):
                 summary = fn(out)
             elif stage == "search":
