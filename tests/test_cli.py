@@ -622,3 +622,49 @@ def test_m3_label_runner_error_exits_2_and_missing_inputs_name_the_step(data, ca
     monkeypatch.setattr(cli, "run_claude", fail)
     assert cli.entry(["m3", "label"]) == 2
     assert "claude down" in capsys.readouterr().err
+
+
+def _kept_runner(prompt, model):
+    quote = "The parties agree. The parties agree."
+    if prompt.startswith("Below is the outline"):
+        reply = {t: ["C1"] for t in ("equity_awards", "termination_fee", "employee_benefits")}
+    else:
+        reply = {t: {"found": True, "quotes": [quote], "answer": "yes"}
+                 for t in ("equity_awards", "termination_fee", "employee_benefits")}
+    return {"result": json.dumps(reply), "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+
+def _m3_setup(data, monkeypatch):
+    from tests.fakes import fake_claude
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    _add_tune_contract(data)
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    return fake_claude
+
+
+def test_m3_chain_embed_lexicon_label_eval_writes_every_result(data, monkeypatch):
+    fake_claude = _m3_setup(data, monkeypatch)
+    assert cli.entry(["embed", "--deals"]) == 0
+    monkeypatch.setattr(cli, "run_claude", fake_claude('{"cash deal": ["Type of Consideration"]}'))
+    assert cli.entry(["embed"]) == 0
+    assert cli.entry(["lexicon"]) == 0
+    monkeypatch.setattr(cli, "run_claude", _kept_runner)
+    assert cli.entry(["m3", "label"]) == 0
+    assert cli.entry(["m3", "eval"]) == 0
+    out = data / "out" / "m3"
+    for name in [f"t_r{i}.json" for i in range(1, 7)] + ["t_r6_corpus.json", "t_r7_corpus.json", "r7_scope.json"]:
+        assert (out / name).exists(), name
+    assert json.loads((out / "t_r7_corpus.json").read_text())["scope"] == "corpus-wide"
+    assert json.loads((out / "r7_scope.json").read_text())["items"]
+
+
+def test_m3_eval_before_embed_deals_exits_2_and_names_it(data, capsys):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    assert cli.entry(["m3", "eval"]) == 2
+    assert "dtd embed --deals" in capsys.readouterr().err

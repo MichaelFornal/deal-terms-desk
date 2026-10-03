@@ -241,3 +241,22 @@ def test_runner_failure_stops_the_run_and_resume_reuses_the_ledger(tmp_path):
     good.calls.clear()
     label_all(conn, texts, contracts, TOPICS, PASSES, good, tmp_path / "l.jsonl", workers=2)
     assert len(good.calls) == 8 * 4 - ledgered
+
+
+def test_scope_report_outcomes():
+    import sqlite3
+    from evals.items import Item
+    from evals.tmachine import scope_report
+    from retrieval.scope import Resolver
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE aliases(alias TEXT, contract_id TEXT, kind TEXT)")
+    conn.executemany("INSERT INTO aliases VALUES (?, ?, ?)", [
+        ("acme software", "edgar_1", "target"), ("polycom", "edgar_2", "target"), ("polycom", "edgar_3", "target"),
+        ("zeta labs", "edgar_4", "target")])
+    items = [Item("edgar_1|equity_awards", "edgar_1", "equity_awards", "equity_awards", "Acme Software options?", ((0, 5),)),
+             Item("edgar_2|termination_fee", "edgar_2", "termination_fee", "termination_fee", "Polycom fee?", ((0, 5),)),
+             Item("edgar_5|termination_fee", "edgar_5", "termination_fee", "termination_fee", "Zeta Labs fee?", ((0, 5),)),
+             Item("edgar_6|termination_fee", "edgar_6", "termination_fee", "termination_fee", "Unknown Co fee?", ((0, 5),))]
+    got = scope_report(items, Resolver(conn))
+    assert [r["outcome"] for r in got["items"]] == ["right", "ambiguous", "wrong", "none"]
+    assert sum(sum(c.values()) for c in got["by_split"].values()) == 4

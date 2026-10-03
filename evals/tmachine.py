@@ -1,5 +1,6 @@
 import json
 import threading
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -297,3 +298,16 @@ def items_from_rows(rows: list[dict]) -> list[Item]:
     return [Item(f"{r['contract_id']}|{r['family']}", r["contract_id"], r["family"], r["family"],
                  TEMPLATES[r["family"]].format(target=r["target"]), tuple(tuple(g) for g in r["gold"]))
             for r in rows if r["status"] == "kept"]
+
+
+def scope_report(items: list[Item], resolver) -> dict:
+    rows, by_split = [], defaultdict(Counter)
+    for i in items:
+        s = resolver.resolve(i.query)
+        outcome = ("right" if s.contract_id == i.contract_id else "wrong" if s.contract_id
+                   else "ambiguous" if s.candidates else "none")
+        split = split_of(i.contract_id)
+        rows.append({"item_id": i.item_id, "split": split, "outcome": outcome, "alias": s.alias,
+                     "candidates": list(s.candidates)})
+        by_split[split][outcome] += 1
+    return {"items": rows, "by_split": {k: dict(v) for k, v in sorted(by_split.items())}}

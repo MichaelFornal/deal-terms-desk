@@ -10,8 +10,8 @@ from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
-from evals.run_rung import evaluate, load_context, with_passages
-from evals.tmachine import PASSES, TOPICS, label_all
+from evals.run_rung import Context, evaluate, load_context, with_passages
+from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
 from evals.tune import tune
 from facts.build import build as build_facts
 from facts.build import UNSTABLE
@@ -39,6 +39,7 @@ from retrieval.lexicon import LEXICON_PATH, load_lexicon
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
 from retrieval.result import Retrieved
+from retrieval.scope import Resolver
 
 FACTS = Path("facts.json")
 REPORT = Path("docs/m1/REPORT.md")
@@ -134,9 +135,10 @@ def _has_vectors(db: Path) -> bool:
 
 
 def _cmd_embed(args) -> int:
-    db = INDEX_FIXED if args.fixed else INDEX
+    db = DEALS_INDEX if args.deals else INDEX_FIXED if args.fixed else INDEX
     if not db.exists():
-        print(f"{db} missing; run `dtd build{' --fixed' if args.fixed else ''}` first", file=sys.stderr)
+        flag = " --deals" if args.deals else " --fixed" if args.fixed else ""
+        print(f"{db} missing; run `dtd build{flag}` first", file=sys.stderr)
         return 2
     embedder, _ = _models()
     conn = vectors.connect(db)
@@ -155,6 +157,16 @@ def _ladder(db: Path, texts: dict[str, str]) -> Ladder:
     reranker = CachedReranker(make_reranker(settings.reranker), CACHE / "rerank.db")
     lexicon = load_lexicon(LEXICON_PATH) if LEXICON_PATH.exists() else None
     return Ladder(vectors.connect(db), texts, embedder, reranker, lexicon, settings)
+
+
+def _deals_ladder(contracts: dict[str, str], amendment_texts: dict[str, str]) -> Ladder:
+    embedder, make_reranker = _models()
+    settings = load_settings(SETTINGS_PATH)
+    reranker = CachedReranker(make_reranker(settings.reranker), CACHE / "rerank.db")
+    lexicon = load_lexicon(LEXICON_PATH) if LEXICON_PATH.exists() else None
+    conn = vectors.connect(DEALS_INDEX)
+    return Ladder(conn, contracts, embedder, reranker, lexicon, settings, amendment_texts=amendment_texts,
+                  resolver=Resolver(conn))
 
 
 def _eval_rung(rung: str, db: Path, name: str, ctx, out: Path = OUT, **kw) -> dict:
@@ -361,6 +373,8 @@ def _cmd_m3(args) -> int:
         print(json.dumps(summary))
     elif args.stage == "label":
         return _m3_label(args)
+    elif args.stage == "eval":
+        return _m3_eval()
     return 0
 
 
@@ -386,6 +400,38 @@ def _m3_label(args) -> int:
     _write_atomic(out / "tmachine.jsonl", "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
     _write_atomic(out / "tmachine_summary.json", json.dumps(summary, indent=2, sort_keys=True))
     print(json.dumps(summary))
+    return 0
+
+
+def _m3_eval() -> int:
+    tm = DATA / "m3" / "tmachine.jsonl"
+    if not DEALS_INDEX.exists() or not _has_vectors(DEALS_INDEX):
+        print("deals index missing or has no vectors; run `dtd build --deals` then `dtd embed --deals` first",
+              file=sys.stderr)
+        return 2
+    if not tm.exists():
+        print(f"{tm} missing; run `dtd m3 label` first", file=sys.stderr)
+        return 2
+    if not LEXICON_PATH.exists():
+        print("lexicon missing; run `dtd lexicon` first", file=sys.stderr)
+        return 2
+    contracts, amendment_texts = _deals_texts()
+    rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
+    items = items_from_rows(rows)
+    if not items:
+        print("no kept T-machine items to evaluate", file=sys.stderr)
+        return 2
+    ctx = with_passages(Context(items, {"source": "T-machine (machine-built)", "items": len(items)}, contracts, {}),
+                        DEALS_INDEX)
+    ladder = _deals_ladder(contracts, amendment_texts)
+    out, kw = OUT / "m3", {"count_tokens": ladder.embedder.count_tokens,
+                           "extra": {"settings": asdict(ladder.settings)}}
+    for rung in RUNGS:
+        evaluate(ctx, f"T-{rung}", lambda q, c, k, r=rung: ladder.run(r, q, c, k), out, **kw)
+    evaluate(ctx, "T-R6-corpus", lambda q, c, k: ladder.run("R6", q, None, k), out, scope="corpus-wide", **kw)
+    evaluate(ctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), out, scope="corpus-wide", **kw)
+    _write_atomic(out / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
+    print(json.dumps({"items": len(items), "written": sorted(p.name for p in out.iterdir())}))
     return 0
 
 
@@ -443,6 +489,7 @@ def entry(argv: list[str] | None = None) -> int:
     build.set_defaults(fn=_cmd_build)
     embed = sub.add_parser("embed")
     embed.add_argument("--fixed", action="store_true")
+    embed.add_argument("--deals", action="store_true")
     embed.set_defaults(fn=_cmd_embed)
     ev = sub.add_parser("eval")
     ev.add_argument("--rung", default="R1")
@@ -461,7 +508,7 @@ def entry(argv: list[str] | None = None) -> int:
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
     m3p = sub.add_parser("m3")
-    m3p.add_argument("stage", choices=("corpus", "label"))
+    m3p.add_argument("stage", choices=("corpus", "label", "eval"))
     m3p.add_argument("--workers", type=int, default=4)
     m3p.add_argument("--max-new", type=int, default=None)
     m3p.set_defaults(fn=_cmd_m3)
