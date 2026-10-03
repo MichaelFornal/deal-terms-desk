@@ -668,3 +668,32 @@ def test_m3_eval_before_embed_deals_exits_2_and_names_it(data, capsys):
     assert cli.entry(["build", "--deals"]) == 0
     assert cli.entry(["m3", "eval"]) == 2
     assert "dtd embed --deals" in capsys.readouterr().err
+
+
+def _tier_runner(prompt, model):
+    if prompt.startswith("Below is the outline"):
+        reply = {"T1": ["C1"]}
+    else:
+        reply = {"T1": {"found": True, "quotes": ["Each Company Share shall be converted into the right to receive cash"], "answer": "x"}}
+    return {"result": json.dumps(reply), "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+
+def test_m3_tier_writes_the_report_and_names_a_missing_rung(data, monkeypatch, capsys):
+    _m2_chain(data, monkeypatch)
+    monkeypatch.setattr(cli, "run_claude", _tier_runner)
+    assert cli.entry(["m3", "tier", "--workers", "2"]) == 0
+    rep = json.loads((data / "out" / "m3" / "tier.json").read_text())
+    assert {"match", "tau", "rungs"} <= set(rep) and set(rep["rungs"]) == {f"R{i}" for i in range(1, 7)}
+    assert rep["kept"] >= 1 and rep["match"]["mean"] == 1.0
+    rows = [json.loads(x) for x in (data / "data" / "m3" / "tier_rows.jsonl").read_text().splitlines()]
+    assert rows and (data / "data" / "m3" / "tier_ledger.jsonl").exists()
+    assert not (data / "out" / "tier.json").exists()
+
+    def boom(prompt, model):
+        raise AssertionError("model called on a fully cached run")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    assert cli.entry(["m3", "tier"]) == 0
+    (data / "out" / "r6_items.jsonl").unlink()
+    capsys.readouterr()
+    assert cli.entry(["m3", "tier"]) == 2
+    assert "dtd eval --rung R6" in capsys.readouterr().err

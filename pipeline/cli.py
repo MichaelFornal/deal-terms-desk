@@ -11,6 +11,7 @@ from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sampl
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
 from evals.run_rung import Context, evaluate, load_context, with_passages
+from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
 from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
 from evals.tune import tune
 from facts.build import build as build_facts
@@ -375,6 +376,8 @@ def _cmd_m3(args) -> int:
         return _m3_label(args)
     elif args.stage == "eval":
         return _m3_eval()
+    elif args.stage == "tier":
+        return _m3_tier(args)
     return 0
 
 
@@ -432,6 +435,45 @@ def _m3_eval() -> int:
     evaluate(ctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), out, scope="corpus-wide", **kw)
     _write_atomic(out / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
     print(json.dumps({"items": len(items), "written": sorted(p.name for p in out.iterdir())}))
+    return 0
+
+
+def _m3_tier(args) -> int:
+    missing = [r for r in RUNG_NAMES if not (OUT / f"{r.lower()}_items.jsonl").exists()]
+    if not INDEX.exists():
+        print(f"{INDEX} missing; run `dtd build` first", file=sys.stderr)
+        return 2
+    if missing:
+        print(f"missing M2 items for {', '.join(missing)}; run " + ", ".join(f"`dtd eval --rung {r}`" for r in missing),
+              file=sys.stderr)
+        return 2
+    rung_rows = {r: load_items(OUT / f"{r.lower()}_items.jsonl") for r in RUNG_NAMES}
+    cids = tier_sample(rung_rows["R1"])
+    topics_by_contract, keymap = {}, {}
+    for cid in cids:
+        topics, ids = tier_topics(rung_rows["R1"], cid)
+        topics_by_contract[cid] = topics
+        keymap |= {(cid, key): item_id for key, item_id in ids.items()}
+    texts = {cid: load_contract(RAW / "contracts" / f"{cid}.txt") for cid in cids}
+    conn = sqlite3.connect(INDEX, check_same_thread=False)
+    out = DATA / "m3"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        rows, _ = label_all(conn, texts, [(cid, cid) for cid in cids], {}, PASSES, run_claude,
+                            out / "tier_ledger.jsonl", workers=args.workers, topics_by_contract=topics_by_contract)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    spans = {pid: (s, e) for pid, s, e in conn.execute("SELECT passage_id, start_char, end_char FROM passages")}
+    rows = [r for r in rows if (r["contract_id"], r["family"]) in keymap]
+    if not rows:
+        print("no tier items were labelled", file=sys.stderr)
+        return 2
+    report = tier_report(rows, keymap, rung_rows, spans)
+    _write_atomic(out / "tier_rows.jsonl", "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    (OUT / "m3").mkdir(parents=True, exist_ok=True)
+    _write_atomic(OUT / "m3" / "tier.json", json.dumps(report, indent=2, sort_keys=True))
+    print(json.dumps({k: report[k] for k in ("match", "tau", "tau_lo", "tau_hi")}))
     return 0
 
 
@@ -508,7 +550,7 @@ def entry(argv: list[str] | None = None) -> int:
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
     m3p = sub.add_parser("m3")
-    m3p.add_argument("stage", choices=("corpus", "label", "eval"))
+    m3p.add_argument("stage", choices=("corpus", "label", "eval", "tier"))
     m3p.add_argument("--workers", type=int, default=4)
     m3p.add_argument("--max-new", type=int, default=None)
     m3p.set_defaults(fn=_cmd_m3)
