@@ -575,3 +575,50 @@ def test_build_deals_writes_index_and_summary(data, capsys):
 def test_build_deals_without_corpus_names_the_command(data, capsys):
     assert cli.entry(["build", "--deals"]) == 2
     assert "dtd m3 corpus" in capsys.readouterr().err
+
+
+def _fake_label_runner(calls):
+    def runner(prompt, model):
+        calls.append(model)
+        if prompt.startswith("Below is the outline"):
+            reply = {"equity_awards": [], "termination_fee": [], "employee_benefits": []}
+        else:
+            reply = {}
+        return {"result": json.dumps(reply), "usage": {"input_tokens": 1, "output_tokens": 1}}
+    return runner
+
+
+def test_m3_label_writes_rows_and_summary_and_resumes_from_the_ledger(data, capsys, monkeypatch):
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+    calls = []
+    monkeypatch.setattr(cli, "run_claude", _fake_label_runner(calls))
+    assert cli.entry(["m3", "label", "--workers", "2"]) == 0
+    out = data / "data" / "m3"
+    rows = [json.loads(line) for line in (out / "tmachine.jsonl").read_text().splitlines()]
+    summary = json.loads((out / "tmachine_summary.json").read_text())
+    assert calls and rows and summary["complete"] == summary["contracts"] and summary["absent"] == len(rows)
+    assert (out / "tmachine_ledger.jsonl").exists()
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == summary
+
+    def boom(prompt, model):
+        raise AssertionError("model called on a fully cached run")
+    monkeypatch.setattr(cli, "run_claude", boom)
+    assert cli.entry(["m3", "label"]) == 0
+
+
+def test_m3_label_runner_error_exits_2_and_missing_inputs_name_the_step(data, capsys, monkeypatch):
+    assert cli.entry(["m3", "label"]) == 2
+    assert "dtd build --deals" in capsys.readouterr().err
+    from tests.test_tech_corpus import make_m0
+    make_m0(data / "data")
+    assert cli.entry(["m3", "corpus"]) == 0
+    assert cli.entry(["build", "--deals"]) == 0
+
+    def fail(prompt, model):
+        raise RuntimeError("claude down")
+    monkeypatch.setattr(cli, "run_claude", fail)
+    assert cli.entry(["m3", "label"]) == 2
+    assert "claude down" in capsys.readouterr().err

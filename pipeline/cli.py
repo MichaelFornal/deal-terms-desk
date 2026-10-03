@@ -11,6 +11,7 @@ from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sampl
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
 from evals.run_rung import evaluate, load_context, with_passages
+from evals.tmachine import PASSES, TOPICS, label_all
 from evals.tune import tune
 from facts.build import build as build_facts
 from facts.build import UNSTABLE
@@ -358,6 +359,33 @@ def _cmd_m3(args) -> int:
         summary = assemble(DATA / "m0", EDGAR)
         _write_atomic(EDGAR / "summary.json", json.dumps(summary, indent=2, sort_keys=True))
         print(json.dumps(summary))
+    elif args.stage == "label":
+        return _m3_label(args)
+    return 0
+
+
+def _m3_label(args) -> int:
+    if not DEALS_INDEX.exists():
+        print(f"{DEALS_INDEX} missing; run `dtd build --deals` first", file=sys.stderr)
+        return 2
+    if not (EDGAR / "deals.jsonl").exists():
+        print(f"{EDGAR / 'deals.jsonl'} missing; run `dtd m3 corpus` first", file=sys.stderr)
+        return 2
+    deals = [json.loads(line) for line in (EDGAR / "deals.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    texts = {p.stem: load_contract(p) for p in sorted((EDGAR / "contracts").glob("*.txt"))}
+    contracts = sorted((d["contract_id"], d["target"] or d["aliases"][0]) for d in deals)
+    out = DATA / "m3"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        rows, summary = label_all(sqlite3.connect(DEALS_INDEX, check_same_thread=False), texts, contracts, TOPICS,
+                                  PASSES, run_claude, out / "tmachine_ledger.jsonl", workers=args.workers,
+                                  max_new=args.max_new)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    _write_atomic(out / "tmachine.jsonl", "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    _write_atomic(out / "tmachine_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
     return 0
 
 
@@ -433,7 +461,9 @@ def entry(argv: list[str] | None = None) -> int:
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
     m3p = sub.add_parser("m3")
-    m3p.add_argument("stage", choices=("corpus",))
+    m3p.add_argument("stage", choices=("corpus", "label"))
+    m3p.add_argument("--workers", type=int, default=4)
+    m3p.add_argument("--max-new", type=int, default=None)
     m3p.set_defaults(fn=_cmd_m3)
     args = parser.parse_args(argv)
     return args.fn(args)
