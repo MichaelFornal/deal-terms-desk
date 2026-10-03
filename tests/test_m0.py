@@ -444,3 +444,58 @@ def test_measure_counts_bare_ex2_exhibits(tmp_path):
     for n in ("docs", "deals", "sample", "press"):
         (tmp_path / f"{n}.jsonl").write_text("")
     assert stage_measure(tmp_path)["ex2_bare_docs"] == 2
+
+
+def test_the_data_driven_prompt_for_the_original_families_is_unchanged():
+    from pipeline.m0 import LEAD_SPECS, PROMPT, _prompt
+    assert _prompt(LEAD_SPECS, "{excerpt}") == PROMPT.replace("{{", "{").replace("}}", "}")
+
+
+def _cand_fixture(tmp_path):
+    from pathlib import Path
+    text = ("Section 6.9 Employee Matters. For twelve months after closing, Continuing Employees receive pay no less "
+            "favorable than before.\n\nSection 5.1 Financing. Parent has delivered the Debt Commitment Letter to the "
+            "Company.\n\nSection 2.3 Company Options. Each Company Option shall be cancelled.\n")
+    tp = tmp_path / "t.txt"
+    tp.write_text(text, encoding="utf-8")
+    (tmp_path / "deals.jsonl").write_text(json.dumps({"canonical": {"adsh": "a-1", "filename": "f.htm", "text": str(tp)}}) + "\n")
+    (tmp_path / "sample.jsonl").write_text(json.dumps({"adsh": "a-1", "key": ["x", "y", "2017-01-01"],
+                                                      "equity_awards": {"present": True}}) + "\n")
+
+
+CAND = json.dumps({"employee_benefits": {"present": True, "quote": "Continuing Employees receive pay no less favorable than before"},
+                   "financing": {"present": True, "quote": "Parent has delivered the Debt Commitment Letter"},
+                   "go_shop": {"present": True, "quote": "a fabricated go-shop quote that is not in the text"}})
+
+
+def test_candidates_run_on_a_fixture_sample_and_resume_makes_no_calls(tmp_path):
+    from pipeline.m0 import stage_candidates_sample
+    _cand_fixture(tmp_path)
+    r = fake_claude(CAND)
+    m = stage_candidates_sample(tmp_path, runner=r, model="m")
+    assert len(r.calls) == 1
+    assert m["family_present"] == {"employee_benefits": 1, "financing": 1, "go_shop": 0}
+    assert m["family_regex"] == {"employee_benefits": 1, "financing": 1, "go_shop": 0} and m["sample"] == 1
+    assert json.loads((tmp_path / "candidate_measure.json").read_text())["model"] == "m"
+    again = fake_claude("unused")
+    assert stage_candidates_sample(tmp_path, runner=again, model="m") == m and again.calls == []
+    assert (tmp_path / "candidate_sample_ledger.jsonl").exists()
+    assert json.loads((tmp_path / "sample.jsonl").read_text())["equity_awards"] == {"present": True}
+
+
+def test_the_original_families_ignore_candidate_hints():
+    from pipeline.m0 import hint_passages, CANDIDATE_SPECS
+    t = "Section 6.9 Employee Matters. Continuing Employees keep pay.\n\n"
+    assert hint_passages(t)["equity_awards"] == [] and hint_passages(t, CANDIDATE_SPECS)["employee_benefits"]
+
+
+def test_candidate_measure_is_written_atomically(tmp_path, monkeypatch):
+    import os
+    from pipeline.m0 import stage_candidates_sample
+    _cand_fixture(tmp_path)
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda a, b: seen.append((str(a), str(b))) or real(a, b))
+    stage_candidates_sample(tmp_path, runner=fake_claude(CAND), model="m")
+    assert any(b.endswith("candidate_measure.json") and a != b for a, b in seen)
+    assert not list(tmp_path.glob("*.tmp"))

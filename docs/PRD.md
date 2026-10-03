@@ -11,13 +11,14 @@ conclude "he can make RAG measurably good", and RAG should be on the resume hone
 second showcase alongside Agent Census, not a replacement.
 
 **The product in one sentence:** ask what a signed acquisition agreement really says about
-employee stock, break-up fees or earn-outs, and get the clause quoted from the contract.
+employee stock, break-up fees or what happens to employees' pay and benefits, and get the clause quoted
+from the contract.
 
 | Decision | Value |
 |---|---|
 | Subject | Merger agreements: MAUD's 152 lawyer-labelled agreements plus technology-target agreements filed as 8-K EX-2.1 exhibits on EDGAR |
 | Centerpiece | A real RAG system: messy contracts in, grounded answers with quoted, cited clauses out. Evals sit behind it and are published |
-| Lead questions | (1) treatment of employee equity awards, (2) termination ("break-up") fee size and triggers, (3) earn-outs and other contingent consideration |
+| Lead questions | (1) treatment of employee equity awards, (2) termination ("break-up") fee size and triggers, (3) employees' pay and benefits after the deal (the post-closing compensation and benefits covenant). Changed 2026-10-02 from earn-outs and other contingent consideration; see §9 |
 | Eval anchor | Two tiers, labelled differently: human-labelled (MAUD) and machine-built (lead questions on tech deals) |
 | Demo | Fully live: any question gets retrieval plus a generated, cited answer |
 | Budget | **$10 per month hard cap, all in**, for the live demo (hosting plus model calls). Everything offline (ingestion, indexing, evals) costs $0: Claude Max plan via `claude -p`, local open-source models, free data |
@@ -51,7 +52,8 @@ so and compares against the published baselines.
 - One agreement was read during verification: 113,471 words, 199 inline defined terms, no
   standalone definitions article, no redaction markers, 46 references to an unfiled disclosure
   letter. One document is not a rate; M1 measures the distribution.
-- MAUD has no question about equity awards, fee amounts or earn-outs.
+- MAUD has no question about equity awards, fee amounts, employees' post-closing pay and benefits, or
+  earn-outs.
 
 ### 2.2 Tech half: EDGAR EX-2.1
 
@@ -217,6 +219,14 @@ M1 and M2 touch only MAUD, so they do not wait on the SEC.
 | M4 | Answering, the citation gate, abstention and citation-accuracy evals, the fee cross-check if M0 allowed it | Answer-quality tables for both tiers |
 | M5 | The service, cost controls, deployment to `deals.forn.al`, the four pages. Model and price confirmed; index size checked against 1 GB | A visitor can ask a question and get a cited answer; the cap trips in a test |
 | M6 | Michael's README and launch post; final facts check | Public |
+
+**M0 outcome (2026-10-02, recorded in `docs/m0/REPORT.md`):** the gate failed on its family
+condition, not on corpus size. Tech agreements met the count, but earn-outs and other contingent
+consideration were present in none of the 30 sampled public tech-target agreements (machine-built,
+quote-gated). §10's fallback, written for a thin corpus, did not fit. Michael's decision: replace the
+third lead family with employees' pay and benefits after the deal, which is not a MAUD deal point and
+was measured present in nearly all of the same sample. Earn-out questions stay in the evals as
+abstention items (§5.2), where their absence is the correct answer.
 
 ## 10. Risks and stated limits (these appear on the Method page)
 

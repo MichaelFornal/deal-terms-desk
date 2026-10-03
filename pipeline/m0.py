@@ -1,9 +1,11 @@
 import json
+import os
 import random
 import re
 from datetime import date
 from pathlib import Path
 from statistics import median
+from typing import NamedTuple
 
 from pipeline.claude import run_claude
 from pipeline.edgar_search import START, doc_url, index_url, is_ex21, months, search_window
@@ -23,6 +25,13 @@ MAX_PROMPT_CHARS = 40000
 PASSAGE_SEP = "\n\n---\n\n"
 MIN_FEE = 100_000
 FEE_TOLERANCE = 0.005
+
+class FamilySpec(NamedTuple):
+    name: str
+    hint: re.Pattern
+    topic: str
+
+
 HINTS = {
     "equity_awards": re.compile(r"\b(?:Stock\s+Options?|Company\s+Options?|RSUs?|Restricted\s+Stock(?:\s+Units?)?|"
                                 r"PSUs?|Equity\s+Awards?|Stock\s+Awards?)\b", re.I),
@@ -41,6 +50,31 @@ Reply with one JSON object and nothing else: {{"equity_awards": {{"present": tru
 
 Passages:
 {excerpt}"""
+LEAD_TOPICS = {
+    "equity_awards": "how employee stock options, restricted stock units or other equity awards are treated in the merger",
+    "termination_fee": "a fee one party must pay the other if the agreement is terminated",
+    "contingent_consideration": "an earn-out, contingent value right, milestone payment or other consideration paid later "
+                                "depending on future events",
+}
+LEAD_SPECS = tuple(FamilySpec(f, HINTS[f], LEAD_TOPICS[f]) for f in FAMILIES)
+CANDIDATE_SPECS = (
+    FamilySpec("employee_benefits",
+               re.compile(r"\b(?:Continuing\s+Employees?|Continuation\s+Period|no\s+less\s+favorable|"
+                          r"(?:substantially\s+)?comparable\s+(?:to|in\s+the\s+aggregate)|Employee\s+Matters|"
+                          r"severance\s+(?:plans?|benefits?|pay|protection))\b", re.I),
+               "a covenant that, for a period after closing, continuing employees keep compensation or benefits no "
+               "less favorable than before, or keep severance protection"),
+    FamilySpec("financing",
+               re.compile(r"\b(?:Debt\s+Commitment\s+Letters?|Equity\s+Commitment\s+Letters?|Debt\s+Financing|"
+                          r"Equity\s+Financing|Financing\s+Sources?|financing\s+cooperation|"
+                          r"(?:Parent|Reverse)\s+Termination\s+Fee|Commitment\s+Letters?)\b", re.I),
+               "the buyer's debt or equity financing of the deal, such as a debt or equity commitment letter, a "
+               "financing cooperation covenant, or a termination fee payable by the buyer"),
+    FamilySpec("go_shop",
+               re.compile(r"\b(?:Go-?\s?Shop|No-?\s?Shop\s+Period\s+Start\s+Date|Excluded\s+Parties|"
+                          r"Excluded\s+Party|Window\s+Period)\b", re.I),
+               "a period after signing in which the target may actively solicit competing acquisition proposals"),
+)
 SCALE = r"(?:\s*(million|billion|mm|bn|m|b)\b)?"
 FEE = re.compile(r"termination\s+fee[^;]{0,300}?\$\s?(\d[\d,]*(?:\.\d+)?)" + SCALE, re.I | re.S)
 DOLLARS = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)" + SCALE, re.I)
@@ -183,13 +217,23 @@ def _gate_deals(out: Path) -> list[dict]:
     return [d for d in _read_jsonl(Path(out) / "deals.jsonl") if d["tech"] and d["signed"] >= START.isoformat()]
 
 
-def _all_hints(text: str) -> dict[str, list[str]]:
+def _all_hints(text: str, specs=LEAD_SPECS) -> dict[str, list[str]]:
     chunks = [text[p.start:p.end] for p in segment("m0", text)]
-    return {f: [c for c in chunks if HINTS[f].search(c)] for f in FAMILIES}
+    return {sp.name: [c for c in chunks if sp.hint.search(c)] for sp in specs}
 
 
-def hint_passages(text: str) -> dict[str, list[str]]:
-    return {f: v[:MAX_HINT_PASSAGES] for f, v in _all_hints(text).items()}
+def hint_passages(text: str, specs=LEAD_SPECS) -> dict[str, list[str]]:
+    return {f: v[:MAX_HINT_PASSAGES] for f, v in _all_hints(text, specs).items()}
+
+
+def _prompt(specs, excerpt: str) -> str:
+    topics = "\n".join(f"- {sp.name}: {sp.topic}" for sp in specs)
+    shape = ", ".join(f'"{sp.name}": {{{{"present": true or false, "quote": "..."}}}}' for sp in specs)
+    head, rest = PROMPT.split("Topics:\n", 1)
+    tail = rest.split("\n\nReply with one JSON object", 1)[1].split("\n\nPassages:\n", 1)[0]
+    reply = "Reply with one JSON object" + tail.split("{{", 1)[0]
+    return (head + "Topics:\n" + topics + "\n\n" + reply + "{" + shape.replace("{{", "{").replace("}}", "}") +
+            "}\n\nPassages:\n" + excerpt)
 
 
 def _clean(s: str) -> str:
@@ -231,10 +275,11 @@ def _family_block(passages: list[str], cap: int, more: bool) -> tuple[str, bool]
     return PASSAGE_SEP.join(parts), truncated
 
 
-def lead_families(text: str, runner, model: str) -> dict:
-    full = _all_hints(text)
-    out = {f: {"present": False, "regex": bool(full[f]), "quote": "", "truncated": False} for f in FAMILIES}
-    asked = [f for f in FAMILIES if full[f]]
+def lead_families(text: str, runner, model: str, specs=LEAD_SPECS) -> dict:
+    full = _all_hints(text, specs)
+    names = [sp.name for sp in specs]
+    out = {f: {"present": False, "regex": bool(full[f]), "quote": "", "truncated": False} for f in names}
+    asked = [f for f in names if full[f]]
     if not asked:
         return out
     cap = MAX_PROMPT_CHARS // len(asked)
@@ -244,7 +289,7 @@ def lead_families(text: str, runner, model: str) -> dict:
                                                        len(full[f]) > MAX_HINT_PASSAGES)
         shown[f] = _clean(blocks[f])
     excerpt = PASSAGE_SEP.join(blocks[f] for f in asked)
-    answer = _json_object(runner(PROMPT.format(excerpt=excerpt), model)["result"], tuple(asked))
+    answer = _json_object(runner(_prompt(specs, excerpt), model)["result"], tuple(asked))
     for f in asked:
         got = answer.get(f) if isinstance(answer.get(f), dict) else {}
         quote = str(got.get("quote", "")).strip()
@@ -382,3 +427,33 @@ def stage_measure(out: Path = M0_DIR) -> dict:
     tmp.write_text(json.dumps(m, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
     return m
+
+
+def stage_candidates_sample(out: Path = M0_DIR, runner=run_claude, model: str = LEAD_MODEL) -> dict:
+    out = Path(out)
+    sample = _read_jsonl(out / "sample.jsonl")
+    canon = {d["canonical"]["adsh"]: d["canonical"] for d in _read_jsonl(out / "deals.jsonl")}
+    ledger = Ledger(out / "candidate_sample_ledger.jsonl", key="id")
+    rows = []
+    for s in sample:
+        c = canon[s["adsh"]]
+        lid = f"{s['adsh']}|{c['filename']}|{model}|candidates"
+        rec = ledger.get(lid)
+        if rec is None:
+            text = Path(c["text"]).read_text(encoding="utf-8")
+            rec = {"id": lid, "adsh": s["adsh"], "filename": c["filename"], "model": model,
+                   **lead_families(text, runner, model, CANDIDATE_SPECS)}
+            ledger.put(rec)
+        rows.append({**rec, "key": s["key"]})
+    _write_jsonl(out / "candidate_sample.jsonl", rows)
+    names = [sp.name for sp in CANDIDATE_SPECS]
+    measure = {"sample": len(rows),
+               "family_present": {f: sum(1 for r in rows if r[f]["present"]) for f in names},
+               "family_regex": {f: sum(1 for r in rows if r[f]["regex"]) for f in names},
+               "family_truncated": {f: sum(1 for r in rows if r[f]["truncated"]) for f in names},
+               "model": model}
+    path = out / "candidate_measure.json"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(measure, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+    return measure

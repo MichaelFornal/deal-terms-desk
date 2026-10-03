@@ -335,8 +335,8 @@ def _cmd_m0(args) -> int:
             client = SecClient(DATA / "sec", sec_contact())
         out = DATA / "m0"
         for stage in stages:
-            fn = getattr(m0, f"stage_{stage}")
-            if stage in ("sample", "measure"):
+            fn = getattr(m0, "stage_candidates_sample" if stage == "candidate-sample" else f"stage_{stage}")
+            if stage in ("sample", "measure", "candidate-sample"):
                 summary = fn(out)
             elif stage == "search":
                 summary = fn(client, out, today=m0.search_end(out))  # a rerun asks the same windows
@@ -394,7 +394,7 @@ def entry(argv: list[str] | None = None) -> int:
     sub.add_parser("failures").set_defaults(fn=_cmd_failures)
     sub.add_parser("report").set_defaults(fn=_cmd_report)
     m0p = sub.add_parser("m0")
-    m0p.add_argument("stage", choices=M0_STAGES + ("all",))
+    m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
     args = parser.parse_args(argv)
     return args.fn(args)
