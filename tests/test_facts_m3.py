@@ -116,3 +116,47 @@ def test_unstable_facts_are_recognised():
     from facts.m2 import is_unstable
     assert is_unstable("m3_t_r1_latency_ms_p95") and is_unstable("m3_deals_index_bytes")
     assert not is_unstable("m3_t_r1_report_recall_at_5")
+
+
+NEW_SINCE_RERUN = ("m3_t_bare_r1_report_recall_at_5", "m3_cmp_t_bare_r1_vs_t_r1_recall_at_5_delta",
+                   "m3_t_bare_r1_equity_awards_recall_at_5", "m3_t_r1_context_tokens_mean",
+                   "m3_t_bare_r6_context_tokens_mean", "m3_t_r7_corpus_context_tokens_mean")
+
+
+def _rerun(m3_tree):
+    out_m3, _, data_m3, _, _ = m3_tree
+    for n in range(1, 7):
+        evaluate(_ctx(), f"T-bare-R{n}", _retriever(n - 1), out_m3, n_boot=50, count_tokens=len)
+    for name, extra in (("deals_summary.json", {"maud_duplicates": 2, "maud_duplicate_pairs": [["c", "e"]] * 2}),
+                        ("tmachine_summary.json", {"truncated_topics": 3, "split_groups": 1})):
+        doc = json.loads((data_m3 / name).read_text())
+        (data_m3 / name).write_text(json.dumps(doc | extra))
+
+
+def test_facts_from_the_fix_wave_are_absent_until_the_rerun(m3_tree):
+    f = build_m3(*m3_tree, n_boot=50)
+    assert not [k for k in NEW_SINCE_RERUN + ("m3_deals_maud_duplicates", "m3_tm_truncated_topics",
+                                               "m3_tm_split_contracts") if k in f]
+
+
+def test_bare_question_facts_and_their_paired_change(m3_tree):
+    _rerun(m3_tree)
+    f = build_m3(*m3_tree, n_boot=50)
+    assert set(NEW_SINCE_RERUN) <= set(f)
+    for n in range(1, 7):
+        assert f"m3_t_bare_r{n}_report_recall_at_5_lo" in f and f"m3_cmp_t_bare_r{n}_vs_t_r{n}_recall_at_5_hi" in f
+    # bare R1 uses the R0 retriever (misses termination_fee), named R1 the R1 one: the same, so no change
+    assert f["m3_cmp_t_bare_r1_vs_t_r1_recall_at_5_delta"] == 0.0
+    # bare R2 misses termination_fee where named R2 finds it: bare minus named is negative
+    assert f["m3_cmp_t_bare_r2_vs_t_r2_recall_at_5_delta"] == -0.5
+    assert f["m3_t_bare_r2_termination_fee_recall_at_5"] == 0.0
+    assert f["m3_t_bare_r1_context_tokens_mean"] == 0.0 and f["m3_t_r1_context_tokens_mean"] is None
+    assert f["m3_deals_maud_duplicates"] == 2
+    assert f["m3_tm_truncated_topics"] == 3 and f["m3_tm_split_contracts"] == 1
+
+
+def test_a_partial_bare_run_is_named(m3_tree):
+    _rerun(m3_tree)
+    (m3_tree[0] / "t_bare_r4.json").unlink()
+    with pytest.raises(FileNotFoundError, match="t_bare_r4.json"):
+        build_m3(*m3_tree, n_boot=50)

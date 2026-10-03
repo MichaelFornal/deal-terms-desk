@@ -9,6 +9,7 @@ from facts.m2 import _ci, _delta, _json
 
 T_LADDER = ("t_r1", "t_r2", "t_r3", "t_r4", "t_r5", "t_r6")
 T_CORPUS = ("t_r6_corpus", "t_r7_corpus")
+T_BARE = tuple(r.replace("t_", "t_bare_", 1) for r in T_LADDER)
 STATUSES = ("kept", "absent", "disagree", "one_found", "error")
 SCOPE_OUTCOMES = ("right", "wrong", "ambiguous", "none")
 
@@ -22,10 +23,19 @@ def _model(ledger_rows: list[dict], pass_name: str) -> str | None:
     return ", ".join(models) or None
 
 
+def _context_tokens(rows: list[dict]) -> float | None:
+    tokens = [row["context_tokens"] for row in rows if row.get("context_tokens") is not None]
+    return round(sum(tokens) / len(tokens), 1) if tokens else None
+
+
 def build_m3(out_m3, out_dir, data_m3, edgar_dir, deals_db, n_boot: int = 2000) -> dict:
     out_m3, out_dir, data_m3, edgar_dir, deals_db = map(Path, (out_m3, out_dir, data_m3, edgar_dir, deals_db))
-    needed = ([out_m3 / f"{r}.json" for r in T_LADDER + T_CORPUS]
-              + [out_m3 / f"{r}_items.jsonl" for r in T_LADDER + T_CORPUS]
+    # The bare-question results arrive with the fix-wave rerun of `dtd m3 eval`; until then the facts that rerun
+    # adds (bare questions, context tokens per rung) are absent, not guessed.
+    rerun = (out_m3 / f"{T_BARE[0]}.json").exists()
+    runs = T_LADDER + T_CORPUS + (T_BARE if rerun else ())
+    needed = ([out_m3 / f"{r}.json" for r in runs]
+              + [out_m3 / f"{r}_items.jsonl" for r in runs]
               + [out_m3 / "r7_scope.json", out_m3 / "tier.json", out_dir / "r5_items.jsonl",
                  out_dir / "r5_llm_items.jsonl", out_dir / "r5_llm_append.json", out_dir / "r5_llm_append_items.jsonl",
                  data_m3 / "tmachine_summary.json", data_m3 / "tmachine_ledger.jsonl", data_m3 / "deals_summary.json",
@@ -42,6 +52,8 @@ def build_m3(out_m3, out_dir, data_m3, edgar_dir, deals_db, n_boot: int = 2000) 
     for k in ("deals", "maud_deals", "aliases", "schedule_tagged", "amendments_linked", "amendments_unlinked",
               "passages_superseded"):
         f[f"m3_deals_{k}"] = deals[k]
+    if "maud_duplicates" in deals:  # written by `dtd build --deals` since the one-copy-per-agreement rule
+        f["m3_deals_maud_duplicates"] = deals["maud_duplicates"]
     conn = sqlite3.connect(deals_db)
     f["m3_deals_passages"] = conn.execute("SELECT COUNT(*) FROM passages WHERE kind != 'toc'").fetchone()[0]
     f["m3_tech_passages"] = conn.execute("SELECT COUNT(*) FROM passages WHERE kind != 'toc'"
@@ -52,6 +64,9 @@ def build_m3(out_m3, out_dir, data_m3, edgar_dir, deals_db, n_boot: int = 2000) 
     tm = _json(data_m3 / "tmachine_summary.json")
     for k in ("contracts", "complete", "fallback_contracts") + STATUSES:
         f[f"m3_tm_{k}"] = tm[k]
+    if "truncated_topics" in tm:  # written by `dtd m3 label` since step-2 groups split instead of truncating
+        f["m3_tm_truncated_topics"] = tm["truncated_topics"]
+        f["m3_tm_split_contracts"] = tm["split_groups"]
     ledger = _rows(data_m3 / "tmachine_ledger.jsonl")
     f["m3_tm_calls"] = len({r["key"] for r in ledger})
     f["m3_tm_model_a"], f["m3_tm_model_b"] = _model(ledger, "a"), _model(ledger, "b")
@@ -62,19 +77,26 @@ def build_m3(out_m3, out_dir, data_m3, edgar_dir, deals_db, n_boot: int = 2000) 
         decided = c["kept"] + c["disagree"] + c["one_found"]
         f[f"m3_tm_{fam}_agreement_rate"] = round(c["kept"] / decided, 4) if decided else None
 
-    res = {r: _json(out_m3 / f"{r}.json") for r in T_LADDER + T_CORPUS}
-    items = {r: load_items(out_m3 / f"{r}_items.jsonl") for r in T_LADDER + T_CORPUS}
+    res = {r: _json(out_m3 / f"{r}.json") for r in runs}
+    items = {r: load_items(out_m3 / f"{r}_items.jsonl") for r in runs}
     f["m3_t_report_items"] = res["t_r1"]["by_split"]["report"]["recall@5"]["n_items"]
     f["m3_t_report_contracts"] = res["t_r1"]["by_split"]["report"]["recall@5"]["n_clusters"]
-    for r in T_LADDER + T_CORPUS:
+    for r in runs:
         report = res[r]["by_split"]["report"]
         _ci(f, f"m3_{r}_report_recall_at_5", report["recall@5"])
-        _ci(f, f"m3_{r}_report_mrr_at_10", report["mrr@10"])
         rows = [row for row in items[r].values() if row["split"] == "report"]
-        f[f"m3_{r}_latency_ms_p95"] = round(_percentile(sorted(row["latency_ms"] for row in rows), 0.95), 2)
         for fam in FAMILIES:
             fr = [row["recall@5"] for row in rows if row["category"] == fam]
             f[f"m3_{r}_{fam}_recall_at_5"] = round(sum(fr) / len(fr), 4) if fr else None
+        if rerun:
+            f[f"m3_{r}_context_tokens_mean"] = _context_tokens(rows)  # PRD §5.3: tokens sent per question
+        if r in T_BARE:
+            continue
+        _ci(f, f"m3_{r}_report_mrr_at_10", report["mrr@10"])
+        f[f"m3_{r}_latency_ms_p95"] = round(_percentile(sorted(row["latency_ms"] for row in rows), 0.95), 2)
+    for named, bare in zip(T_LADDER, T_BARE if rerun else ()):  # bare minus named, the same items
+        _delta(f, f"m3_cmp_{bare}_vs_{named}_recall_at_5",
+               paired_bootstrap(items[named], items[bare], "recall@5", n_boot=n_boot))
     for i, r in enumerate(T_LADDER[1:], start=1):
         _delta(f, f"m3_cmp_{r}_vs_t_r1_recall_at_5", paired_bootstrap(items["t_r1"], items[r], "recall@5", n_boot=n_boot))
         if i > 1:
