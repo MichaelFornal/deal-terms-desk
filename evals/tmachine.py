@@ -121,6 +121,15 @@ def _parse(reply: str, keys) -> dict | None:
         return None
 
 
+def _norm_id(x) -> str:
+    t = str(x).strip()
+    for lead in ("Section ", "section ", "SECTION ", "\u00a7"):
+        if t.startswith(lead):
+            t = t[len(lead):].strip()
+    t = t.split()[0] if t.split() else ""
+    return t.rstrip(".:")
+
+
 def label_contract(cid, text, ol: Outline, topics: dict[str, str], model, runner, ledger, pass_name, group=6,
                    lock=None) -> dict[str, dict]:
     lock = lock or threading.Lock()
@@ -134,8 +143,17 @@ def label_contract(cid, text, ol: Outline, topics: dict[str, str], model, runner
     if picked is None:
         return out
     for t in topics:
-        ids = picked.get(t) if isinstance(picked.get(t), list) else []
-        out[t]["sections"] = [i for i in dict.fromkeys(str(x) for x in ids) if i in ol.sections][:MAX_SECTIONS]
+        out[t]["unmatched"] = 0
+        raw = picked.get(t)
+        if not isinstance(raw, list):
+            out[t]["error"] = True  # the model left the topic out, or gave a non-list
+            continue
+        ids = list(dict.fromkeys(n for n in (_norm_id(x) for x in raw) if n))
+        matched = [i for i in ids if i in ol.sections]
+        out[t]["unmatched"] = len(ids) - len(matched)
+        out[t]["sections"] = matched[:MAX_SECTIONS]
+        if raw and not matched:
+            out[t]["error"] = True  # it named sections, none of them exist
     names = list(topics)
     for g, start in enumerate(range(0, len(names), group)):
         chunk = names[start:start + group]
@@ -159,11 +177,17 @@ def label_contract(cid, text, ol: Outline, topics: dict[str, str], model, runner
                               sections="\n\n".join(parts))
         got = _parse(_ask(ledger, lock, f"{base}|sections|{g}", prompt, model, runner), chunk)
         for t in chunk:
+            if out[t]["error"]:
+                continue
             out[t]["truncated"] = truncated
             if got is None:
                 out[t]["error"] = True
                 continue
-            r = got.get(t) if isinstance(got.get(t), dict) else {}
+            if not isinstance(got.get(t), dict):
+                if out[t]["sections"]:
+                    out[t]["error"] = True  # the model skipped a topic it was shown sections for
+                continue
+            r = got[t]
             quotes = [q for q in r.get("quotes", []) if isinstance(q, str)][:3]
             located = [locate(q, text, shown) for q in quotes]
             out[t].update(found=bool(r.get("found")), spans=[list(sp) for got in located for sp in got],
@@ -242,8 +266,12 @@ def label_all(conn, texts, contracts, topics, passes, runner, ledger_path, worke
         todo = todo[:max_new]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(run_one, cid, counted): cid for cid in todo}
-        for fut in as_completed(futures):
-            results[futures[fut]] = fut.result()  # a failed call raises here; finished calls are already ledgered
+        try:
+            for fut in as_completed(futures):
+                results[futures[fut]] = fut.result()  # a failed call raises here; finished calls are already ledgered
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)  # stop queued contracts; running ones finish
+            raise
     (pa, _), (pb, _) = passes
     rows = []
     for cid, target in contracts:

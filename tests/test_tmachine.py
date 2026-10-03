@@ -175,3 +175,69 @@ def test_topics_by_contract(tmp_path, deals_conn_two):
                               tmp_path / "l.jsonl", topics_by_contract=per)
     assert sorted((r["contract_id"], r["family"]) for r in rows) == sorted(
         [("edgar_1", f) for f in QUOTES] + [("edgar_2", "equity_awards")])
+
+
+def _reply(obj):
+    return {"result": json.dumps(obj), "usage": {}}
+
+
+def test_missing_or_non_list_step1_topic_is_error_but_empty_list_is_absent(tmp_path):
+    from evals.tmachine import TOPICS
+    r = lambda prompt, model: _reply({"equity_awards": "2.3", "termination_fee": []})
+    got = label_contract("e", TEXT, big_outline(), TOPICS, "m", r, Ledger(tmp_path / "l.jsonl", key="key"), "a")
+    assert got["equity_awards"]["error"]  # non-list
+    assert got["employee_benefits"]["error"]  # key missing
+    assert not got["termination_fee"]["error"] and not got["termination_fee"]["found"]
+
+
+def test_unmatched_ids_are_error_and_lenient_ids_match(tmp_path):
+    from evals.tmachine import TOPICS
+    runner = FakeRunner(QUOTES, ids={"equity_awards": ["Section 2.3"], "termination_fee": ["8.3.", "99"],
+                                     "employee_benefits": ["7.7", "§ 1.1"]})
+    runner.ids["employee_benefits"] = ["7.7"]
+    got = label_contract("e", TEXT, big_outline(), TOPICS, "m", runner, Ledger(tmp_path / "l.jsonl", key="key"), "a")
+    assert got["equity_awards"]["sections"] == ["2.3"] and got["equity_awards"]["found"]
+    assert got["termination_fee"]["sections"] == ["8.3"] and got["termination_fee"]["unmatched"] == 1
+    assert got["employee_benefits"]["error"] and got["employee_benefits"]["unmatched"] == 1
+    from evals.tmachine import _norm_id
+    assert _norm_id("2.3 Treatment of Options") == "2.3" and _norm_id("C1:") == "C1" and _norm_id("§2.3") == "2.3"
+
+
+def test_step2_omitted_topic_is_error(tmp_path):
+    from evals.tmachine import TOPICS
+
+    def runner(prompt, model):
+        if prompt.startswith("Below is the outline"):
+            return _reply(FakeRunner.SECTION_IDS)
+        return _reply({"equity_awards": {"found": False, "quotes": [], "answer": ""}, "termination_fee": "oops"})
+    got = label_contract("e", TEXT, big_outline(), TOPICS, "m", runner, Ledger(tmp_path / "l.jsonl", key="key"), "a")
+    assert not got["equity_awards"]["error"]
+    assert got["termination_fee"]["error"] and got["employee_benefits"]["error"]
+
+
+def test_runner_failure_stops_the_run_and_resume_reuses_the_ledger(tmp_path):
+    import sqlite3
+    import threading
+    from evals.tmachine import PASSES, TOPICS
+    from retrieval.index import build_index
+    texts = {f"edgar_{i}": TEXT for i in range(8)}
+    build_index(tmp_path / "d.db", texts)
+    conn = sqlite3.connect(tmp_path / "d.db", check_same_thread=False)
+    contracts = [(c, "T") for c in texts]
+    good = FakeRunner(QUOTES, ids=CHUNK_IDS)
+    attempts, lock = [], threading.Lock()
+
+    def bad(prompt, model):
+        with lock:
+            attempts.append(1)
+            first = len(attempts) == 1
+        if first:
+            raise RuntimeError("claude down")
+        return good(prompt, model)
+    with pytest.raises(RuntimeError, match="claude down"):
+        label_all(conn, texts, contracts, TOPICS, PASSES, bad, tmp_path / "l.jsonl", workers=2)
+    assert len(attempts) < 8 * 4
+    ledgered = len((tmp_path / "l.jsonl").read_text().splitlines()) if (tmp_path / "l.jsonl").exists() else 0
+    good.calls.clear()
+    label_all(conn, texts, contracts, TOPICS, PASSES, good, tmp_path / "l.jsonl", workers=2)
+    assert len(good.calls) == 8 * 4 - ledgered
