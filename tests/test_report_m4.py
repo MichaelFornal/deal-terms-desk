@@ -68,3 +68,14 @@ def test_committed_m4_report_is_rendered_from_committed_facts():
     if "m4_thuman_haiku_report_accuracy" not in f:
         pytest.skip("M4 facts not yet committed")
     assert Path("docs/m4/REPORT.md").read_text() == render_m4(f)
+
+
+def test_absent_not_filed_is_reported_apart_with_its_answered_share():
+    text = render_m4(Every(m4_abstain_absent_not_filed_answered_rate=0.75, m4_abstain_absent_not_filed_n=4,
+                           m4_abstain_absent_not_judged=3, m4_abstain_absent_judge_unparsed=2))
+    sec = text.split("## Abstention", 1)[1].split("\n## ", 1)[0]
+    main, apart = sec.split("Machine key contradicted by retrieval", 1)
+    assert "section's text was not filed" not in main and "section's title" not in main
+    row = [line for line in apart.splitlines() if line.startswith("| ") and "section's title" in line][0]
+    assert "the answerer found the clause text" in row and "| 4 |" in row and "0.75" in row
+    assert "answered but not yet judged: 3" in main and "judge reply unreadable: 2" in main

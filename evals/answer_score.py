@@ -98,7 +98,21 @@ def _tmachine(items, recs, verdicts, n_boot):
     return out
 
 
-def _abstain(items, recs):
+def _abstain_judged(st, v) -> str:
+    """Group `absent`: a decline is correct; an answer is correct when the judge finds it matches the two passes."""
+    if st == "not_stated":
+        return "correct"
+    if st != "answered":
+        return "other"
+    if v is ...:
+        return "not_judged"
+    if v is None:
+        return "judge_unparsed"
+    return "correct" if v in ("agree", "partial") else "false_answer" if v == "disagree" else "other"
+
+
+def _abstain(items, recs, verdicts=None):
+    verdicts = verdicts or {}
     out = {}
     for g in ABSTAIN_GROUPS:
         c = Counter()
@@ -112,11 +126,17 @@ def _abstain(items, recs):
                 c["errors"] += 1
                 continue
             st = r["answer"]["state"]
-            c["n"] += 1
-            c["correct" if st == i.expected else "false_answer" if st == "answered" else "other"] += 1
+            if g == "absent":
+                v = verdicts[i.item_id].get("verdict") if i.item_id in verdicts else ...
+                k = _abstain_judged(st, v)
+            else:
+                k = "correct" if st == i.expected else "false_answer" if st == "answered" else "other"
+            c[k] += 1
+            c["n"] += k not in ("not_judged", "judge_unparsed")
         if c["items"] and c["items"] > c["missing"]:
             n = c["n"]
-            out[g] = {k: c[k] for k in ("n", "correct", "false_answer", "other", "errors", "items", "missing")} | {
+            out[g] = {k: c[k] for k in ("n", "correct", "false_answer", "other", "errors", "items", "missing",
+                                        "not_judged", "judge_unparsed")} | {
                 "correct_rate": round(c["correct"] / n, 4) if n else None,
                 "false_answer_rate": round(c["false_answer"] / n, 4) if n else None}
     return out
@@ -130,7 +150,7 @@ def score(sets, answers, judge, refute, models, n_boot: int = 2000) -> dict:
         if "tmachine" in sets and answers.get(("tmachine", m)):
             s["tmachine"][m] = _tmachine(sets["tmachine"], answers[("tmachine", m)], judge.get(m, {}), n_boot)
     if "abstain" in sets and answers.get(("abstain", models[0])):
-        s["abstain"] = _abstain(sets["abstain"], answers[("abstain", models[0])])
+        s["abstain"] = _abstain(sets["abstain"], answers[("abstain", models[0])], judge.get("abstain:" + models[0], {}))
     for (set_name, m), recs in answers.items():
         done = [r["answer"] for r in recs.values() if r["answer"] is not None]
         if m == models[0]:

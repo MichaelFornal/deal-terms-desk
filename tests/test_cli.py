@@ -766,3 +766,27 @@ def test_m4_answer_refuses_without_set_or_items(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "DATA_M4", tmp_path)
     assert cli.entry(["m4", "answer", "--set", "thuman"]) == 2
     assert "dtd m4 sets" in capsys.readouterr().err
+
+
+def test_m4_judge_also_judges_the_absent_abstain_group(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from evals.answer_sets import AnswerItem, write_items
+    d = tmp_path / "m4"
+    monkeypatch.setattr(cli, "DATA_M4", d)
+    write_items(d / "tmachine_items.jsonl", [AnswerItem("t1", "tmachine", "f", "report", None, "q", (), "e", {})])
+    write_items(d / "abstain_items.jsonl",
+                [AnswerItem("a1", "abstain", "absent", "report", "c", "q", (), "not_stated", {"a": "x", "b": "y"}),
+                 AnswerItem("n1", "abstain", "absent_not_filed", "report", "c", "q", (), "not_stated", {"a": "x", "b": "y"}),
+                 AnswerItem("e1", "abstain", "earnout", "report", "c", "q", (), "not_stated")])
+    paths = []
+
+    def fake_load(path, model, items):
+        paths.append(Path(path).name)
+        return {i.item_id: {"answer": {}} for i in items} if model == cli.HAIKU else {}
+    monkeypatch.setattr(cli, "load_answers", fake_load)
+    monkeypatch.setattr(cli, "judge_all", lambda items, answers, *a, **k: {i.item_id: {"verdict": "agree"} for i in items})
+    assert cli._m4_judge(Namespace(workers=1)) == 0
+    out = json.loads((d / "judge.json").read_text())
+    assert out["abstain:" + cli.HAIKU] == {"a1": {"verdict": "agree"}} and out[cli.HAIKU] == {"t1": {"verdict": "agree"}}
+    assert f"answers_abstain_{cli.HAIKU}.jsonl" in paths

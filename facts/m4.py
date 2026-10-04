@@ -5,7 +5,8 @@ from evals.tmachine import FAMILIES
 from facts.m2 import _ci, _delta, _json, slug
 
 MODELS = (("haiku", "claude-haiku-4-5-20251001"), ("sonnet", "claude-sonnet-5-5"))
-ABSTAIN_KEYS = ("correct_rate", "false_answer_rate", "correct", "false_answer", "other", "errors", "items", "missing")
+ABSTAIN_KEYS = ("correct_rate", "false_answer_rate", "correct", "false_answer", "other", "errors", "items", "missing",
+                "not_judged", "judge_unparsed")
 
 
 def present_m4(out_m4: Path) -> bool:
@@ -87,6 +88,9 @@ def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
     for g, v in s["abstain"].items():
         for k in ABSTAIN_KEYS:
             f[f"m4_abstain_{g}_{k}"] = v.get(k)
+    nf = s["abstain"].get("absent_not_filed")  # answered share: the machine key here is contradicted by retrieval
+    f["m4_abstain_absent_not_filed_answered_rate"] = (round(nf["false_answer"] / nf["n"], 4)
+                                                      if nf and nf.get("n") else None)
     for set_name, v in s["gate"].items():
         for k in ("pass_rate", "returned", "kept"):
             f[f"m4_gate_{set_name}_{k}"] = v[k]

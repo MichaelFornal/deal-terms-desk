@@ -90,6 +90,8 @@ def test_abstain_groups():
     assert set(by) <= set(ABSTAIN_GROUPS)
     assert [i.contract_id for i in by["absent"]] == ["edgar_1"] and by["absent"][0].expected == "not_stated"
     assert [i.contract_id for i in by["absent_not_filed"]] == ["edgar_2"]
+    assert by["absent"][0].meta == {"a": "No such covenant.", "b": "None."}
+    assert by["absent_not_filed"][0].meta["b"] == "Not included."
     assert [i.contract_id for i in by["earnout"]] == ["edgar_000000000120000001"]
     assert "Zed Corp" in by["earnout"][0].question
     unknown = {i.meta["name"] for i in by["unknown_deal"]}

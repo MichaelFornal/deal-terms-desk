@@ -85,3 +85,20 @@ def test_choice_scoring_folds_typographic_quotes_and_none_is_wrong():
     r = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["thuman"][M]["report"]
     assert r["n"] == 2 and abs(r["accuracy"]["mean"] - 0.5) < 1e-9 and abs(r["accuracy_cited"]["mean"] - 0.5) < 1e-9
     assert r["out_of_list"] == 1  # only the None choice is outside the options
+
+
+def test_absent_group_is_judged_and_other_groups_keep_the_state_rule():
+    ab = [AnswerItem(f"a{k}", "abstain", "absent", "report", "c", "q", (), "not_stated", {"a": "x", "b": "y"})
+          for k in range(6)]
+    ab.append(AnswerItem("nf", "abstain", "absent_not_filed", "report", "c", "q", (), "not_stated"))
+    answers = {("abstain", M): {"a0": ans(), "a1": ans(), "a2": ans(), "a3": ans(state="not_stated"), "a4": ans(),
+                                "a5": ans(state="unfiled_schedule"), "nf": ans()}}
+    judge = {"abstain:" + M: {"a0": {"verdict": "agree"}, "a1": {"verdict": "disagree"}, "a4": {"verdict": None},
+                              "a5": {"verdict": "declined"}},
+             "nf": {"nf": {"verdict": "agree"}}}
+    s = score({"abstain": ab}, answers, judge, {}, (M,), n_boot=50)["abstain"]
+    a = s["absent"]
+    assert (a["correct"], a["false_answer"], a["other"]) == (2, 1, 1)  # a0 agree, a3 not_stated; a1; a5
+    assert a["not_judged"] == 1 and a["judge_unparsed"] == 1 and a["n"] == 4 and a["correct_rate"] == 0.5
+    nf = s["absent_not_filed"]
+    assert nf["false_answer"] == 1 and nf["n"] == 1 and nf["not_judged"] == 0  # plain state rule, no judge

@@ -4,7 +4,6 @@ from evals.tmachine import FAMILIES
 LABELS = {"equity_awards": "Employee equity awards", "termination_fee": "Termination (break-up) fee",
           "employee_benefits": "Employees' pay and benefits after the deal"}
 GROUPS = {"absent": "Lead question, both passes found no such clause",
-          "absent_not_filed": "Lead question, the governing section's text was not filed",
           "earnout": "Earn-out question (one machine pass found none)",
           "unknown_deal": "A company name that matches no deal's aliases",
           "ambiguous_deal": "A name matching several deals",
@@ -88,10 +87,20 @@ def _tmachine(f) -> str:
 def _abstain(f) -> str:
     rows = "\n".join(f"| {GROUPS[g]} | {_v(f.get(f'm4_abstain_{g}_n'))} | {_v(f.get(f'm4_abstain_{g}_missing'))} | "
                      f"{_v(f.get(f'm4_abstain_{g}_correct_rate'))} | "
-                     f"{_v(f.get(f'm4_abstain_{g}_false_answer_rate'))} |" for g in ABSTAIN_GROUPS)
+                     f"{_v(f.get(f'm4_abstain_{g}_false_answer_rate'))} |" for g in ABSTAIN_GROUPS if g in GROUPS)
     return ("## Abstention\n\nQuestions whose right answer is a decline: \"not stated in this agreement\", \"in a "
             "schedule that was not filed\", or \"which agreement?\". The keys are machine-built.\n\n"
-            "| Group | Items | Missing | Correct decline | False answer |\n|---|---|---|---|---|\n" + rows + "\n")
+            "| Group | Items | Missing | Correct decline (machine-built key) | False answer (machine-built key) |\n"
+            "|---|---|---|---|---|\n" + rows + "\n\n"
+            "For the lead question, an answer also counts as correct when the judge finds it matches the two "
+            f"machine passes; answered but not yet judged: {_v(f.get('m4_abstain_absent_not_judged'))}; judge reply "
+            f"unreadable: {_v(f.get('m4_abstain_absent_judge_unparsed'))}.\n\n"
+            "### Machine key contradicted by retrieval\n\nThese are kept out of the abstention figures above: the "
+            "machine key says \"not stated\", but the key is likely wrong.\n\n"
+            "| Group | Items | Answered share (machine-built key) |\n|---|---|---|\n"
+            "| Lead question where the machine passes saw only the section's title, and the answerer found the "
+            f"clause text | {_v(f.get('m4_abstain_absent_not_filed_n'))} | "
+            f"{_v(f.get('m4_abstain_absent_not_filed_answered_rate'))} |\n")
 
 
 def _citation(f) -> str:

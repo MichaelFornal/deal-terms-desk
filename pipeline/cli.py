@@ -471,12 +471,16 @@ SONNET = "claude-sonnet-5-5"
 
 def _m4_judge(args) -> int:
     items = read_items(DATA_M4 / "tmachine_items.jsonl")
+    jobs = [(model, items, DATA_M4 / f"answers_tmachine_{model}.jsonl") for model in (HAIKU, JUDGE_MODEL)]
+    if (DATA_M4 / "abstain_items.jsonl").exists():  # the absent group: an answer is judged against the two passes
+        absent = [i for i in read_items(DATA_M4 / "abstain_items.jsonl") if i.group == "absent"]
+        jobs.append(("abstain:" + HAIKU, absent, DATA_M4 / f"answers_abstain_{HAIKU}.jsonl"))
     out = {}
-    for model in (HAIKU, JUDGE_MODEL):
-        answers = load_answers(DATA_M4 / f"answers_tmachine_{model}.jsonl", model, items)
+    for key, its, path in jobs:
+        answers = load_answers(path, key.removeprefix("abstain:"), its)
         if answers:
             try:
-                out[model] = judge_all(items, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
+                out[key] = judge_all(its, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
             except RuntimeError as e:
                 print(str(e), file=sys.stderr)
                 return 2

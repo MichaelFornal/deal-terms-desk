@@ -109,7 +109,8 @@ def abstain_items(tm_rows, sample_rows, deals: dict, candidate_names, resolver, 
             continue
         g = "absent_not_filed" if NOT_FILED.search(r["a"]["answer"] + " " + r["b"]["answer"]) else "absent"
         out.append(AnswerItem(f"{g}|{r['contract_id']}|{r['family']}", "abstain", g, split_of(r["contract_id"]),
-                              r["contract_id"], TEMPLATES[r["family"]].format(target=r["target"]), (), "not_stated"))
+                              r["contract_id"], TEMPLATES[r["family"]].format(target=r["target"]), (), "not_stated",
+                              {"a": r["a"]["answer"], "b": r["b"]["answer"]}))
     for s in sample_rows:
         cid = "edgar_" + s["adsh"].replace("-", "")
         if s["contingent_consideration"]["present"] or cid not in deals:

@@ -98,3 +98,17 @@ def test_missing_blocks_and_absent_groups_become_none_or_absent(tmp_path):
 def test_build_m4_names_every_missing_input(tmp_path):
     with pytest.raises(FileNotFoundError, match="scores.json"):
         build_m4(tmp_path / "m4", tmp_path, tmp_path / "d")
+
+
+def test_absent_not_filed_answered_rate_and_judge_counts(tmp_path):
+    ab = {"absent": {"n": 8, "items": 10, "missing": 0, "correct": 6, "false_answer": 1, "other": 1, "errors": 0,
+                     "not_judged": 1, "judge_unparsed": 1, "correct_rate": 0.75, "false_answer_rate": 0.125},
+          "absent_not_filed": {"n": 4, "items": 4, "missing": 0, "correct": 1, "false_answer": 3, "other": 0,
+                               "errors": 0, "not_judged": 0, "judge_unparsed": 0, "correct_rate": 0.25,
+                               "false_answer_rate": 0.75}}
+    out, m4, data = _setup(tmp_path, _scores(abstain=ab))
+    f = build_m4(m4, out, data, n_boot=20)
+    assert f["m4_abstain_absent_not_filed_answered_rate"] == 0.75
+    assert (f["m4_abstain_absent_not_judged"], f["m4_abstain_absent_judge_unparsed"]) == (1, 1)
+    out2, m42, data2 = _setup(tmp_path / "b", _scores())
+    assert build_m4(m42, out2, data2, n_boot=20)["m4_abstain_absent_not_filed_answered_rate"] is None
