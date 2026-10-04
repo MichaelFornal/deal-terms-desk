@@ -76,3 +76,12 @@ def test_not_judged_vs_unparsed_and_abstain_missing():
     assert t["n"] == 1 and t["judge_unparsed"] == 1 and t["not_judged"] == 1
     assert t["items"] == 4 and t["missing"] == 1
     assert s["abstain"]["earnout"]["items"] == 3 and s["abstain"]["earnout"]["missing"] == 2
+
+
+def test_choice_scoring_folds_typographic_quotes_and_none_is_wrong():
+    opts = ("“Publicly disclosed” applies", "Other")
+    items = [AnswerItem(f"c{k}|Q", "thuman", "Cat", "report", f"c{k}", "Q", opts, opts[0]) for k in range(2)]
+    answers = {("thuman", M): {"c0|Q": ans(choice='"Publicly  disclosed" applies'), "c1|Q": ans(choice=None)}}
+    r = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["thuman"][M]["report"]
+    assert r["n"] == 2 and abs(r["accuracy"]["mean"] - 0.5) < 1e-9 and abs(r["accuracy_cited"]["mean"] - 0.5) < 1e-9
+    assert r["out_of_list"] == 1  # only the None choice is outside the options

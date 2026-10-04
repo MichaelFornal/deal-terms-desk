@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 
+from answer.gate import normalise
 from evals.answer_sets import ABSTAIN_GROUPS
 from evals.bootstrap import cluster_bootstrap
 
@@ -9,6 +10,10 @@ def _ci(values: list[tuple[str, float]], n_boot: int):
     for cluster, v in values:
         by[cluster].append(v)
     return cluster_bootstrap(by, n_boot=n_boot) if by else None
+
+
+def _norm(s) -> str | None:
+    return None if s is None else normalise(str(s))
 
 
 def _baseline(tune_items) -> dict[str, str]:
@@ -33,11 +38,12 @@ def _thuman(items, recs, n_boot):
             if r["answer"] is None:
                 err += 1
                 continue
-            choice = r["answer"]["choice"]
-            ool += choice not in i.choices
-            a = (i.contract_id, float(choice == i.expected))
+            choice = _norm(r["answer"]["choice"])
+            ool += choice not in {_norm(o) for o in i.choices}
+            right = choice is not None and choice == _norm(i.expected)
+            a = (i.contract_id, float(right))
             b = (i.contract_id, float(base.get(i.item_id.split("|", 1)[1]) == i.expected))
-            c = (i.contract_id, float(choice == i.expected and r["answer"]["state"] == "answered"))
+            c = (i.contract_id, float(right and r["answer"]["state"] == "answered"))
             acc.append(a)
             bl.append(b)
             cit.append(c)
