@@ -78,10 +78,11 @@ def test_sentence_initial_common_word_does_not_scope(tmp_path, monkeypatch):
     import retrieval.scope as scope
     monkeypatch.setattr(scope, "COMMON_MIN_PASSAGES", 3)
     r = make_with_fts(tmp_path, [("base", "edgar_2", "target"), ("true", "edgar_1", "target")],
-                      _common_docs("base", 5) | {"contract_8": "Section 1.1 Truth. A true copy. A true statement."})
+                      _common_docs("base", 5) | {"contract_8": _common_docs("true", 5)["contract_9"]})
     assert r.resolve("Base salary continues for a year?") == Scope(None, None, ())
     assert r.resolve("What about Base?").contract_id == "edgar_2"  # not at a sentence start: still a name
     assert r.resolve("True Corp options").contract_id == "edgar_1"  # a corporate suffix follows: a name
+    assert r.resolve("True salary continues") == Scope(None, None, ())  # common, no suffix: not a name
 
 
 def test_rare_sentence_initial_alias_still_scopes(tmp_path, monkeypatch):
