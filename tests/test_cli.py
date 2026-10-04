@@ -763,7 +763,7 @@ def test_m4_recall_refuses_without_inputs(tmp_path, monkeypatch, capsys):
 def test_m4_answer_refuses_without_set_or_items(tmp_path, monkeypatch, capsys):
     assert cli.entry(["m4", "answer"]) == 2
     assert "--set is required" in capsys.readouterr().err
-    monkeypatch.setattr(cli, "DATA_M4", tmp_path)
+    monkeypatch.setattr(cli, "DATA", tmp_path)
     assert cli.entry(["m4", "answer", "--set", "thuman"]) == 2
     assert "dtd m4 sets" in capsys.readouterr().err
 
@@ -773,7 +773,7 @@ def test_m4_judge_also_judges_the_absent_abstain_group(tmp_path, monkeypatch):
 
     from evals.answer_sets import AnswerItem, write_items
     d = tmp_path / "m4"
-    monkeypatch.setattr(cli, "DATA_M4", d)
+    monkeypatch.setattr(cli, "DATA", tmp_path)
     write_items(d / "tmachine_items.jsonl", [AnswerItem("t1", "tmachine", "f", "report", None, "q", (), "e", {})])
     write_items(d / "abstain_items.jsonl",
                 [AnswerItem("a1", "abstain", "absent", "report", "c", "q", (), "not_stated", {"a": "x", "b": "y"}),
@@ -797,7 +797,7 @@ def test_m4_judge_loops_over_the_answer_models_not_the_judge(tmp_path, monkeypat
 
     from evals.answer_sets import AnswerItem, write_items
     d = tmp_path / "m4"
-    monkeypatch.setattr(cli, "DATA_M4", d)
+    monkeypatch.setattr(cli, "DATA", tmp_path)
     write_items(d / "tmachine_items.jsonl", [AnswerItem("t1", "tmachine", "f", "report", None, "q", (), "e", {})])
     paths = []
 

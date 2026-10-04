@@ -336,8 +336,8 @@ def _all_facts() -> dict:
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
     if present_m3(OUT / "m3"):
         facts |= build_m3(OUT / "m3", OUT, DATA / "m3", EDGAR, DEALS_INDEX)
-    if present_m4(OUT_M4):
-        facts |= build_m4(OUT_M4, OUT, DATA / "m4")
+    if present_m4(_out_m4()):
+        facts |= build_m4(_out_m4(), OUT, DATA / "m4")
     if (DATA / "m0" / "measure.json").exists():
         facts |= build_m0(DATA / "m0", facts, DATA / "sec")
     return facts
@@ -388,8 +388,12 @@ def _cmd_failures(args) -> int:
     return 0
 
 
-OUT_M4 = OUT / "m4"
-DATA_M4 = DATA / "m4"
+def _out_m4() -> Path:
+    return OUT / "m4"
+
+
+def _data_m4() -> Path:
+    return DATA / "m4"
 
 
 def _m4_recall() -> int:
@@ -400,7 +404,7 @@ def _m4_recall() -> int:
               file=sys.stderr)
         return 2
     ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
-    _eval_rung("R6n", INDEX, "R6n", ctx, OUT_M4)  # T-human, within agreement, next to M2's r6.json
+    _eval_rung("R6n", INDEX, "R6n", ctx, _out_m4())  # T-human, within agreement, next to M2's r6.json
     contracts, amendment_texts = _deals_texts()
     rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
     items = items_from_rows(rows)
@@ -408,12 +412,12 @@ def _m4_recall() -> int:
                          DEALS_INDEX)
     ladder = _deals_ladder(contracts, amendment_texts)
     kw = {"count_tokens": ladder.embedder.count_tokens, "extra": {"settings": asdict(ladder.settings)}}
-    evaluate(tctx, "T-R6n", lambda q, c, k: ladder.run("R6n", q, c, k), OUT_M4, **kw)
+    evaluate(tctx, "T-R6n", lambda q, c, k: ladder.run("R6n", q, c, k), _out_m4(), **kw)
     # R7 is rerun after Task 1's resolver fixes so R7n is compared with the same resolver
-    evaluate(tctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), OUT_M4, scope="corpus-wide", **kw)
-    evaluate(tctx, "T-R7n-corpus", lambda q, c, k: ladder.run("R7n", q, None, k), OUT_M4, scope="corpus-wide", **kw)
-    _write_atomic(OUT_M4 / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
-    print(json.dumps({"written": sorted(p.name for p in OUT_M4.iterdir())}))
+    evaluate(tctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), _out_m4(), scope="corpus-wide", **kw)
+    evaluate(tctx, "T-R7n-corpus", lambda q, c, k: ladder.run("R7n", q, None, k), _out_m4(), scope="corpus-wide", **kw)
+    _write_atomic(_out_m4() / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
+    print(json.dumps({"written": sorted(p.name for p in _out_m4().iterdir())}))
     return 0
 
 
@@ -431,12 +435,12 @@ def _m4_sets() -> int:
     conn = sqlite3.connect(DEALS_INDEX)
     ab = abstain_items(rows, sample, deals, names, Resolver(conn), conn)
     tmi = tmachine_items(rows)
-    write_items(DATA_M4 / "thuman_items.jsonl", th)
-    write_items(DATA_M4 / "tmachine_items.jsonl", tmi)
-    write_items(DATA_M4 / "abstain_items.jsonl", ab)
+    write_items(_data_m4() / "thuman_items.jsonl", th)
+    write_items(_data_m4() / "tmachine_items.jsonl", tmi)
+    write_items(_data_m4() / "abstain_items.jsonl", ab)
     summary = {"thuman": len(th), "thuman_excluded": ex, "tmachine": len(tmi),
                "abstain": {g: sum(1 for i in ab if i.group == g) for g in sorted({i.group for i in ab})}}
-    _write_atomic(DATA_M4 / "sets_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    _write_atomic(_data_m4() / "sets_summary.json", json.dumps(summary, indent=2, sort_keys=True))
     print(json.dumps(summary))
     return 0
 
@@ -445,7 +449,7 @@ def _m4_answer(args) -> int:
     if not args.set_name:
         print("--set is required: thuman, tmachine or abstain", file=sys.stderr)
         return 2
-    path = DATA_M4 / f"{args.set_name}_items.jsonl"
+    path = _data_m4() / f"{args.set_name}_items.jsonl"
     if not path.exists():
         print(f"{path} missing; run `dtd m4 sets` first", file=sys.stderr)
         return 2
@@ -454,7 +458,7 @@ def _m4_answer(args) -> int:
         ladder = _ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))})
     else:
         ladder = _deals_ladder(*_deals_texts())
-    ledger = DATA_M4 / f"answers_{args.set_name}_{args.model}.jsonl"
+    ledger = _data_m4() / f"answers_{args.set_name}_{args.model}.jsonl"
     try:
         summary = answer_all(items, Answerer(ladder, run_claude, args.model), ledger, workers=args.workers,
                              max_new=args.max_new)
@@ -470,21 +474,21 @@ SONNET = "claude-sonnet-5-5"
 
 
 def _m4_judge(args) -> int:
-    items = read_items(DATA_M4 / "tmachine_items.jsonl")
-    jobs = [(model, items, DATA_M4 / f"answers_tmachine_{model}.jsonl") for model in (HAIKU, SONNET)]
-    if (DATA_M4 / "abstain_items.jsonl").exists():  # the absent group: an answer is judged against the two passes
-        absent = [i for i in read_items(DATA_M4 / "abstain_items.jsonl") if i.group == "absent"]
-        jobs.append(("abstain:" + HAIKU, absent, DATA_M4 / f"answers_abstain_{HAIKU}.jsonl"))
+    items = read_items(_data_m4() / "tmachine_items.jsonl")
+    jobs = [(model, items, _data_m4() / f"answers_tmachine_{model}.jsonl") for model in (HAIKU, SONNET)]
+    if (_data_m4() / "abstain_items.jsonl").exists():  # the absent group: an answer is judged against the two passes
+        absent = [i for i in read_items(_data_m4() / "abstain_items.jsonl") if i.group == "absent"]
+        jobs.append(("abstain:" + HAIKU, absent, _data_m4() / f"answers_abstain_{HAIKU}.jsonl"))
     out = {}
     for key, its, path in jobs:
         answers = load_answers(path, key.removeprefix("abstain:"), its)
         if answers:
             try:
-                out[key] = judge_all(its, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
+                out[key] = judge_all(its, answers, run_claude, _data_m4() / "judge_ledger.jsonl", workers=args.workers)
             except RuntimeError as e:
                 print(str(e), file=sys.stderr)
                 return 2
-    _write_atomic(DATA_M4 / "judge.json", json.dumps(out, indent=2, sort_keys=True))
+    _write_atomic(_data_m4() / "judge.json", json.dumps(out, indent=2, sort_keys=True))
     print(json.dumps({m: len(v) for m, v in out.items()}))
     return 0
 
@@ -492,31 +496,31 @@ def _m4_judge(args) -> int:
 def _m4_refute(args) -> int:
     answers = {}
     for s in ("thuman", "tmachine"):
-        items = {i.item_id: i for i in read_items(DATA_M4 / f"{s}_items.jsonl")}
-        for iid, rec in load_answers(DATA_M4 / f"answers_{s}_{HAIKU}.jsonl", HAIKU, items.values()).items():
+        items = {i.item_id: i for i in read_items(_data_m4() / f"{s}_items.jsonl")}
+        for iid, rec in load_answers(_data_m4() / f"answers_{s}_{HAIKU}.jsonl", HAIKU, items.values()).items():
             if items[iid].split == "report":
                 answers[f"{s}:{iid}"] = rec
     try:
-        out = refute_all(answers, run_claude, DATA_M4 / "refute_ledger.jsonl", workers=args.workers)
+        out = refute_all(answers, run_claude, _data_m4() / "refute_ledger.jsonl", workers=args.workers)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 2
-    _write_atomic(DATA_M4 / "refute.json", json.dumps(out, indent=2, sort_keys=True))
+    _write_atomic(_data_m4() / "refute.json", json.dumps(out, indent=2, sort_keys=True))
     print(json.dumps({"claims": len(out)}))
     return 0
 
 
 def _m4_score(args) -> int:
-    sets = {s: read_items(DATA_M4 / f"{s}_items.jsonl") for s in ("thuman", "tmachine", "abstain")
-            if (DATA_M4 / f"{s}_items.jsonl").exists()}
-    answers = {(s, m): load_answers(DATA_M4 / f"answers_{s}_{m}.jsonl", m, sets[s]) for s in sets for m in (HAIKU, SONNET)}
+    sets = {s: read_items(_data_m4() / f"{s}_items.jsonl") for s in ("thuman", "tmachine", "abstain")
+            if (_data_m4() / f"{s}_items.jsonl").exists()}
+    answers = {(s, m): load_answers(_data_m4() / f"answers_{s}_{m}.jsonl", m, sets[s]) for s in sets for m in (HAIKU, SONNET)}
     answers = {k: v for k, v in answers.items() if v}
-    judge = json.loads((DATA_M4 / "judge.json").read_text()) if (DATA_M4 / "judge.json").exists() else {}
-    refute = json.loads((DATA_M4 / "refute.json").read_text()) if (DATA_M4 / "refute.json").exists() else {}
+    judge = json.loads((_data_m4() / "judge.json").read_text()) if (_data_m4() / "judge.json").exists() else {}
+    refute = json.loads((_data_m4() / "refute.json").read_text()) if (_data_m4() / "refute.json").exists() else {}
     s = score_answers(sets, answers, judge, refute, (HAIKU, SONNET))
-    OUT_M4.mkdir(parents=True, exist_ok=True)
-    _write_atomic(OUT_M4 / "scores.json", json.dumps(s, indent=2, sort_keys=True))
-    print(json.dumps({"written": str(OUT_M4 / "scores.json")}))
+    _out_m4().mkdir(parents=True, exist_ok=True)
+    _write_atomic(_out_m4() / "scores.json", json.dumps(s, indent=2, sort_keys=True))
+    print(json.dumps({"written": str(_out_m4() / "scores.json")}))
     return 0
 
 
