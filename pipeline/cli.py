@@ -6,7 +6,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from answer.answerer import Answerer
-from evals.answer_judge import judge_all, refute_all
+from evals.answer_judge import JUDGE_MODEL, judge_all, refute_all
 from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
 from evals.compare import load_items
@@ -465,10 +465,14 @@ HAIKU = "claude-haiku-4-5-20251001"
 def _m4_judge(args) -> int:
     items = read_items(DATA_M4 / "tmachine_items.jsonl")
     out = {}
-    for model in (HAIKU, "claude-sonnet-5-5"):
+    for model in (HAIKU, JUDGE_MODEL):
         answers = load_answers(DATA_M4 / f"answers_tmachine_{model}.jsonl", model)
         if answers:
-            out[model] = judge_all(items, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
+            try:
+                out[model] = judge_all(items, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
+            except RuntimeError as e:
+                print(str(e), file=sys.stderr)
+                return 2
     _write_atomic(DATA_M4 / "judge.json", json.dumps(out, indent=2, sort_keys=True))
     print(json.dumps({m: len(v) for m, v in out.items()}))
     return 0
@@ -481,7 +485,11 @@ def _m4_refute(args) -> int:
         for iid, rec in load_answers(DATA_M4 / f"answers_{s}_{HAIKU}.jsonl", HAIKU).items():
             if items[iid].split == "report":
                 answers[f"{s}:{iid}"] = rec
-    out = refute_all(answers, run_claude, DATA_M4 / "refute_ledger.jsonl", workers=args.workers)
+    try:
+        out = refute_all(answers, run_claude, DATA_M4 / "refute_ledger.jsonl", workers=args.workers)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     _write_atomic(DATA_M4 / "refute.json", json.dumps(out, indent=2, sort_keys=True))
     print(json.dumps({"claims": len(out)}))
     return 0

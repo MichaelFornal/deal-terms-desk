@@ -39,3 +39,27 @@ def test_refute_one_call_per_surviving_claim(tmp_path):
     got = refute_all(answers, run, tmp_path / "r.jsonl")
     assert set(got) == {"a#0", "a#1"} and got["a#0"]["refuted"] is False and len(run.calls) == 2
     assert "q1" in run.calls[0][0] and "c1" in run.calls[0][0]
+
+
+def _down(prompt, model):
+    _down.n += 1
+    raise RuntimeError("down")
+
+
+def test_persistent_failure_stops_and_rerun_resumes(tmp_path):
+    import pytest
+    _down.n = 0
+    answers = {f"i{n}": rec("answered", [(f"c{n}", f"q{n}")]) for n in range(50)}
+    with pytest.raises(RuntimeError, match="consecutive failures"):
+        refute_all(answers, _down, tmp_path / "r.jsonl", workers=2)
+    assert _down.n <= 20 + 2
+    good = fake_claude(json.dumps({"refuted": False, "reason": "ok"}))
+    got = refute_all(answers, good, tmp_path / "r.jsonl", workers=2)
+    assert len(got) == 50 and len(good.calls) == 50
+
+
+def test_identical_claim_and_quote_share_one_call(tmp_path):
+    run = fake_claude(json.dumps({"refuted": True, "reason": "no"}))
+    answers = {"a": rec("answered", [("same", "quote")]), "b": rec("answered", [("same", "quote")])}
+    got = refute_all(answers, run, tmp_path / "r.jsonl")
+    assert len(run.calls) == 1 and got["a#0"]["refuted"] is True and got["b#0"]["refuted"] is True

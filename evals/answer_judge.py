@@ -7,6 +7,7 @@ from pipeline.ledger import Ledger
 from pipeline.m0 import _json_object
 
 JUDGE_MODEL = REFUTE_MODEL = "claude-sonnet-5-5"
+MAX_CONSECUTIVE = 20
 VERDICTS = ("agree", "partial", "disagree", "declined")
 
 JUDGE = """Two careful readers each answered a question about one merger agreement. A system then answered the same question. Compare the system's answer with the readers' answers.
@@ -44,8 +45,48 @@ def _parse(reply: str, key: str):
 
 
 def _pool(jobs, workers):
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return dict(zip([k for k, _ in jobs], pool.map(lambda j: j[1](), jobs)))
+    """jobs: (result_key, ledger_key, fn). One call per distinct ledger key, shared by every result key that uses it.
+    Stops after MAX_CONSECUTIVE failures in a row: queued jobs are cancelled, running ones finish (their replies
+    are ledgered), then a RuntimeError is raised."""
+    unique = {}
+    for _, lkey, fn in jobs:
+        unique.setdefault(lkey, fn)
+    state = {"run": 0, "stop": False}
+    lock = threading.Lock()
+
+    def guarded(fn):
+        if state["stop"]:
+            return None
+        try:
+            reply = fn()
+        except Exception as e:  # noqa: BLE001 - counted, then the run stops
+            with lock:
+                state["run"] += 1
+                if state["run"] >= MAX_CONSECUTIVE:
+                    state["stop"] = True
+            return ("error", e)
+        with lock:
+            state["run"] = 0
+        return ("ok", reply)
+
+    pool = ThreadPoolExecutor(max_workers=workers)
+    futures = {lkey: pool.submit(guarded, fn) for lkey, fn in unique.items()}
+    results = {}
+    try:
+        for lkey, fut in futures.items():
+            results[lkey] = fut.result()
+            if state["stop"]:
+                break
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    if state["stop"]:
+        raise RuntimeError(f"judge/refute stopped after {MAX_CONSECUTIVE} consecutive failures; "
+                           "replies so far are ledgered; rerun to resume")
+    failed = [r[1] for r in results.values() if r and r[0] == "error"]
+    if failed:
+        raise RuntimeError(f"judge/refute: {len(failed)} calls failed (first: {failed[0]}); "
+                           "replies so far are ledgered; rerun to resume")
+    return {rkey: results[lkey][1] for rkey, lkey, _ in jobs}
 
 
 def judge_all(items, answers: dict, runner, ledger_path, workers: int = 4) -> dict:
@@ -61,7 +102,7 @@ def judge_all(items, answers: dict, runner, ledger_path, workers: int = 4) -> di
         text = "\n".join(f"- {c['text']}" for c in ans["claims"])
         prompt = JUDGE.format(question=it.question, a=it.meta["a"], b=it.meta["b"], answer=text)
         key = f"judge|{JUDGE_MODEL}|{it.item_id}|{_sha(text)}"
-        jobs.append((it.item_id, lambda p=prompt, k=key: _ask(led, lock, k, p, JUDGE_MODEL, runner)))
+        jobs.append((it.item_id, key, lambda p=prompt, k=key: _ask(led, lock, k, p, JUDGE_MODEL, runner)))
     for item_id, reply in _pool(jobs, workers).items():
         obj = _parse(reply, "verdict")
         v = obj.get("verdict")
@@ -77,7 +118,7 @@ def refute_all(answers: dict, runner, ledger_path, workers: int = 4) -> dict:
         for i, c in enumerate(rec["answer"]["claims"]):
             prompt = REFUTE.format(claim=c["text"], quote=c["quote"])
             key = f"refute|{REFUTE_MODEL}|{_sha(c['text'] + chr(0) + c['quote'])}"
-            jobs.append((f"{item_id}#{i}", lambda p=prompt, k=key: _ask(led, lock, k, p, REFUTE_MODEL, runner)))
+            jobs.append((f"{item_id}#{i}", key, lambda p=prompt, k=key: _ask(led, lock, k, p, REFUTE_MODEL, runner)))
     out = {}
     for ck, reply in _pool(jobs, workers).items():
         obj = _parse(reply, "refuted")
