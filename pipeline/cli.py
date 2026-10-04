@@ -5,11 +5,13 @@ import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
+from evals.answer_sets import abstain_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
+from evals.maud_labels import load_rows
 from evals.run_rung import Context, evaluate, load_context, with_passages
 from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
 from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
@@ -406,8 +408,32 @@ def _m4_recall() -> int:
     return 0
 
 
+def _m4_sets() -> int:
+    tm = DATA / "m3" / "tmachine.jsonl"
+    if not (INDEX.exists() and DEALS_INDEX.exists() and tm.exists() and _csv_paths()):
+        print("need maud.db, deals.db, data/m3/tmachine.jsonl and the label CSVs", file=sys.stderr)
+        return 2
+    maud_ids = {r[0] for r in sqlite3.connect(INDEX).execute("SELECT contract_id FROM contracts")}
+    th, ex = thuman_items(load_rows(_csv_paths()), maud_ids)
+    rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
+    deals = {d["contract_id"]: d for d in map(json.loads, (EDGAR / "deals.jsonl").read_text().splitlines()) if d}
+    sample = [json.loads(line) for line in (DATA / "m0" / "sample.jsonl").read_text().splitlines() if line]
+    names = [n for c in map(json.loads, (DATA / "m0" / "candidates.jsonl").read_text().splitlines()) for n in c["names"]]
+    conn = sqlite3.connect(DEALS_INDEX)
+    ab = abstain_items(rows, sample, deals, names, Resolver(conn), conn)
+    tmi = tmachine_items(rows)
+    write_items(DATA_M4 / "thuman_items.jsonl", th)
+    write_items(DATA_M4 / "tmachine_items.jsonl", tmi)
+    write_items(DATA_M4 / "abstain_items.jsonl", ab)
+    summary = {"thuman": len(th), "thuman_excluded": ex, "tmachine": len(tmi),
+               "abstain": {g: sum(1 for i in ab if i.group == g) for g in sorted({i.group for i in ab})}}
+    _write_atomic(DATA_M4 / "sets_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
 def _cmd_m4(args) -> int:
-    stages = {"recall": lambda: _m4_recall()}
+    stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets()}
     return stages[args.stage]()
 
 
