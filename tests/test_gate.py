@@ -43,6 +43,7 @@ def test_build_blocks_carries_definitions_amendments_and_schedule_tags(deals_lad
     assert [b.ref for b in blocks] == [f"P{i}" for i in range(1, len(blocks) + 1)]
     fee = next(b for b in blocks if any(p.kind == "amendment" for p in b.parts))
     assert fee.parts[0].kind == "passage" and fee.section_path
+    assert any(b.schedule_ref for b in blocks)  # non-vacuous: section 7.3 is schedule-tagged
     assert any(b.schedule_ref for b in blocks) == any(
         deals_ladder.conn.execute("SELECT 1 FROM passage_tags WHERE passage_id = ?", (b.passage_id,)).fetchone()
         for b in blocks)
@@ -53,3 +54,16 @@ def test_build_blocks_on_maud_index_has_no_tags_table(ladder):
     blocks = build_blocks(ladder, got.hits[:5])
     assert blocks and not any(b.schedule_ref for b in blocks)
     assert any(p.kind == "definition" for b in blocks for p in b.parts)
+
+
+def _one(text):
+    return [Block("P1", 1, "c", "s", False, (Part("passage", text, None),))]
+
+
+def test_quote_must_start_and_end_on_word_boundaries():
+    assert check("reasonable efforts", "P1", _one("use unreasonable efforts")) == "quote_not_found"
+    assert check("shall pay", "P1", _one("shall payback the sum")) == "quote_not_found"
+    assert check("not", "P1", _one("Parent cannot close")) == "quote_not_found"
+    assert check("reasonable efforts", "P1", _one("use reasonable efforts to close"))[1].kind == "passage"
+    assert check("is terminated.", "P1", BLOCKS)[1].kind == "passage"
+    assert check('"Company Termination Fee" means', "P1", _one('x“Company Termination Fee” means y'))[1].kind == "passage"
