@@ -17,8 +17,10 @@ Rules:
 Reply with one JSON object and nothing else:
 {{"state": "answered" | "not_stated" | "unfiled_schedule",{choice_key} "claims": [{{"text": "...", "quote": "...", "ref": "P1"}}]}}
 """
-CHOICES = "\nChoose exactly one of these answers and copy it into \"choice\" exactly as written:\n{options}\n"
-TEMPLATE_SHA = hashlib.sha1(TEMPLATE.encode("utf-8")).hexdigest()[:12]
+CHOICES = ("\nChoose exactly one of these answers and copy it into \"choice\" exactly as written:\n{options}\n"
+           "Always fill \"choice\": pick the answer the passages best support, or the likeliest one if they are silent. "
+           "\"state\" still says \"not_stated\" when the passages do not answer the question.\n")
+TEMPLATE_SHA = hashlib.sha1((TEMPLATE + CHOICES).encode("utf-8")).hexdigest()[:12]
 
 
 def _block(b) -> str:

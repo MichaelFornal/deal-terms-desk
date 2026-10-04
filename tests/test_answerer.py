@@ -119,3 +119,12 @@ def test_missing_or_non_string_result_is_a_parse_error(ladder):
         ans = Answerer(ladder, lambda prompt, model, bad=bad: bad, "m")
         with pytest.raises(ParseError):
             ans.ask("termination fee", "big")
+
+
+def test_option_mode_prompt_always_fills_choice_and_template_hash_covers_choices():
+    import hashlib
+
+    from answer.prompt import CHOICES, TEMPLATE
+    p = render("Type of Consideration", [], choices=("All Cash", "All Stock"))
+    assert "Always fill \"choice\"" in p and "likeliest" in p and "not_stated" in p
+    assert TEMPLATE_SHA == hashlib.sha1((TEMPLATE + CHOICES).encode("utf-8")).hexdigest()[:12]
