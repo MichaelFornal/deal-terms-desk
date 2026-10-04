@@ -1,4 +1,5 @@
 import hashlib
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -11,6 +12,11 @@ from retrieval.scope import strip_alias
 
 INPUT_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 MODEL_STATES = ("answered", "not_stated", "unfiled_schedule")
+
+
+# After a quote inside a string: what makes it the closing quote. }, ] or a key colon (followed by a value start),
+# or a comma then the start of the next key or element. Anything else means the quote is part of the text.
+_CLOSES = re.compile(r'\s*(?:[}\]]|:\s*(?:["{\[]|(?:true|false|null)\b)|,\s+["{\[]|,["{\[]|\s*$)')
 
 
 def _repair_inner_quotes(s: str) -> str:
@@ -31,7 +37,7 @@ def _repair_inner_quotes(s: str) -> str:
         if ch == '"':
             if not inside:
                 inside = True
-            elif (body[i + 1:].lstrip() or "}")[0] in ",}]:":
+            elif _CLOSES.match(body, i + 1):
                 inside = False
             else:
                 out.append("\\")

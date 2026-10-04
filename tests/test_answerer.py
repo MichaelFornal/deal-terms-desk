@@ -178,3 +178,22 @@ def test_repair_escapes_only_inner_quotes():
         '{"state": "answered", "claims": [{"text": "a: b", "quote": "the \\"Term\\" x", "ref": "P1"}], "n": [[1], ["a"]]}')
     assert _repair_inner_quotes('{"a": "x \\"y\\" z"}') == '{"a": "x \\"y\\" z"}'
     assert _repair_inner_quotes("no braces") == "no braces"
+
+
+@pytest.mark.parametrize("quote", [
+    'the "Term", as defined in Section 1',
+    'the "Term": which means the thing',
+    'the "Term": 5 days after (the "Company")',
+    'any benefit under (the "Company")',
+])
+def test_inner_quote_before_comma_or_colon_is_repaired(quote):
+    raw = '{"state": "answered", "claims": [{"text": "t", "quote": "' + quote + '", "ref": "P1"}], "choice": null}'
+    got = json.loads(_repair_inner_quotes(raw))
+    assert got["claims"][0]["quote"] == quote and got["choice"] is None
+    assert got["state"] == "answered"
+
+
+def test_closing_rule_keeps_key_and_value_boundaries():
+    s = '{"a": "x",\n "b": ["y", "z"], "c": {"d": "1"}, "e": true}'
+    assert _repair_inner_quotes(s) == s
+    assert json.loads(_repair_inner_quotes('{"quote": "ends (the "Company")", "ref": "P1"}'))["quote"] == 'ends (the "Company")'
