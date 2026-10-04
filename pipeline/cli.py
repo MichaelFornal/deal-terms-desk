@@ -25,11 +25,13 @@ from facts.build import UNSTABLE
 from facts.m0 import build_m0
 from facts.m2 import build_m2, is_unstable
 from facts.m3 import build_m3, present_m3
+from facts.m4 import build_m4, present_m4
 from facts.m2 import present as m2_present
 from facts.report import render
 from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
+from facts.report_m4 import render_m4
 from pipeline import m0
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
@@ -55,6 +57,7 @@ EXTERNAL = Path("facts/external.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
 REPORT_M3 = Path("docs/m3/REPORT.md")
+REPORT_M4 = Path("docs/m4/REPORT.md")
 M0_STAGES = ("search", "candidates", "fetch", "deals", "sample", "press", "measure")
 NEEDS_SEC = {"search", "candidates", "fetch", "deals", "press"}
 REWRITES = "llm_rewrites.jsonl"
@@ -333,6 +336,8 @@ def _all_facts() -> dict:
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
     if present_m3(OUT / "m3"):
         facts |= build_m3(OUT / "m3", OUT, DATA / "m3", EDGAR, DEALS_INDEX)
+    if present_m4(OUT_M4):
+        facts |= build_m4(OUT_M4, OUT, DATA / "m4")
     if (DATA / "m0" / "measure.json").exists():
         facts |= build_m0(DATA / "m0", facts, DATA / "sec")
     return facts
@@ -677,6 +682,9 @@ def _cmd_report(args) -> int:
     if "m3_t_r1_report_recall_at_5" in facts:
         REPORT_M3.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M3.write_text(render_m3(facts), encoding="utf-8")
+    if "m4_thuman_haiku_report_accuracy" in facts:
+        REPORT_M4.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M4.write_text(render_m4(facts), encoding="utf-8")
     if "m0_gate_pass" in facts:
         REPORT_M0.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M0.write_text(render_m0(facts), encoding="utf-8")
