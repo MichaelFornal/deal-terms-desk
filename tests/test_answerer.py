@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from answer.answerer import Answerer, ParseError, Prepared
+from answer.answerer import Answerer, ParseError, Prepared, _repair_inner_quotes
+from answer.blocks import Block, Part
 from answer.prompt import TEMPLATE_SHA, render
 from tests.fakes import fake_claude
 from tests.test_ladder import deals_ladder, ladder  # noqa: F401
@@ -128,3 +129,52 @@ def test_option_mode_prompt_always_fills_choice_and_template_hash_covers_choices
     p = render("Type of Consideration", [], choices=("All Cash", "All Stock"))
     assert "Always fill \"choice\"" in p and "likeliest" in p and "not_stated" in p
     assert TEMPLATE_SHA == hashlib.sha1((TEMPLATE + CHOICES).encode("utf-8")).hexdigest()[:12]
+
+
+QUOTE_SHAPES = [
+    'immediately prior to the consummation of the Merger (a "Vested Company RSU"),',
+    'under the Plan (the "Excluded Benefits"))',
+    'any benefits (collectively, "Excluded Benefits"))',
+]
+
+
+def quote_prepared(quote):
+    part = Part("passage", quote.replace('"', "“", 1).replace('"', "”", 1))
+    blk = Block("P1", 1, "big", "1.1", False, (part,))
+    return Prepared("q", "big", [blk], "prompt", "sha")
+
+
+def finish(text, quote):
+    return Answerer(None, None, "m").finish(quote_prepared(quote), {"result": text, "usage": {}}, 1.0)
+
+
+@pytest.mark.parametrize("quote", QUOTE_SHAPES)
+def test_unescaped_inner_quotes_are_repaired_and_still_gated(quote):
+    raw = '```json\n{"state": "answered", "claims": [{"text": "t", "quote": "' + quote + '", "ref": "P1"}]}\n```'
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(raw.strip("`").removeprefix("json"))
+    a = finish(raw, quote)
+    assert a.state == "answered" and a.claims[0].quote == quote and not a.dropped
+    wrong = raw.replace("Excluded", "Included").replace("Vested", "Unvested")
+    assert finish(wrong, quote).dropped[0].reason == "quote_not_found"
+
+
+def test_escaped_inner_quotes_parse_unchanged():
+    quote = QUOTE_SHAPES[0]
+    raw = json.dumps({"state": "answered", "claims": [{"text": "t", "quote": quote, "ref": "P1"}]})
+    assert '\\"' in raw and _repair_inner_quotes(raw) == raw
+    assert finish(raw, quote).claims[0].quote == quote
+
+
+def test_non_json_garbage_still_raises_parse_error():
+    for junk in ("I cannot help with that.", '{"state": "answered", "claims": [oops "x" }', "{not json}"):
+        with pytest.raises(ParseError):
+            finish(junk, "x")
+
+
+def test_repair_escapes_only_inner_quotes():
+    s = 'Sure: {"state": "answered", "claims": [{"text": "a: b", "quote": "the "Term" x", "ref": "P1"}], "n": [[1], ["a"]]} done'
+    assert _repair_inner_quotes(s) == (
+        '{"state": "answered", "claims": [{"text": "a: b", "quote": "the \\"Term\\" x", "ref": "P1"}], "n": [[1], ["a"]]}')
+    assert _repair_inner_quotes('{"a": "x \\"y\\" z"}') == '{"a": "x \\"y\\" z"}'
+    assert _repair_inner_quotes("no braces") == "no braces"

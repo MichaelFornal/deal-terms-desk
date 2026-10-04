@@ -13,6 +13,33 @@ INPUT_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_t
 MODEL_STATES = ("answered", "not_stated", "unfiled_schedule")
 
 
+def _repair_inner_quotes(s: str) -> str:
+    """Escape a double quote inside a JSON string value: models copy contract text such as (a "Term") into a string
+    unescaped. A quote opens a string when none is open; inside one it closes it only when the next non-space
+    character is one of , } ] : and is otherwise escaped. Works on the text from the first { to the last };
+    an already-escaped quote stays."""
+    a, b = s.find("{"), s.rfind("}")
+    if a < 0 or b < a:
+        return s
+    body, out, i, inside = s[a:b + 1], [], 0, False
+    while i < len(body):
+        ch = body[i]
+        if inside and ch == "\\" and i + 1 < len(body):
+            out.append(body[i:i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            if not inside:
+                inside = True
+            elif (body[i + 1:].lstrip() or "}")[0] in ",}]:":
+                inside = False
+            else:
+                out.append("\\")
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 class ParseError(RuntimeError):
     """The model's reply held no usable answer object. An error, never an abstention."""
 
@@ -96,7 +123,10 @@ class Answerer:
         try:
             obj = _json_object(result, ("claims", "state"))
         except RuntimeError:
-            raise ParseError(f"parse: no answer object in reply {result[:200]!r}") from None
+            try:
+                obj = _json_object(_repair_inner_quotes(result), ("claims", "state"))
+            except RuntimeError:
+                raise ParseError(f"parse: no answer object in reply {result[:200]!r}") from None
         raw = obj.get("claims", [])
         if not isinstance(raw, list) or obj.get("state") not in MODEL_STATES:
             raise ParseError(f"parse: bad state or claims in {str(obj)[:200]!r}")
