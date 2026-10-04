@@ -790,3 +790,20 @@ def test_m4_judge_also_judges_the_absent_abstain_group(tmp_path, monkeypatch):
     out = json.loads((d / "judge.json").read_text())
     assert out["abstain:" + cli.HAIKU] == {"a1": {"verdict": "agree"}} and out[cli.HAIKU] == {"t1": {"verdict": "agree"}}
     assert f"answers_abstain_{cli.HAIKU}.jsonl" in paths
+
+
+def test_m4_judge_loops_over_the_answer_models_not_the_judge(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from evals.answer_sets import AnswerItem, write_items
+    d = tmp_path / "m4"
+    monkeypatch.setattr(cli, "DATA_M4", d)
+    write_items(d / "tmachine_items.jsonl", [AnswerItem("t1", "tmachine", "f", "report", None, "q", (), "e", {})])
+    paths = []
+
+    def fake_load(path, model, items):
+        paths.append(Path(path).name)
+        return {}
+    monkeypatch.setattr(cli, "load_answers", fake_load)
+    assert cli._m4_judge(Namespace(workers=1)) == 0
+    assert paths == [f"answers_tmachine_{cli.HAIKU}.jsonl", f"answers_tmachine_{cli.SONNET}.jsonl"]

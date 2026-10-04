@@ -7,7 +7,7 @@ from pathlib import Path
 
 from answer.answerer import Answerer
 from evals.answer_score import score as score_answers
-from evals.answer_judge import JUDGE_MODEL, judge_all, refute_all
+from evals.answer_judge import judge_all, refute_all
 from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
 from evals.compare import load_items
@@ -471,7 +471,7 @@ SONNET = "claude-sonnet-5-5"
 
 def _m4_judge(args) -> int:
     items = read_items(DATA_M4 / "tmachine_items.jsonl")
-    jobs = [(model, items, DATA_M4 / f"answers_tmachine_{model}.jsonl") for model in (HAIKU, JUDGE_MODEL)]
+    jobs = [(model, items, DATA_M4 / f"answers_tmachine_{model}.jsonl") for model in (HAIKU, SONNET)]
     if (DATA_M4 / "abstain_items.jsonl").exists():  # the absent group: an answer is judged against the two passes
         absent = [i for i in read_items(DATA_M4 / "abstain_items.jsonl") if i.group == "absent"]
         jobs.append(("abstain:" + HAIKU, absent, DATA_M4 / f"answers_abstain_{HAIKU}.jsonl"))
