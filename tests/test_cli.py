@@ -752,3 +752,9 @@ def test_m3_tier_with_kept_items_missing_from_a_rung_exits_2(data, monkeypatch, 
     assert cli.entry(["m3", "tier"]) == 2
     err = capsys.readouterr().err
     assert "dtd eval --rung R4" in err and "dtd eval --rung R1" not in err
+
+
+def test_m4_recall_refuses_without_inputs(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "INDEX", tmp_path / "missing.db")
+    assert cli.entry(["m4", "recall"]) == 2
+    assert "run M2 and M3 first" in capsys.readouterr().err

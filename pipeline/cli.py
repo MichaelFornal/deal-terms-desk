@@ -37,7 +37,7 @@ from pipeline.tech_corpus import assemble
 from retrieval import vectors
 from retrieval.deals import add_deals, maud_duplicates
 from retrieval.index import build_index
-from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
+from retrieval.ladder import ANSWER_RUNGS, RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
@@ -377,6 +377,40 @@ def _cmd_failures(args) -> int:
     return 0
 
 
+OUT_M4 = OUT / "m4"
+DATA_M4 = DATA / "m4"
+
+
+def _m4_recall() -> int:
+    tm = DATA / "m3" / "tmachine.jsonl"
+    if not (INDEX.exists() and DEALS_INDEX.exists() and _has_vectors(DEALS_INDEX) and tm.exists()
+            and LEXICON_PATH.exists() and _csv_paths()):
+        print("need maud.db, deals.db with vectors, data/m3/tmachine.jsonl and the lexicon; run M2 and M3 first",
+              file=sys.stderr)
+        return 2
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    _eval_rung("R6n", INDEX, "R6n", ctx, OUT_M4)  # T-human, within agreement, next to M2's r6.json
+    contracts, amendment_texts = _deals_texts()
+    rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
+    items = items_from_rows(rows)
+    tctx = with_passages(Context(items, {"source": "T-machine (machine-built)", "items": len(items)}, contracts, {}),
+                         DEALS_INDEX)
+    ladder = _deals_ladder(contracts, amendment_texts)
+    kw = {"count_tokens": ladder.embedder.count_tokens, "extra": {"settings": asdict(ladder.settings)}}
+    evaluate(tctx, "T-R6n", lambda q, c, k: ladder.run("R6n", q, c, k), OUT_M4, **kw)
+    # R7 is rerun after Task 1's resolver fixes so R7n is compared with the same resolver
+    evaluate(tctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), OUT_M4, scope="corpus-wide", **kw)
+    evaluate(tctx, "T-R7n-corpus", lambda q, c, k: ladder.run("R7n", q, None, k), OUT_M4, scope="corpus-wide", **kw)
+    _write_atomic(OUT_M4 / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
+    print(json.dumps({"written": sorted(p.name for p in OUT_M4.iterdir())}))
+    return 0
+
+
+def _cmd_m4(args) -> int:
+    stages = {"recall": lambda: _m4_recall()}
+    return stages[args.stage]()
+
+
 def _cmd_m3(args) -> int:
     if args.stage == "corpus":
         summary = assemble(DATA / "m0", EDGAR)
@@ -576,6 +610,14 @@ def entry(argv: list[str] | None = None) -> int:
     m3p.add_argument("--workers", type=int, default=4)
     m3p.add_argument("--max-new", type=int, default=None)
     m3p.set_defaults(fn=_cmd_m3)
+    m4p = sub.add_parser("m4")
+    m4p.add_argument("stage", choices=("recall", "sets", "answer", "judge", "refute", "score"))
+    m4p.add_argument("--set", dest="set_name", choices=("thuman", "tmachine", "abstain"), default=None)
+    m4p.add_argument("--model", default="claude-haiku-4-5-20251001")
+    m4p.add_argument("--split", choices=("tune", "report"), default=None)
+    m4p.add_argument("--workers", type=int, default=4)
+    m4p.add_argument("--max-new", type=int, default=None)
+    m4p.set_defaults(fn=_cmd_m4)
     args = parser.parse_args(argv)
     return args.fn(args)
 
