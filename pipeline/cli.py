@@ -505,6 +505,7 @@ def _m4_score(args) -> int:
     judge = json.loads((DATA_M4 / "judge.json").read_text()) if (DATA_M4 / "judge.json").exists() else {}
     refute = json.loads((DATA_M4 / "refute.json").read_text()) if (DATA_M4 / "refute.json").exists() else {}
     s = score_answers(sets, answers, judge, refute, (HAIKU, SONNET))
+    OUT_M4.mkdir(parents=True, exist_ok=True)
     _write_atomic(OUT_M4 / "scores.json", json.dumps(s, indent=2, sort_keys=True))
     print(json.dumps({"written": str(OUT_M4 / "scores.json")}))
     return 0

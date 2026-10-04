@@ -22,10 +22,13 @@ def _thuman(items, recs, n_boot):
     base = _baseline([i for i in items if i.split == "tune"])
     out = {}
     for split in ("tune", "report"):
-        acc, bl, cats, ool, err = [], [], defaultdict(lambda: ([], [])), 0, 0
+        acc, bl, cit, diff = [], [], [], []
+        cats, ool, err, total, missing = defaultdict(lambda: ([], [], [])), 0, 0, 0, 0
         for i in (x for x in items if x.split == split):
+            total += 1
             r = recs.get(i.item_id)
             if r is None:
+                missing += 1
                 continue
             if r["answer"] is None:
                 err += 1
@@ -34,15 +37,21 @@ def _thuman(items, recs, n_boot):
             ool += choice not in i.choices
             a = (i.contract_id, float(choice == i.expected))
             b = (i.contract_id, float(base.get(i.item_id.split("|", 1)[1]) == i.expected))
+            c = (i.contract_id, float(choice == i.expected and r["answer"]["state"] == "answered"))
             acc.append(a)
             bl.append(b)
+            cit.append(c)
+            diff.append((i.contract_id, a[1] - b[1]))
             cats[i.group][0].append(a)
             cats[i.group][1].append(b)
+            cats[i.group][2].append(c)
         if acc:
-            out[split] = {"accuracy": _ci(acc, n_boot), "baseline": _ci(bl, n_boot), "out_of_list": ool,
-                          "errors": err, "n": len(acc),
-                          "by_category": {c: {"accuracy": _ci(a, n_boot), "baseline": _ci(b, n_boot)}
-                                          for c, (a, b) in sorted(cats.items())}}
+            out[split] = {"accuracy": _ci(acc, n_boot), "accuracy_cited": _ci(cit, n_boot),
+                          "baseline": _ci(bl, n_boot), "vs_baseline": _ci(diff, n_boot), "out_of_list": ool,
+                          "errors": err, "n": len(acc), "items": total, "missing": missing,
+                          "by_category": {k: {"accuracy": _ci(a, n_boot), "accuracy_cited": _ci(c, n_boot),
+                                              "baseline": _ci(b, n_boot)}
+                                          for k, (a, b, c) in sorted(cats.items())}}
     return out
 
 
@@ -50,15 +59,21 @@ def _tmachine(items, recs, verdicts, n_boot):
     out = {}
     for split in ("tune", "report"):
         ag, ap, fams, declined, unparsed, wrong, err = [], [], defaultdict(lambda: ([], [])), 0, 0, 0, 0
+        total = missing = not_judged = 0
         for i in (x for x in items if x.split == split):
+            total += 1
             r = recs.get(i.item_id)
             if r is None:
+                missing += 1
                 continue
             if r["answer"] is None:
                 err += 1
                 continue
             wrong += r["answer"]["contract_id"] not in (None, i.expected)
-            v = verdicts.get(i.item_id, {}).get("verdict")
+            if i.item_id not in verdicts:
+                not_judged += 1
+                continue
+            v = verdicts[i.item_id].get("verdict")
             if v is None:
                 unparsed += 1
                 continue
@@ -70,7 +85,8 @@ def _tmachine(items, recs, verdicts, n_boot):
             fams[i.group][1].append(p)
         if ag:
             out[split] = {"agree": _ci(ag, n_boot), "agree_or_partial": _ci(ap, n_boot), "declined": declined,
-                          "judge_unparsed": unparsed, "wrong_deal": wrong, "errors": err, "n": len(ag),
+                          "judge_unparsed": unparsed, "not_judged": not_judged, "wrong_deal": wrong, "errors": err,
+                          "n": len(ag), "items": total, "missing": missing,
                           "by_family": {f: {"agree": _ci(a, n_boot), "agree_or_partial": _ci(p, n_boot)}
                                         for f, (a, p) in sorted(fams.items())}}
     return out
@@ -81,8 +97,10 @@ def _abstain(items, recs):
     for g in ABSTAIN_GROUPS:
         c = Counter()
         for i in (x for x in items if x.group == g):
+            c["items"] += 1
             r = recs.get(i.item_id)
             if r is None:
+                c["missing"] += 1
                 continue
             if r["answer"] is None:
                 c["errors"] += 1
@@ -90,9 +108,11 @@ def _abstain(items, recs):
             st = r["answer"]["state"]
             c["n"] += 1
             c["correct" if st == i.expected else "false_answer" if st == "answered" else "other"] += 1
-        if c["n"]:
-            out[g] = {k: c[k] for k in ("n", "correct", "false_answer", "other", "errors")} | {
-                "correct_rate": round(c["correct"] / c["n"], 4), "false_answer_rate": round(c["false_answer"] / c["n"], 4)}
+        if c["items"] and c["items"] > c["missing"]:
+            n = c["n"]
+            out[g] = {k: c[k] for k in ("n", "correct", "false_answer", "other", "errors", "items", "missing")} | {
+                "correct_rate": round(c["correct"] / n, 4) if n else None,
+                "false_answer_rate": round(c["false_answer"] / n, 4) if n else None}
     return out
 
 

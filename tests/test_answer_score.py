@@ -50,3 +50,29 @@ def test_tmachine_judge_and_abstention():
     assert s["abstain"]["unknown_deal"]["correct"] == 1
     assert s["gate"]["tmachine"]["returned"] == 5 and s["gate"]["tmachine"]["kept"] == 4
     assert s["refute"] == {"claims": 3, "not_refuted": 1, "unparsed": 1, "survival_rate": 0.5}
+
+
+def test_missing_records_and_cited_and_vs_baseline():
+    items = [th("c1", "Q", "A", "tune"), th("c4", "Q", "A", "report"), th("c5", "Q", "B", "report"),
+             th("c6", "Q", "A", "report"), th("c7", "Q", "A", "report")]
+    answers = {("thuman", M): {"c4|Q": ans(choice="A"), "c5|Q": ans(choice="B", state="not_stated"),
+                               "c6|Q": ans(choice="B")}}
+    r = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["thuman"][M]["report"]
+    assert r["items"] == 4 and r["missing"] == 1 and r["n"] == 3
+    assert abs(r["accuracy"]["mean"] - 2 / 3) < 1e-9 and abs(r["accuracy_cited"]["mean"] - 1 / 3) < 1e-9
+    # baseline "A": diffs c4 1-1=0, c5 1-0=1, c6 0-1=-1
+    assert abs(r["vs_baseline"]["mean"]) < 1e-9 and r["vs_baseline"]["n_items"] == 3
+    assert abs(r["by_category"]["Cat"]["accuracy_cited"]["mean"] - 1 / 3) < 1e-9
+
+
+def test_not_judged_vs_unparsed_and_abstain_missing():
+    tm = [AnswerItem(f"edgar_{k}|f", "tmachine", "f", "report", None, "q", (), f"edgar_{k}", {}) for k in range(4)]
+    answers = {("tmachine", M): {t.item_id: ans(cid=t.expected) for t in tm[:3]}}
+    judge = {M: {tm[0].item_id: {"verdict": "agree"}, tm[1].item_id: {"verdict": None}}}
+    ab = [AnswerItem(f"x{k}", "abstain", "earnout", "report", "c", "q", (), "not_stated") for k in range(3)]
+    answers[("abstain", M)] = {"x0": ans(state="not_stated")}
+    s = score({"tmachine": tm, "abstain": ab}, answers, judge, {}, (M,), n_boot=50)
+    t = s["tmachine"][M]["report"]
+    assert t["n"] == 1 and t["judge_unparsed"] == 1 and t["not_judged"] == 1
+    assert t["items"] == 4 and t["missing"] == 1
+    assert s["abstain"]["earnout"]["items"] == 3 and s["abstain"]["earnout"]["missing"] == 2
