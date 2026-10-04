@@ -90,10 +90,13 @@ class Answerer:
                         tuple(choices), ms, candidates)
 
     def finish(self, p: Prepared, reply: dict, ms: float) -> Answer:
+        result = reply.get("result") if isinstance(reply, dict) else None
+        if not isinstance(result, str):
+            raise ParseError("parse: reply has no text result")
         try:
-            obj = _json_object(reply["result"], ("claims", "state"))
+            obj = _json_object(result, ("claims", "state"))
         except RuntimeError:
-            raise ParseError(f"parse: no answer object in reply {reply['result'][:200]!r}") from None
+            raise ParseError(f"parse: no answer object in reply {result[:200]!r}") from None
         raw = obj.get("claims", [])
         if not isinstance(raw, list) or obj.get("state") not in MODEL_STATES:
             raise ParseError(f"parse: bad state or claims in {str(obj)[:200]!r}")

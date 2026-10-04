@@ -14,9 +14,9 @@ def reply(**obj):
     return json.dumps(obj)
 
 
-def fee_ref(ladder):
+def fee_ref(ladder, question="termination fee", choices=()):
     """The label the fee passage gets in this fixture (hit order decides it, not the test)."""
-    prep = Answerer(ladder, fake_claude(""), "m").prepare("termination fee", "big")
+    prep = Answerer(ladder, fake_claude(""), "m").prepare(question, "big", choices=choices)
     return next(b.ref for b in prep.blocks if FEE_QUOTE in b.parts[0].text)
 
 
@@ -37,8 +37,9 @@ def test_no_surviving_claim_is_not_stated(ladder):
 
 
 def test_model_not_stated_wins_over_claims(ladder):
-    run = fake_claude(reply(state="not_stated", claims=[{"text": "x", "quote": FEE_QUOTE, "ref": "P1"}]))
-    assert Answerer(ladder, run, "m").ask("termination fee", "big").state == "not_stated"
+    run = fake_claude(reply(state="not_stated", claims=[{"text": "x", "quote": FEE_QUOTE, "ref": fee_ref(ladder)}]))
+    a = Answerer(ladder, run, "m").ask("termination fee", "big")
+    assert a.state == "not_stated" and len(a.claims) == 1 and a.dropped == ()  # claim passed the gate; model decided
 
 
 def test_which_deal_makes_no_call(deals_ladder):
@@ -73,8 +74,9 @@ def test_unfiled_schedule_needs_a_tagged_passage(deals_ladder, ladder):
     q = tagged.parts[0].text.split(".")[0]
     run = fake_claude(reply(state="unfiled_schedule", claims=[{"text": "In a schedule.", "quote": q, "ref": tagged.ref}]))
     assert Answerer(deals_ladder, run, "m").ask("termination fee schedule", "edgar_0001").state == "unfiled_schedule"
-    run = fake_claude(reply(state="unfiled_schedule", claims=[{"text": "x", "quote": FEE_QUOTE, "ref": "P1"}]))
-    assert Answerer(ladder, run, "m").ask("termination fee", "big").state == "not_stated"  # no tags in MAUD index
+    run = fake_claude(reply(state="unfiled_schedule", claims=[{"text": "x", "quote": FEE_QUOTE, "ref": fee_ref(ladder)}]))
+    a = Answerer(ladder, run, "m").ask("termination fee", "big")
+    assert len(a.claims) == 1 and a.state == "not_stated"  # no tags in MAUD index
 
 
 def test_parse_failure_raises_not_abstains(ladder):
@@ -91,9 +93,11 @@ def test_reply_in_code_fence_is_parsed(ladder):
 
 
 def test_option_mode_records_the_choice_and_lists_options(ladder):
-    run = fake_claude(reply(state="answered", choice="All Cash", claims=[{"text": "t", "quote": FEE_QUOTE, "ref": fee_ref(ladder)}]))
-    a = Answerer(ladder, run, "m").ask("Type of Consideration", "big", choices=("All Cash", "All Stock"))
-    assert a.choice == "All Cash"
+    ch = ("All Cash", "All Stock")
+    ref = fee_ref(ladder, "Type of Consideration", ch)
+    run = fake_claude(reply(state="answered", choice="All Cash", claims=[{"text": "t", "quote": FEE_QUOTE, "ref": ref}]))
+    a = Answerer(ladder, run, "m").ask("Type of Consideration", "big", choices=ch)
+    assert a.state == "answered" and a.choice == "All Cash"
     assert "- All Cash" in run.calls[0][0] and "- All Stock" in run.calls[0][0]
 
 
@@ -108,3 +112,10 @@ def test_prompt_hash_is_stable_and_template_hash_is_exported(ladder):
     p2 = Answerer(ladder, fake_claude(""), "m").prepare("termination fee", "big")
     assert isinstance(p1, Prepared) and p1.prompt_sha == p2.prompt_sha and len(TEMPLATE_SHA) == 12
     assert render("termination fee", p1.blocks) == p1.prompt
+
+
+def test_missing_or_non_string_result_is_a_parse_error(ladder):
+    for bad in ({}, {"result": None}, {"result": 5}):
+        ans = Answerer(ladder, lambda prompt, model, bad=bad: bad, "m")
+        with pytest.raises(ParseError):
+            ans.ask("termination fee", "big")
