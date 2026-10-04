@@ -6,6 +6,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from answer.answerer import Answerer
+from evals.answer_judge import judge_all, refute_all
 from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
 from evals.compare import load_items
@@ -13,7 +14,7 @@ from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sampl
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
 from evals.maud_labels import load_rows
-from evals.run_answers import answer_all
+from evals.run_answers import answer_all, load_answers
 from evals.run_rung import Context, evaluate, load_context, with_passages
 from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
 from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
@@ -458,8 +459,37 @@ def _m4_answer(args) -> int:
     return 0
 
 
+HAIKU = "claude-haiku-4-5-20251001"
+
+
+def _m4_judge(args) -> int:
+    items = read_items(DATA_M4 / "tmachine_items.jsonl")
+    out = {}
+    for model in (HAIKU, "claude-sonnet-5-5"):
+        answers = load_answers(DATA_M4 / f"answers_tmachine_{model}.jsonl", model)
+        if answers:
+            out[model] = judge_all(items, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
+    _write_atomic(DATA_M4 / "judge.json", json.dumps(out, indent=2, sort_keys=True))
+    print(json.dumps({m: len(v) for m, v in out.items()}))
+    return 0
+
+
+def _m4_refute(args) -> int:
+    answers = {}
+    for s in ("thuman", "tmachine"):
+        items = {i.item_id: i for i in read_items(DATA_M4 / f"{s}_items.jsonl")}
+        for iid, rec in load_answers(DATA_M4 / f"answers_{s}_{HAIKU}.jsonl", HAIKU).items():
+            if items[iid].split == "report":
+                answers[f"{s}:{iid}"] = rec
+    out = refute_all(answers, run_claude, DATA_M4 / "refute_ledger.jsonl", workers=args.workers)
+    _write_atomic(DATA_M4 / "refute.json", json.dumps(out, indent=2, sort_keys=True))
+    print(json.dumps({"claims": len(out)}))
+    return 0
+
+
 def _cmd_m4(args) -> int:
-    stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets(), "answer": lambda: _m4_answer(args)}
+    stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets(), "answer": lambda: _m4_answer(args),
+              "judge": lambda: _m4_judge(args), "refute": lambda: _m4_refute(args)}
     return stages[args.stage]()
 
 
