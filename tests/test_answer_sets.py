@@ -33,6 +33,12 @@ def test_thuman_question_carries_the_maud_question_type():
     assert items[0].item_id == "contract_1|A/P/C application to-Answer"
 
 
+def test_thuman_question_is_the_bare_type_when_stem_equals_it():
+    rows = [LabelRow("contract_1", "span", "MAE definition-Answer", "", "Yes", "MAE definition", "Deal Protection")]
+    items, _ = thuman_items(rows, {"contract_1"})
+    assert items[0].question == "MAE definition"
+
+
 def test_thuman_excludes_questions_with_too_many_options():
     rows = [lr(f"contract_{i}", "Big-Answer", f"opt{i}") for i in range(12)]
     items, ex = thuman_items(rows, {f"contract_{i}" for i in range(12)}, max_options=10)

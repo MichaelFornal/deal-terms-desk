@@ -468,7 +468,7 @@ def _m4_judge(args) -> int:
     items = read_items(DATA_M4 / "tmachine_items.jsonl")
     out = {}
     for model in (HAIKU, JUDGE_MODEL):
-        answers = load_answers(DATA_M4 / f"answers_tmachine_{model}.jsonl", model)
+        answers = load_answers(DATA_M4 / f"answers_tmachine_{model}.jsonl", model, items)
         if answers:
             try:
                 out[model] = judge_all(items, answers, run_claude, DATA_M4 / "judge_ledger.jsonl", workers=args.workers)
@@ -484,7 +484,7 @@ def _m4_refute(args) -> int:
     answers = {}
     for s in ("thuman", "tmachine"):
         items = {i.item_id: i for i in read_items(DATA_M4 / f"{s}_items.jsonl")}
-        for iid, rec in load_answers(DATA_M4 / f"answers_{s}_{HAIKU}.jsonl", HAIKU).items():
+        for iid, rec in load_answers(DATA_M4 / f"answers_{s}_{HAIKU}.jsonl", HAIKU, items.values()).items():
             if items[iid].split == "report":
                 answers[f"{s}:{iid}"] = rec
     try:
@@ -500,7 +500,7 @@ def _m4_refute(args) -> int:
 def _m4_score(args) -> int:
     sets = {s: read_items(DATA_M4 / f"{s}_items.jsonl") for s in ("thuman", "tmachine", "abstain")
             if (DATA_M4 / f"{s}_items.jsonl").exists()}
-    answers = {(s, m): load_answers(DATA_M4 / f"answers_{s}_{m}.jsonl", m) for s in sets for m in (HAIKU, SONNET)}
+    answers = {(s, m): load_answers(DATA_M4 / f"answers_{s}_{m}.jsonl", m, sets[s]) for s in sets for m in (HAIKU, SONNET)}
     answers = {k: v for k, v in answers.items() if v}
     judge = json.loads((DATA_M4 / "judge.json").read_text()) if (DATA_M4 / "judge.json").exists() else {}
     refute = json.loads((DATA_M4 / "refute.json").read_text()) if (DATA_M4 / "refute.json").exists() else {}

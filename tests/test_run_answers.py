@@ -10,7 +10,7 @@ import pytest
 from answer.answerer import Answer, ParseError, Prepared
 from answer.prompt import TEMPLATE_SHA
 from evals.answer_sets import AnswerItem, write_items
-from evals.run_answers import answer_all, load_answers
+from evals.run_answers import _item_sha, answer_all, load_answers
 
 
 class FakeAnswerer:
@@ -43,7 +43,7 @@ def test_ledger_skip_and_no_call_states(tmp_path):
     its = items(5) + [AnswerItem("nd", "abstain", "unknown_deal", "report", None, "nodeal x", (), "which_deal")]
     s = answer_all(its, FakeAnswerer(runner), tmp_path / "l.jsonl", workers=2)
     assert s == {"items": 6, "done": 6, "new_calls": 5, "errors": 0}
-    got = load_answers(tmp_path / "l.jsonl", "m")
+    got = load_answers(tmp_path / "l.jsonl", "m", its)
     assert got["nd"]["answer"]["state"] == "which_deal" and got["i0"]["template_sha"] == TEMPLATE_SHA
     runner.calls = []
     assert answer_all(its, FakeAnswerer(runner), tmp_path / "l.jsonl")["new_calls"] == 0 and runner.calls == []
@@ -56,7 +56,7 @@ def test_changed_template_is_a_miss(tmp_path, monkeypatch):
     monkeypatch.setattr(ra, "TEMPLATE_SHA", "000000000000")
     runner.calls = []
     assert answer_all(items(2), FakeAnswerer(runner), tmp_path / "l.jsonl")["new_calls"] == 2
-    assert set(load_answers(tmp_path / "l.jsonl", "m")) == {"i0", "i1"}
+    assert set(load_answers(tmp_path / "l.jsonl", "m", items(2))) == {"i0", "i1"}
 
 
 def test_changed_question_for_same_item_id_is_a_miss(tmp_path):
@@ -67,13 +67,22 @@ def test_changed_question_for_same_item_id_is_a_miss(tmp_path):
     assert answer_all(old, FakeAnswerer(runner), tmp_path / "l.jsonl")["new_calls"] == 0
     s = answer_all(new, FakeAnswerer(runner), tmp_path / "l.jsonl")
     assert s["new_calls"] == 1 and s["done"] == 1 and len(runner.calls) == 2
-    assert load_answers(tmp_path / "l.jsonl", "m")["i0"]["item_sha"] == answer_all.__globals__["_item_sha"](new[0])
+    assert load_answers(tmp_path / "l.jsonl", "m", new)["i0"]["item_sha"] == _item_sha(new[0])
+    # the old question's record is not read for the new item, and is still read for the old one
+    only_old = tmp_path / "o.jsonl"
+    answer_all(old, FakeAnswerer(runner), only_old)
+    assert load_answers(only_old, "m", new) == {}
+    assert load_answers(only_old, "m", old)["i0"]["item_sha"] == _item_sha(old[0])
+    # changed then reverted: the current question's record is the one returned
+    answer_all(new, FakeAnswerer(runner), only_old)
+    assert load_answers(only_old, "m", old)["i0"]["item_sha"] == _item_sha(old[0])
+    assert load_answers(only_old, "m", new)["i0"]["item_sha"] == _item_sha(new[0])
 
 
 def test_parse_and_runner_errors_are_recorded_and_threshold_stops(tmp_path):
     runner.calls = []
     s = answer_all(items(40), FakeAnswerer(runner, fail_parse={"q3"}), tmp_path / "l.jsonl", max_error_rate=0.05)
-    assert s["errors"] == 1 and load_answers(tmp_path / "l.jsonl", "m")["i3"]["error"].startswith("parse")
+    assert s["errors"] == 1 and load_answers(tmp_path / "l.jsonl", "m", items(40))["i3"]["error"].startswith("parse")
 
     def down(prompt, model):
         raise RuntimeError("claude down")
@@ -110,13 +119,13 @@ def test_sigkill_mid_run_then_resume(tmp_path):
         time.sleep(0.02)
     os.kill(p.pid, signal.SIGKILL)
     p.wait()
-    before = len(load_answers(ledger, "m"))
+    before = len(load_answers(ledger, "m", items(60)))
     assert 10 <= before < 60
     with open(ledger, "a") as f:
         f.write('{"key": "torn')  # a kill mid-write leaves a torn last line
     runner.calls = []
     s = answer_all(items(60), FakeAnswerer(runner), ledger)
-    assert s["new_calls"] == 60 - before and len(load_answers(ledger, "m")) == 60
+    assert s["new_calls"] == 60 - before and len(load_answers(ledger, "m", items(60))) == 60
     keys = [json.loads(l)["key"] for l in ledger.read_text().splitlines() if l.strip()]
     assert len(keys) == len(set(keys)) == 60
 
@@ -127,13 +136,13 @@ def test_runner_errors_are_retried_on_rerun_and_parse_errors_are_not(tmp_path):
     led = tmp_path / "l.jsonl"
     with pytest.raises(RuntimeError, match="error rate"):
         answer_all(items(40), FakeAnswerer(down), led, workers=2)
-    failed = {k for k, r in load_answers(led, "m").items() if r["error"].startswith("runner")}
+    failed = {k for k, r in load_answers(led, "m", items(40)).items() if r["error"].startswith("runner")}
     assert failed
-    kept = len(load_answers(led, "m")) - len(failed)
+    kept = len(load_answers(led, "m", items(40))) - len(failed)
     runner.calls = []
     s = answer_all(items(40), FakeAnswerer(runner, fail_parse={"q3"}), led, workers=2)
     assert s["new_calls"] == 40 - kept and len(runner.calls) == s["new_calls"]
-    got = load_answers(led, "m")
+    got = load_answers(led, "m", items(40))
     assert all(got[k]["error"] is None or got[k]["error"].startswith("parse") for k in failed)
     assert s["done"] == 40
     # parse errors stay permanent: a third run makes no calls
@@ -151,7 +160,7 @@ def test_stop_cancels_queued_calls_and_ledgers_running_ones(tmp_path):
     led = tmp_path / "l.jsonl"
     with pytest.raises(RuntimeError):
         answer_all(items(200), FakeAnswerer(down), led, workers=2)
-    recorded = len(load_answers(led, "m"))
+    recorded = len(load_answers(led, "m", items(200)))
     assert len(calls) == recorded  # every call that ran was ledgered
     assert recorded <= 20 + 2 * 2  # stop within the consecutive limit plus the in-flight window
 
@@ -173,4 +182,4 @@ def test_late_outage_stops_on_consecutive_failures(tmp_path):
 def test_raw_reply_is_stored(tmp_path):
     runner.calls = []
     answer_all(items(1), FakeAnswerer(runner), tmp_path / "l.jsonl")
-    assert load_answers(tmp_path / "l.jsonl", "m")["i0"]["result"] == "{}"
+    assert load_answers(tmp_path / "l.jsonl", "m", items(1))["i0"]["result"] == "{}"

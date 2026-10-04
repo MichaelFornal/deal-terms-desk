@@ -23,13 +23,19 @@ def _key(item, model: str) -> str:
     return f"{item.item_id}|{model}|{TEMPLATE_SHA}|{_item_sha(item)}"
 
 
-def load_answers(ledger_path: Path, model: str) -> dict[str, dict]:
-    """Current-template records for one model, by item id. It does not know the items, so if an item id has records
-    for several questions the latest put wins (ledger order)."""
+def load_answers(ledger_path: Path, model: str, items) -> dict[str, dict]:
+    """The record for each current item, by item id: exactly the ledger key `_key(item, model)`. A record made for a
+    different question, choices or template (or a legacy record without the item hash) is absent, so a stale answer
+    is never read; an item with no match is simply missing."""
     if not Path(ledger_path).exists():
         return {}
     led = Ledger(ledger_path, key="key")
-    return {r["item_id"]: r for r in led._recs.values() if r["model"] == model and r["template_sha"] == TEMPLATE_SHA}
+    out = {}
+    for item in items:
+        rec = led.get(_key(item, model))
+        if rec is not None:
+            out[item.item_id] = rec
+    return out
 
 
 def _is_done(rec: dict | None) -> bool:
