@@ -6,6 +6,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from answer.answerer import Answerer
+from evals.answer_score import score as score_answers
 from evals.answer_judge import JUDGE_MODEL, judge_all, refute_all
 from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
@@ -460,6 +461,7 @@ def _m4_answer(args) -> int:
 
 
 HAIKU = "claude-haiku-4-5-20251001"
+SONNET = "claude-sonnet-5-5"
 
 
 def _m4_judge(args) -> int:
@@ -495,9 +497,22 @@ def _m4_refute(args) -> int:
     return 0
 
 
+def _m4_score(args) -> int:
+    sets = {s: read_items(DATA_M4 / f"{s}_items.jsonl") for s in ("thuman", "tmachine", "abstain")
+            if (DATA_M4 / f"{s}_items.jsonl").exists()}
+    answers = {(s, m): load_answers(DATA_M4 / f"answers_{s}_{m}.jsonl", m) for s in sets for m in (HAIKU, SONNET)}
+    answers = {k: v for k, v in answers.items() if v}
+    judge = json.loads((DATA_M4 / "judge.json").read_text()) if (DATA_M4 / "judge.json").exists() else {}
+    refute = json.loads((DATA_M4 / "refute.json").read_text()) if (DATA_M4 / "refute.json").exists() else {}
+    s = score_answers(sets, answers, judge, refute, (HAIKU, SONNET))
+    _write_atomic(OUT_M4 / "scores.json", json.dumps(s, indent=2, sort_keys=True))
+    print(json.dumps({"written": str(OUT_M4 / "scores.json")}))
+    return 0
+
+
 def _cmd_m4(args) -> int:
     stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets(), "answer": lambda: _m4_answer(args),
-              "judge": lambda: _m4_judge(args), "refute": lambda: _m4_refute(args)}
+              "judge": lambda: _m4_judge(args), "refute": lambda: _m4_refute(args), "score": lambda: _m4_score(args)}
     return stages[args.stage]()
 
 
