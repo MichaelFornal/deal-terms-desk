@@ -26,6 +26,13 @@ def test_thuman_one_item_per_contract_question_with_all_options():
     assert ex == {"disputed": 1, "not_indexed": 1, "too_many_options": 0, "questions_too_many_options": 0}
 
 
+def test_thuman_question_carries_the_maud_question_type():
+    rows = [LabelRow("contract_1", "span", "A/P/C application to-Answer", "", "Both", "MAE definition", "Deal Protection")]
+    items, _ = thuman_items(rows, {"contract_1"})
+    assert items[0].question == "MAE definition: A/P/C application to"
+    assert items[0].item_id == "contract_1|A/P/C application to-Answer"
+
+
 def test_thuman_excludes_questions_with_too_many_options():
     rows = [lr(f"contract_{i}", "Big-Answer", f"opt{i}") for i in range(12)]
     items, ex = thuman_items(rows, {f"contract_{i}" for i in range(12)}, max_options=10)

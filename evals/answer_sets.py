@@ -49,15 +49,23 @@ def read_items(path: Path) -> list[AnswerItem]:
     return out
 
 
+def _question(text_type: str, question: str) -> str:
+    """The MAUD label query: the question type plus the stem (as evals.items._query), once if they are the same."""
+    stem = ANSWER_SUFFIX.sub("", question).strip()
+    return text_type if stem == text_type.strip() else f"{text_type}: {stem}"
+
+
 def thuman_items(rows: list[LabelRow], contract_ids: set[str], max_options: int = 10):
     """One item per (agreement, MAUD answer question). Choices are every answer MAUD gives that question."""
     options: dict[str, set[str]] = defaultdict(set)
     answers: dict[tuple[str, str], set[str]] = defaultdict(set)
     category: dict[tuple[str, str], str] = {}
+    text_type: dict[str, str] = {}
     for r in rows:
         options[r.question].add(r.answer)
         answers[(r.contract_id, r.question)].add(r.answer)
         category[(r.contract_id, r.question)] = r.category
+        text_type[r.question] = r.text_type
     wide = {q for q, o in options.items() if len(o) > max_options}
     ex = {"disputed": 0, "not_indexed": 0, "too_many_options": 0, "questions_too_many_options": len(wide)}
     items = []
@@ -70,7 +78,7 @@ def thuman_items(rows: list[LabelRow], contract_ids: set[str], max_options: int 
             ex["disputed"] += 1
         else:
             items.append(AnswerItem(f"{cid}|{q}", "thuman", category[(cid, q)], split_of(cid), cid,
-                                    ANSWER_SUFFIX.sub("", q), tuple(sorted(options[q])), next(iter(got))))
+                                    _question(text_type[q], q), tuple(sorted(options[q])), next(iter(got))))
     return items, ex
 
 

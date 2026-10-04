@@ -1,3 +1,5 @@
+import hashlib
+import json
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -12,12 +14,18 @@ MAX_CONSECUTIVE = 20  # this many failures in a row stop the run at once (a late
 MIN_FOR_RATE = 20  # the error-rate stop needs this many finished calls before it can fire
 
 
-def _key(item_id: str, model: str) -> str:
-    return f"{item_id}|{model}|{TEMPLATE_SHA}"
+def _item_sha(item) -> str:
+    return hashlib.sha1(json.dumps([item.question, item.contract_id, list(item.choices)]).encode()).hexdigest()[:8]
+
+
+def _key(item, model: str) -> str:
+    """Item id, model, template and the item's content, so a changed question is a new call, not a stale hit."""
+    return f"{item.item_id}|{model}|{TEMPLATE_SHA}|{_item_sha(item)}"
 
 
 def load_answers(ledger_path: Path, model: str) -> dict[str, dict]:
-    """Current-template records for one model, by item id."""
+    """Current-template records for one model, by item id. It does not know the items, so if an item id has records
+    for several questions the latest put wins (ledger order)."""
     if not Path(ledger_path).exists():
         return {}
     led = Ledger(ledger_path, key="key")
@@ -39,7 +47,7 @@ def answer_all(items, answerer, ledger_path: Path, workers: int = 4, max_new: in
 
     def put(item, answer: Answer | None, error: str | None, result: str | None = None):
         with lock:
-            led.put({"key": _key(item.item_id, model), "item_id": item.item_id, "model": model,
+            led.put({"key": _key(item, model), "item_id": item.item_id, "item_sha": _item_sha(item), "model": model,
                      "template_sha": TEMPLATE_SHA, "answer": asdict(answer) if answer else None, "error": error,
                      "result": result})
 
@@ -58,7 +66,7 @@ def answer_all(items, answerer, ledger_path: Path, workers: int = 4, max_new: in
             raise RuntimeError(f"error rate {st['errors']}/{st['finished']} (or {st['consecutive']} in a row) is "
                                f"over the limit; stopping. Records so far are ledgered; fix the cause and rerun")
 
-    todo = [i for i in items if not _is_done(led.get(_key(i.item_id, model)))]
+    todo = [i for i in items if not _is_done(led.get(_key(i, model)))]
     pending: dict = {}
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
@@ -88,7 +96,7 @@ def answer_all(items, answerer, ledger_path: Path, workers: int = 4, max_new: in
         raise
     finally:
         pool.shutdown(wait=True)
-    done = sum(1 for i in items if _is_done(led.get(_key(i.item_id, model))))
+    done = sum(1 for i in items if _is_done(led.get(_key(i, model))))
     return {"items": len(items), "done": done, "new_calls": new_calls, "errors": st["errors"]}
 
 

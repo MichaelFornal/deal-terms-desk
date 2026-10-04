@@ -59,6 +59,17 @@ def test_changed_template_is_a_miss(tmp_path, monkeypatch):
     assert set(load_answers(tmp_path / "l.jsonl", "m")) == {"i0", "i1"}
 
 
+def test_changed_question_for_same_item_id_is_a_miss(tmp_path):
+    runner.calls = []
+    old = [AnswerItem("i0", "thuman", "g", "report", "c", "stem only")]
+    new = [AnswerItem("i0", "thuman", "g", "report", "c", "MAE definition: stem only")]
+    assert answer_all(old, FakeAnswerer(runner), tmp_path / "l.jsonl")["new_calls"] == 1
+    assert answer_all(old, FakeAnswerer(runner), tmp_path / "l.jsonl")["new_calls"] == 0
+    s = answer_all(new, FakeAnswerer(runner), tmp_path / "l.jsonl")
+    assert s["new_calls"] == 1 and s["done"] == 1 and len(runner.calls) == 2
+    assert load_answers(tmp_path / "l.jsonl", "m")["i0"]["item_sha"] == answer_all.__globals__["_item_sha"](new[0])
+
+
 def test_parse_and_runner_errors_are_recorded_and_threshold_stops(tmp_path):
     runner.calls = []
     s = answer_all(items(40), FakeAnswerer(runner, fail_parse={"q3"}), tmp_path / "l.jsonl", max_error_rate=0.05)
