@@ -758,3 +758,11 @@ def test_m4_recall_refuses_without_inputs(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "INDEX", tmp_path / "missing.db")
     assert cli.entry(["m4", "recall"]) == 2
     assert "run M2 and M3 first" in capsys.readouterr().err
+
+
+def test_m4_answer_refuses_without_set_or_items(tmp_path, monkeypatch, capsys):
+    assert cli.entry(["m4", "answer"]) == 2
+    assert "--set is required" in capsys.readouterr().err
+    monkeypatch.setattr(cli, "DATA_M4", tmp_path)
+    assert cli.entry(["m4", "answer", "--set", "thuman"]) == 2
+    assert "dtd m4 sets" in capsys.readouterr().err

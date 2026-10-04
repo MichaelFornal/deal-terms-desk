@@ -5,13 +5,15 @@ import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from evals.answer_sets import abstain_items, thuman_items, tmachine_items, write_items
+from answer.answerer import Answerer
+from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
 from evals.maud_labels import load_rows
+from evals.run_answers import answer_all
 from evals.run_rung import Context, evaluate, load_context, with_passages
 from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
 from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
@@ -432,8 +434,32 @@ def _m4_sets() -> int:
     return 0
 
 
+def _m4_answer(args) -> int:
+    if not args.set_name:
+        print("--set is required: thuman, tmachine or abstain", file=sys.stderr)
+        return 2
+    path = DATA_M4 / f"{args.set_name}_items.jsonl"
+    if not path.exists():
+        print(f"{path} missing; run `dtd m4 sets` first", file=sys.stderr)
+        return 2
+    items = [i for i in read_items(path) if args.split is None or i.split == args.split]
+    if args.set_name == "thuman":
+        ladder = _ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))})
+    else:
+        ladder = _deals_ladder(*_deals_texts())
+    ledger = DATA_M4 / f"answers_{args.set_name}_{args.model}.jsonl"
+    try:
+        summary = answer_all(items, Answerer(ladder, run_claude, args.model), ledger, workers=args.workers,
+                             max_new=args.max_new)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    print(json.dumps(summary))
+    return 0
+
+
 def _cmd_m4(args) -> int:
-    stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets()}
+    stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets(), "answer": lambda: _m4_answer(args)}
     return stages[args.stage]()
 
 
