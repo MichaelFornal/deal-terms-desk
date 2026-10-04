@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from answer.answerer import Answerer, ParseError, Prepared, _repair_inner_quotes
+from answer.answerer import Answerer, ParseError, Prepared, _recover_choice, _repair_inner_quotes
 from answer.blocks import Block, Part
 from answer.prompt import TEMPLATE_SHA, render
 from tests.fakes import fake_claude
@@ -235,3 +235,44 @@ def test_prompt_says_amending_text_replaces_the_passage():
     p = render("q", [])
     assert "[Amended by Amendment No. N]" in p and "replaces the passage above it" in p
     assert "state the amended terms and quote the amending text" in p
+
+
+QUOTED_OPTS = ('"Inconsistent" with fiduciary duties', '"Breach" of fiduciary duties', "No")
+
+
+def _bad_choice_reply(ref, line):
+    return ('```json\n{\n  "state": "answered",\n' + line + '\n  "claims": [{"text": "t", "quote": "' + FEE_QUOTE
+            + '", "ref": "' + ref + '"}]\n}\n```')
+
+
+def test_option_with_inner_quotes_is_recovered(ladder):
+    ref = fee_ref(ladder, "Fiduciary", QUOTED_OPTS)
+    run = fake_claude(_bad_choice_reply(ref, '  "choice": "Inconsistent" with fiduciary duties,'))
+    a = Answerer(ladder, run, "m").ask("Fiduciary", "big", choices=QUOTED_OPTS)
+    assert a.state == "answered" and a.choice == '"Inconsistent" with fiduciary duties'
+
+
+def test_option_with_typographic_quotes_is_recovered(ladder):
+    opts = ("“Reasonably likely/expected” to be inconsistent", "No")
+    ref = fee_ref(ladder, "Fiduciary", opts)
+    run = fake_claude(_bad_choice_reply(ref, '  "choice": "Reasonably likely/expected" to be inconsistent,'))
+    a = Answerer(ladder, run, "m").ask("Fiduciary", "big", choices=opts)
+    assert a.choice == opts[0]
+
+
+def test_unmatched_bad_choice_is_a_parse_error(ladder):
+    ref = fee_ref(ladder, "Fiduciary", QUOTED_OPTS)
+    run = fake_claude(_bad_choice_reply(ref, '  "choice": "Other" with something,'))
+    with pytest.raises(ParseError):
+        Answerer(ladder, run, "m").ask("Fiduciary", "big", choices=QUOTED_OPTS)
+
+
+def test_recover_choice_unit():
+    r = '{\n "state": "answered",\n "choice": "Inconsistent" with fiduciary duties,\n "claims": []\n}'
+    out = _recover_choice(r, QUOTED_OPTS)
+    assert '"choice": "\\"Inconsistent\\" with fiduciary duties",' in out
+    assert _recover_choice(r, ("x",)) is None
+    assert _recover_choice('{"state": "answered"}', QUOTED_OPTS) is None
+    amb = ('"A" b', "A b")
+    assert _recover_choice('"choice": "A" b', amb) is None
+    assert _recover_choice('"choice": "A" b', ('"A" b',)) == '"choice": ' + json.dumps('"A" b')

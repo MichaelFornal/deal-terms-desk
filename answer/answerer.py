@@ -1,10 +1,11 @@
 import hashlib
+import json
 import re
 import time
 from dataclasses import dataclass, field
 
 from answer.blocks import Block, build_blocks
-from answer.gate import check
+from answer.gate import check, normalise
 from answer.prompt import render
 from pipeline.m0 import _json_object
 from retrieval.result import CONTEXT_K
@@ -44,6 +45,31 @@ def _repair_inner_quotes(s: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+_NO_QUOTES = str.maketrans({q: None for q in '"“”„‟'})
+_CHOICE_LINE = re.compile(r'^(?P<head>.*?"choice"\s*:\s*)(?P<val>.*)$', re.M)
+
+
+def _recover_choice(reply: str, choices) -> str | None:
+    """The reply with its `"choice":` line rewritten to a valid JSON string, when the model copied an option that
+    itself contains double quotes unescaped. The raw value must equal exactly one option once quotes are stripped
+    from both; otherwise None."""
+    m = _CHOICE_LINE.search(reply)
+    if not m:
+        return None
+    val = m.group("val").strip()
+    comma = val.endswith(",")
+    if comma:
+        val = val[:-1].strip()
+
+    def bare(x: str) -> str:
+        return normalise(x.translate(_NO_QUOTES))
+
+    hit = [c for c in choices if bare(c) == bare(val)]
+    if len(hit) != 1:
+        return None
+    return reply[:m.start()] + m.group("head") + json.dumps(hit[0]) + ("," if comma else "") + reply[m.end():]
 
 
 class ParseError(RuntimeError):
@@ -138,7 +164,16 @@ class Answerer:
             try:
                 obj = _json_object(_repair_inner_quotes(result), ("claims", "state"))
             except RuntimeError:
-                raise ParseError(f"parse: no answer object in reply {result[:200]!r}") from None
+                fixed = _recover_choice(result, p.choices) if p.choices else None
+                try:
+                    if fixed is None:
+                        raise RuntimeError
+                    try:
+                        obj = _json_object(fixed, ("claims", "state"))
+                    except RuntimeError:
+                        obj = _json_object(_repair_inner_quotes(fixed), ("claims", "state"))
+                except RuntimeError:
+                    raise ParseError(f"parse: no answer object in reply {result[:200]!r}") from None
         raw = obj.get("claims", [])
         if not isinstance(raw, list) or obj.get("state") not in MODEL_STATES:
             raise ParseError(f"parse: bad state or claims in {str(obj)[:200]!r}")
