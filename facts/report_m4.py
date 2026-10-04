@@ -1,5 +1,7 @@
 from evals.answer_sets import ABSTAIN_GROUPS
 from evals.tmachine import FAMILIES
+from facts.m2 import slug
+from facts.queries import CATEGORIES
 
 LABELS = {"equity_awards": "Employee equity awards", "termination_fee": "Termination (break-up) fee",
           "employee_benefits": "Employees' pay and benefits after the deal"}
@@ -8,6 +10,7 @@ GROUPS = {"absent": "Lead question, both passes found no such clause",
           "unknown_deal": "A company name that matches no deal's aliases",
           "ambiguous_deal": "A name matching several deals",
           "schedule": "Answer sits in an unfiled schedule (weakest key)"}
+WHICH_DEAL = ("unknown_deal", "ambiguous_deal")  # resolver checks: "which agreement?" holds by construction
 
 
 def _v(x) -> str:
@@ -47,21 +50,32 @@ def _path(f) -> str:
             f"{_d(f, 'm4_cmp_t_r7n_vs_t_r7_corpus_recall_at_5')} |\n")
 
 
+def _categories(f) -> str:
+    rows = "\n".join(f"| {name} | {_ci(f, f'm4_thuman_haiku_{slug(name)}_accuracy')} | "
+                     f"{_ci(f, f'm4_thuman_haiku_{slug(name)}_accuracy_cited')} | "
+                     f"{_ci(f, f'm4_thuman_haiku_{slug(name)}_baseline')} |" for name in CATEGORIES.values())
+    return ("By category (report split):\n\n| Category | Accuracy | With surviving citations | Baseline |\n"
+            "|---|---|---|---|\n" + rows + "\n")
+
+
 def _thuman(f) -> str:
     return ("## T-human answers\n\nOn MAUD's lawyer-labelled questions the answerer is shown the question's answer "
             "options and must pick one, with quoted support. Accuracy here is how often it picks the option the "
             "lawyers chose. The baseline always picks the option most common on the tune split.\n\n"
-            f"Answered {_v(f.get('m4_thuman_haiku_report_n'))} of {_v(f.get('m4_thuman_haiku_report_items'))} items "
+            f"Scored {_v(f.get('m4_thuman_haiku_report_n'))} of {_v(f.get('m4_thuman_haiku_report_items'))} items "
             f"on the report split; {_v(f.get('m4_thuman_haiku_report_missing'))} have no answer yet "
             f"({_v(f.get('m4_thuman_items'))} items built in all; {_v(f.get('m4_thuman_excluded_disputed'))} left out "
             f"because the label rows disagree, {_v(f.get('m4_thuman_excluded_too_many_options'))} because their "
-            f"question has too many options to list ({_v(f.get('m4_thuman_questions_too_many_options'))} questions)).\n\n"
+            f"question has too many options to list ({_v(f.get('m4_thuman_questions_too_many_options'))} questions), "
+            f"{_v(f.get('m4_thuman_excluded_not_indexed'))} (agreement, question) pairs because their agreement has "
+            "no contract text in the index: MAUD names agreements whose text files are missing).\n\n"
             "| | Accuracy |\n|---|---|\n"
             f"| Answerer ({_v(f.get('m4_answer_model'))}) | {_ci(f, 'm4_thuman_haiku_report_accuracy')} |\n"
             f"| Answerer, counting only picks whose citations survived the gate | "
             f"{_ci(f, 'm4_thuman_haiku_report_accuracy_cited')} |\n"
             f"| Majority-answer baseline | {_ci(f, 'm4_thuman_haiku_report_baseline')} |\n\n"
             f"Difference from the baseline: {_verdict(f, 'm4_thuman_haiku_report_vs_baseline')}.\n\n"
+            + _categories(f) + "\n"
             f"Replies with an answer outside the options: {_v(f.get('m4_thuman_haiku_report_out_of_list'))}; "
             f"failed calls left out: {_v(f.get('m4_thuman_haiku_report_errors'))}.\n")
 
@@ -85,49 +99,66 @@ def _tmachine(f) -> str:
 
 
 def _abstain(f) -> str:
-    rows = "\n".join(f"| {GROUPS[g]} | {_v(f.get(f'm4_abstain_{g}_n'))} | {_v(f.get(f'm4_abstain_{g}_missing'))} | "
-                     f"{_v(f.get(f'm4_abstain_{g}_correct_rate'))} | "
-                     f"{_v(f.get(f'm4_abstain_{g}_false_answer_rate'))} |" for g in ABSTAIN_GROUPS if g in GROUPS)
-    return ("## Abstention\n\nQuestions whose right answer is a decline: \"not stated in this agreement\", \"in a "
-            "schedule that was not filed\", or \"which agreement?\". The keys are machine-built.\n\n"
+    def row(g):
+        mark = "*" if g == "absent" else ""
+        return (f"| {GROUPS[g]} | {_v(f.get(f'm4_abstain_{g}_n'))} | {_v(f.get(f'm4_abstain_{g}_missing'))} | "
+                f"{_v(f.get(f'm4_abstain_{g}_correct_rate'))}{mark} | "
+                f"{_v(f.get(f'm4_abstain_{g}_false_answer_rate'))} |")
+    rows = "\n".join(row(g) for g in ABSTAIN_GROUPS if g in GROUPS and g not in WHICH_DEAL)
+    which = "\n".join(f"- {GROUPS[g]}: \"which agreement?\" returned: {_v(f.get(f'm4_abstain_{g}_correct'))} of "
+                      f"{_v(f.get(f'm4_abstain_{g}_items'))}" for g in WHICH_DEAL)
+    return ("## Abstention\n\nQuestions whose right answer is a decline: \"not stated in this agreement\" or \"in a "
+            "schedule that was not filed\". The keys are machine-built.\n\n"
             "| Group | Items | Missing | Correct decline (machine-built key) | False answer (machine-built key) |\n"
             "|---|---|---|---|---|\n" + rows + "\n\n"
-            "For the lead question, an answer also counts as correct when the judge finds it matches the two "
-            f"machine passes; answered but not yet judged: {_v(f.get('m4_abstain_absent_not_judged'))}; judge reply "
+            "\\* For the lead question this cell is Correct (decline, or judged consistent with no such clause): an "
+            "answer also counts as correct when the judge finds it matches the two machine passes. Unjudged answers "
+            f"are excluded: answered but not yet judged: {_v(f.get('m4_abstain_absent_not_judged'))}; judge reply "
             f"unreadable: {_v(f.get('m4_abstain_absent_judge_unparsed'))}.\n\n"
+            "### Which agreement?\n\nThese items are built from names the resolver cannot pin to one deal, so "
+            "\"which agreement?\" holds by construction. They check the resolver path, not the model: no model "
+            "call is made.\n\n" + which + "\n\n"
             "### Machine key contradicted by retrieval\n\nThese are kept out of the abstention figures above: the "
             "machine key says \"not stated\", but the key is likely wrong.\n\n"
-            "| Group | Items | Answered share (machine-built key) |\n|---|---|---|\n"
+            "| Group | Items | Scored | Missing | Answered share (machine-built key) |\n|---|---|---|---|---|\n"
             "| Lead question where the machine passes saw only the section's title, and the answerer found the "
-            f"clause text | {_v(f.get('m4_abstain_absent_not_filed_n'))} | "
+            f"clause text | {_v(f.get('m4_abstain_absent_not_filed_items'))} | "
+            f"{_v(f.get('m4_abstain_absent_not_filed_scored'))} | {_v(f.get('m4_abstain_absent_not_filed_missing'))} | "
             f"{_v(f.get('m4_abstain_absent_not_filed_answered_rate'))} |\n")
 
 
 def _citation(f) -> str:
     return ("## Citation accuracy\n\nEvery claim must quote its passage word for word; a claim whose quote is not "
             "found is dropped before anyone sees it.\n\n"
-            f"Claims kept by the gate: T-human {_v(f.get('m4_gate_thuman_pass_rate'))} "
-            f"({_v(f.get('m4_gate_thuman_kept'))} of {_v(f.get('m4_gate_thuman_returned'))}); T-machine "
-            f"{_v(f.get('m4_gate_tmachine_pass_rate'))} ({_v(f.get('m4_gate_tmachine_kept'))} of "
-            f"{_v(f.get('m4_gate_tmachine_returned'))}).\n\nA second model, shown only a kept claim and its quote and "
-            f"told to refute it, failed to in {_v(f.get('m4_refute_survival_rate'))} of "
-            f"{_v(f.get('m4_refute_claims'))} claims (machine-built; unreadable replies: "
-            f"{_v(f.get('m4_refute_unparsed'))}).\n")
+            f"Claims kept by the gate on the report split: T-human {_v(f.get('m4_gate_thuman_report_pass_rate'))} "
+            f"({_v(f.get('m4_gate_thuman_report_kept'))} of {_v(f.get('m4_gate_thuman_report_returned'))}); "
+            f"T-machine {_v(f.get('m4_gate_tmachine_report_pass_rate'))} "
+            f"({_v(f.get('m4_gate_tmachine_report_kept'))} of {_v(f.get('m4_gate_tmachine_report_returned'))}).\n\n"
+            "A second model, shown only a kept claim from the report split and its quote and told to refute it, "
+            f"failed to in {_v(f.get('m4_refute_survival_rate'))} of {_v(f.get('m4_refute_claims'))} claims "
+            f"(machine-built; unreadable replies: {_v(f.get('m4_refute_unparsed'))}).\n")
+
+
+TOKENS_NOTE = ("Token counts are as measured through the `claude -p` CLI, which include the CLI's own system prompt. "
+               "They are an upper bound, not an API price; M5 measures API tokens.")
 
 
 def _models(f) -> str:
-    def row(s, name):
-        return (f"| {name} | {_v(f.get(f'm4_cmp_model_{s}_thuman_tune_accuracy'))} | "
+    def row(s, model):
+        return (f"| {_v(f.get(model))} | {_v(f.get(f'm4_cmp_model_{s}_thuman_tune_accuracy'))} | "
                 f"{_v(f.get(f'm4_cmp_model_{s}_tmachine_tune_agree'))} | "
                 f"{_v(f.get(f'm4_cmp_model_{s}_tokens_in_mean'))} | {_v(f.get(f'm4_cmp_model_{s}_tokens_out_mean'))} |")
-    return ("## Model comparison\n\nThe same tune-split questions answered by two models; tokens are per called answer "
-            "on the same items. The citation gate figures above are for the answer model only.\n\n"
+    return ("## Model comparison\n\nTwo models answer the same tune-split questions; each model's mean covers the "
+            "answers it completed. Tokens are per called answer. The citation gate figures above are for the answer "
+            f"model only. {TOKENS_NOTE}\n\n"
             "| Model | T-human accuracy | T-machine agree (machine-built) | Tokens in | Tokens out |\n"
             "|---|---|---|---|---|\n"
-            + row("haiku", "claude-haiku-4-5-20251001") + "\n" + row("sonnet", "claude-sonnet-5-5") + "\n\n"
+            + row("haiku", "m4_answer_model") + "\n" + row("sonnet", "m4_compare_model") + "\n\n"
+            f"The judge ({_v(f.get('m4_judge_model'))}) is from the same model family as the comparison answerer "
+            f"({_v(f.get('m4_compare_model'))}), so a self-preference risk applies to the T-machine column.\n\n"
             "Mean tokens per answer on the report split (answer model): "
             f"in {_v(f.get('m4_tokens_haiku_report_in_mean'))}, out {_v(f.get('m4_tokens_haiku_report_out_mean'))}. "
-            "These price the live demo in M5.\n")
+            "These are CLI counts, an upper bound for pricing the live demo in M5.\n")
 
 
 def render_m4(f) -> str:

@@ -25,7 +25,7 @@ def test_thuman_accuracy_baseline_out_of_list_and_errors():
     assert r["n"] == 3 and abs(r["accuracy"]["mean"] - 2 / 3) < 1e-9
     assert abs(r["baseline"]["mean"] - 2 / 3) < 1e-9  # tune majority "A": right on c4, c6; wrong on c5
     assert r["out_of_list"] == 1 and r["errors"] == 1
-    assert s["gate"]["thuman"]["pass_rate"] == 1.0 and s["tokens"][M]["thuman"]["report"]["in_mean"] == 100
+    assert s["gate"]["thuman"]["report"]["pass_rate"] == 1.0 and s["tokens"][M]["thuman"]["report"]["in_mean"] == 100
 
 
 def test_tmachine_judge_and_abstention():
@@ -48,7 +48,7 @@ def test_tmachine_judge_and_abstention():
     e = s["abstain"]["earnout"]
     assert e["n"] == 2 and e["correct"] == 1 and e["false_answer"] == 1 and e["correct_rate"] == 0.5
     assert s["abstain"]["unknown_deal"]["correct"] == 1
-    assert s["gate"]["tmachine"]["returned"] == 5 and s["gate"]["tmachine"]["kept"] == 4
+    assert s["gate"]["tmachine"]["report"]["returned"] == 5 and s["gate"]["tmachine"]["report"]["kept"] == 4
     assert s["refute"] == {"claims": 3, "not_refuted": 1, "unparsed": 1, "survival_rate": 0.5}
 
 
@@ -113,3 +113,12 @@ def test_tokens_are_split_by_item_split_and_count_only_called_answers():
     answers[("thuman", M)]["c3|Q"] = ans(choice="A", tin=0, tout=0)  # no model call (e.g. no hits)
     t = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["tokens"][M]["thuman"]
     assert set(t) == {"tune"}
+
+
+def test_gate_is_counted_per_split():
+    items = [th("c1", "Q", "A", "tune"), th("c2", "Q", "A", "report"), th("c3", "Q", "A", "report")]
+    answers = {("thuman", M): {"c1|Q": ans(choice="A", claims=2, dropped=2), "c2|Q": ans(choice="A", claims=1),
+                               "c3|Q": ans(choice="A", claims=1, dropped=1), "zz|Q": ans(claims=5)}}
+    g = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["gate"]["thuman"]
+    assert g["tune"] == {"returned": 4, "kept": 2, "by_reason": {"quote_not_found": 2}, "pass_rate": 0.5}
+    assert g["report"]["returned"] == 3 and g["report"]["kept"] == 2 and g["report"]["pass_rate"] == 0.6667

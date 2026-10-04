@@ -142,6 +142,14 @@ def _abstain(items, recs, verdicts=None):
     return out
 
 
+def _gate(done) -> dict:
+    kept = sum(len(a["claims"]) for a in done)
+    reasons = Counter(d["reason"] for a in done for d in a["dropped"])
+    returned = kept + sum(reasons.values())
+    return {"returned": returned, "kept": kept, "by_reason": dict(reasons),
+            "pass_rate": round(kept / returned, 4) if returned else None}
+
+
 def score(sets, answers, judge, refute, models, n_boot: int = 2000) -> dict:
     s = {"thuman": {}, "tmachine": {}, "abstain": {}, "gate": {}, "tokens": defaultdict(dict)}
     for m in models:
@@ -152,14 +160,13 @@ def score(sets, answers, judge, refute, models, n_boot: int = 2000) -> dict:
     if "abstain" in sets and answers.get(("abstain", models[0])):
         s["abstain"] = _abstain(sets["abstain"], answers[("abstain", models[0])], judge.get("abstain:" + models[0], {}))
     for (set_name, m), recs in answers.items():
-        done = [r["answer"] for r in recs.values() if r["answer"] is not None]
-        if m == models[0]:
-            kept = sum(len(a["claims"]) for a in done)
-            reasons = Counter(d["reason"] for a in done for d in a["dropped"])
-            returned = kept + sum(reasons.values())
-            s["gate"][set_name] = {"returned": returned, "kept": kept, "by_reason": dict(reasons),
-                                   "pass_rate": round(kept / returned, 4) if returned else None}
         split = {i.item_id: i.split for i in sets.get(set_name, ())}
+        if m == models[0]:  # per split, so the report split lines up with the refute pass, which covers it alone
+            done = defaultdict(list)
+            for iid, r in recs.items():
+                if r["answer"] is not None and iid in split:
+                    done[split[iid]].append(r["answer"])
+            s["gate"][set_name] = {sp: _gate(c) for sp, c in sorted(done.items())}
         by_split = defaultdict(list)
         for iid, r in recs.items():
             if r["answer"] is not None and r["answer"]["tokens_in"] and iid in split:

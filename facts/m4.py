@@ -1,8 +1,10 @@
 from pathlib import Path
 
+from evals.answer_judge import JUDGE_MODEL
 from evals.compare import load_items, paired_bootstrap
 from evals.tmachine import FAMILIES
 from facts.m2 import _ci, _delta, _json, slug
+from facts.queries import CATEGORIES
 
 MODELS = (("haiku", "claude-haiku-4-5-20251001"), ("sonnet", "claude-sonnet-5-5"))
 ABSTAIN_KEYS = ("correct_rate", "false_answer_rate", "correct", "false_answer", "other", "errors", "items", "missing",
@@ -41,7 +43,7 @@ def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
     missing = [str(p) for p in needed if not p.exists()]
     if missing:
         raise FileNotFoundError("M4 inputs missing: " + ", ".join(missing))
-    f: dict = {"m4_answer_model": MODELS[0][1], "m4_judge_model": MODELS[1][1]}
+    f: dict = {"m4_answer_model": MODELS[0][1], "m4_compare_model": MODELS[1][1], "m4_judge_model": JUDGE_MODEL}
 
     for r in ("r6n", "t_r6n", "t_r7_corpus", "t_r7n_corpus"):
         _ci(f, f"m4_{r}_report_recall_at_5", _json(out_m4 / f"{r}.json")["by_split"]["report"]["recall@5"])
@@ -57,7 +59,7 @@ def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
 
     sets = _json(data_m4 / "sets_summary.json")
     f["m4_thuman_items"], f["m4_tmachine_items"] = sets["thuman"], sets["tmachine"]
-    for k in ("disputed", "too_many_options"):
+    for k in ("disputed", "too_many_options", "not_indexed"):
         f[f"m4_thuman_excluded_{k}"] = sets["thuman_excluded"][k]
     f["m4_thuman_questions_too_many_options"] = sets["thuman_excluded"]["questions_too_many_options"]
     for g, n in sets["abstain"].items():
@@ -73,9 +75,10 @@ def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
                 _ci_or_none(f, f"m4_thuman_haiku_report_{k}", r.get(k))
             for k in ("n", "errors", "out_of_list", "items", "missing"):
                 f[f"m4_thuman_haiku_report_{k}"] = r.get(k)
-            for cat, v in r.get("by_category", {}).items():
+            cats = r.get("by_category", {})
+            for cat in dict.fromkeys([*CATEGORIES.values(), *cats]):
                 for k in ("accuracy", "accuracy_cited", "baseline"):
-                    f[f"m4_thuman_haiku_{slug(cat)}_{k}"] = _mean(v.get(k))
+                    _ci_or_none(f, f"m4_thuman_haiku_{slug(cat)}_{k}", cats.get(cat, {}).get(k))
             t = tm.get("report", {})
             _ci_or_none(f, "m4_tmachine_haiku_report_agree", t.get("agree"))
             _ci_or_none(f, "m4_tmachine_haiku_report_agree_or_partial", t.get("agree_or_partial"))
@@ -88,19 +91,21 @@ def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
         f[f"m4_cmp_model_{short}_thuman_tune_accuracy"] = _mean(th.get("tune", {}).get("accuracy"))
         f[f"m4_cmp_model_{short}_tmachine_tune_agree"] = _mean(tm.get("tune", {}).get("agree"))
         tok = s["tokens"].get(mid, {})
-        for k in ("in", "out"):  # tune split only, so both models are compared on the same items
+        for k in ("in", "out"):  # tune split only: the same questions for both models
             f[f"m4_cmp_model_{short}_tokens_{k}_mean"] = _tokens_mean(tok, "tune", k)
             if short == "haiku":  # the answer model on the report split prices the live demo (M5)
                 f[f"m4_tokens_haiku_report_{k}_mean"] = _tokens_mean(tok, "report", k)
     for g, v in s["abstain"].items():
         for k in ABSTAIN_KEYS:
             f[f"m4_abstain_{g}_{k}"] = v.get(k)
+        f[f"m4_abstain_{g}_scored"] = v.get("n")  # `_n` is the count built (sets_summary); this is the count scored
     nf = s["abstain"].get("absent_not_filed")  # answered share: the machine key here is contradicted by retrieval
     f["m4_abstain_absent_not_filed_answered_rate"] = (round(nf["false_answer"] / nf["n"], 4)
                                                       if nf and nf.get("n") else None)
-    for set_name, v in s["gate"].items():
+    for set_name in ("thuman", "tmachine"):  # the report split, the one the refute pass covers
+        v = s["gate"].get(set_name, {}).get("report", {})
         for k in ("pass_rate", "returned", "kept"):
-            f[f"m4_gate_{set_name}_{k}"] = v[k]
+            f[f"m4_gate_{set_name}_report_{k}"] = v.get(k)
     for k in ("survival_rate", "claims", "unparsed"):
         f[f"m4_refute_{k}"] = s["refute"][k]
     return f
