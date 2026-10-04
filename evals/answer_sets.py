@@ -50,9 +50,12 @@ def read_items(path: Path) -> list[AnswerItem]:
 
 
 def _question(text_type: str, question: str) -> str:
-    """The MAUD label query: the question type plus the stem (as evals.items._query), once if they are the same."""
+    """The MAUD label query: the question type plus the stem (as evals.items._query), once if they are the same, and
+    the stem alone if it already starts with the type."""
     stem = ANSWER_SUFFIX.sub("", question).strip()
-    return text_type if stem == text_type.strip() else f"{text_type}: {stem}"
+    if stem == text_type.strip():
+        return text_type
+    return stem if stem.lower().startswith(text_type.strip().lower()) else f"{text_type}: {stem}"
 
 
 def thuman_items(rows: list[LabelRow], contract_ids: set[str], max_options: int = 10):

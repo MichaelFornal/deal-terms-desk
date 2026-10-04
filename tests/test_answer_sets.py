@@ -103,3 +103,11 @@ def test_items_round_trip(tmp_path):
     items, _ = thuman_items([lr("contract_1", "Type of Consideration-Answer", "All Cash")], {"contract_1"})
     write_items(tmp_path / "x.jsonl", items)
     assert read_items(tmp_path / "x.jsonl") == items
+
+
+def test_thuman_question_does_not_double_a_type_the_stem_already_starts_with():
+    t = "Absence of Litigation Closing Condition"
+    rows = [LabelRow("contract_1", "span", f"{t}: Pending v. Threatened-Answer", "", "Pending", t, "Conditions"),
+            LabelRow("contract_1", "span", "absence of litigation closing condition (x)-Answer", "", "Y", t, "Conditions")]
+    items, _ = thuman_items(rows, {"contract_1"})
+    assert sorted(i.question for i in items) == [f"{t}: Pending v. Threatened", "absence of litigation closing condition (x)"]
