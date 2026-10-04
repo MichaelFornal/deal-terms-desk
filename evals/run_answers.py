@@ -8,6 +8,7 @@ from answer.answerer import Answer, ParseError
 from answer.prompt import TEMPLATE_SHA
 from pipeline.ledger import Ledger
 
+MAX_CONSECUTIVE = 20  # this many failures in a row stop the run at once (a late outage)
 MIN_FOR_RATE = 20  # the error-rate stop needs this many finished calls before it can fire
 
 
@@ -23,26 +24,44 @@ def load_answers(ledger_path: Path, model: str) -> dict[str, dict]:
     return {r["item_id"]: r for r in led._recs.values() if r["model"] == model and r["template_sha"] == TEMPLATE_SHA}
 
 
+def _is_done(rec: dict | None) -> bool:
+    """A runner failure is transient, so a rerun retries it; a parse failure is permanent."""
+    return rec is not None and not (rec.get("error") or "").startswith("runner:")
+
+
 def answer_all(items, answerer, ledger_path: Path, workers: int = 4, max_new: int | None = None,
                max_error_rate: float = 0.05) -> dict:
     """Answer every item once per (model, template). Retrieval runs here; only the model call runs in the pool.
-    A rerun skips ledgered keys; a kill loses at most the calls in flight."""
+    A rerun skips ledgered keys (except runner failures); a kill loses at most the calls in flight."""
     led, lock, model = Ledger(ledger_path, key="key"), threading.Lock(), answerer.model
-    new_calls = errors = finished = 0
+    new_calls = 0
+    st = {"errors": 0, "finished": 0, "consecutive": 0}
 
-    def put(item, answer: Answer | None, error: str | None):
+    def put(item, answer: Answer | None, error: str | None, result: str | None = None):
         with lock:
             led.put({"key": _key(item.item_id, model), "item_id": item.item_id, "model": model,
-                     "template_sha": TEMPLATE_SHA, "answer": asdict(answer) if answer else None, "error": error})
+                     "template_sha": TEMPLATE_SHA, "answer": asdict(answer) if answer else None, "error": error,
+                     "result": result})
 
     def call(prep):
         t0 = time.perf_counter()
         reply = answerer.runner(prep.prompt, model)
         return reply, (time.perf_counter() - t0) * 1000.0
 
-    todo = [i for i in items if led.get(_key(i.item_id, model)) is None]
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        pending = {}
+    def drain(pending):
+        ready, _ = wait(list(pending), return_when=FIRST_COMPLETED)
+        for fut in ready:
+            _record(pending.pop(fut), fut, answerer, put, st)
+
+    def stop_if_bad():
+        if _bad(st, max_error_rate):
+            raise RuntimeError(f"error rate {st['errors']}/{st['finished']} (or {st['consecutive']} in a row) is "
+                               f"over the limit; stopping. Records so far are ledgered; fix the cause and rerun")
+
+    todo = [i for i in items if not _is_done(led.get(_key(i.item_id, model)))]
+    pending: dict = {}
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
         for item in todo:
             if max_new is not None and new_calls >= max_new:
                 break
@@ -53,33 +72,49 @@ def answer_all(items, answerer, ledger_path: Path, workers: int = 4, max_new: in
             new_calls += 1
             pending[pool.submit(call, prep)] = (item, prep)
             while len(pending) >= workers * 2:
-                errors, finished = _drain(pending, answerer, put, errors, finished)
-                _check_rate(errors, finished, max_error_rate)
+                drain(pending)
+                stop_if_bad()
         while pending:
-            errors, finished = _drain(pending, answerer, put, errors, finished)
-            _check_rate(errors, finished, max_error_rate)
-    done = sum(1 for i in items if led.get(_key(i.item_id, model)) is not None)
-    return {"items": len(items), "done": done, "new_calls": new_calls, "errors": errors}
+            drain(pending)
+            stop_if_bad()
+    except BaseException:
+        # Cancel calls that have not started, let the running ones finish, and ledger what they return.
+        for fut in list(pending):
+            if fut.cancel():
+                del pending[fut]
+        pool.shutdown(wait=True)
+        for fut in list(pending):
+            _record(pending.pop(fut), fut, answerer, put, st)
+        raise
+    finally:
+        pool.shutdown(wait=True)
+    done = sum(1 for i in items if _is_done(led.get(_key(i.item_id, model))))
+    return {"items": len(items), "done": done, "new_calls": new_calls, "errors": st["errors"]}
 
 
-def _drain(pending, answerer, put, errors, finished):
-    ready, _ = wait(list(pending), return_when=FIRST_COMPLETED)
-    for fut in ready:
-        item, prep = pending.pop(fut)
-        finished += 1
-        try:
-            reply, ms = fut.result()
-            put(item, answerer.finish(prep, reply, ms + prep.retrieval_ms), None)
-        except ParseError as e:
-            errors += 1
-            put(item, None, str(e)[:300])
-        except RuntimeError as e:
-            errors += 1
-            put(item, None, f"runner: {str(e)[:300]}")
-    return errors, finished
+def _record(entry, fut, answerer, put, st):
+    item, prep = entry
+    st["finished"] += 1
+    try:
+        reply, ms = fut.result()
+    except BaseException as e:
+        if not isinstance(e, RuntimeError):
+            raise
+        st["errors"] += 1
+        st["consecutive"] += 1
+        put(item, None, f"runner: {str(e)[:300]}")
+        return
+    text = reply.get("result") if isinstance(reply, dict) else None
+    try:
+        put(item, answerer.finish(prep, reply, ms + prep.retrieval_ms), None, text)
+        st["consecutive"] = 0
+    except ParseError as e:
+        st["errors"] += 1
+        st["consecutive"] += 1
+        put(item, None, str(e)[:300], text)
 
 
-def _check_rate(errors, finished, max_error_rate):
-    if finished >= MIN_FOR_RATE and errors / finished > max_error_rate:
-        raise RuntimeError(f"error rate {errors}/{finished} is over {max_error_rate:.0%}; stopping. Records so far "
-                           "are ledgered; fix the cause and rerun")
+def _bad(st, max_error_rate) -> bool:
+    if st["consecutive"] >= MAX_CONSECUTIVE:
+        return True
+    return st["finished"] >= MIN_FOR_RATE and st["errors"] / st["finished"] > max_error_rate

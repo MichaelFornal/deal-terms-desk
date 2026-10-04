@@ -108,3 +108,58 @@ def test_sigkill_mid_run_then_resume(tmp_path):
     assert s["new_calls"] == 60 - before and len(load_answers(ledger, "m")) == 60
     keys = [json.loads(l)["key"] for l in ledger.read_text().splitlines() if l.strip()]
     assert len(keys) == len(set(keys)) == 60
+
+
+def test_runner_errors_are_retried_on_rerun_and_parse_errors_are_not(tmp_path):
+    def down(prompt, model):
+        raise RuntimeError("claude down")
+    led = tmp_path / "l.jsonl"
+    with pytest.raises(RuntimeError, match="error rate"):
+        answer_all(items(40), FakeAnswerer(down), led, workers=2)
+    failed = {k for k, r in load_answers(led, "m").items() if r["error"].startswith("runner")}
+    assert failed
+    kept = len(load_answers(led, "m")) - len(failed)
+    runner.calls = []
+    s = answer_all(items(40), FakeAnswerer(runner, fail_parse={"q3"}), led, workers=2)
+    assert s["new_calls"] == 40 - kept and len(runner.calls) == s["new_calls"]
+    got = load_answers(led, "m")
+    assert all(got[k]["error"] is None or got[k]["error"].startswith("parse") for k in failed)
+    assert s["done"] == 40
+    # parse errors stay permanent: a third run makes no calls
+    runner.calls = []
+    assert answer_all(items(40), FakeAnswerer(runner, fail_parse={"q3"}), led)["new_calls"] == 0
+
+
+def test_stop_cancels_queued_calls_and_ledgers_running_ones(tmp_path):
+    calls = []
+
+    def down(prompt, model):
+        calls.append(prompt)
+        time.sleep(0.01)
+        raise RuntimeError("claude down")
+    led = tmp_path / "l.jsonl"
+    with pytest.raises(RuntimeError):
+        answer_all(items(200), FakeAnswerer(down), led, workers=2)
+    recorded = len(load_answers(led, "m"))
+    assert len(calls) == recorded  # every call that ran was ledgered
+    assert recorded <= 20 + 2 * 2  # stop within the consecutive limit plus the in-flight window
+
+
+def test_late_outage_stops_on_consecutive_failures(tmp_path):
+    state = {"n": 0}
+
+    def flaky(prompt, model):
+        state["n"] += 1
+        if state["n"] > 100:
+            raise RuntimeError("down")
+        return {"result": "{}", "usage": {}}
+    led = tmp_path / "l.jsonl"
+    with pytest.raises(RuntimeError):
+        answer_all(items(400), FakeAnswerer(flaky), led, workers=2, max_error_rate=0.5)
+    assert state["n"] <= 100 + 20 + 4
+
+
+def test_raw_reply_is_stored(tmp_path):
+    runner.calls = []
+    answer_all(items(1), FakeAnswerer(runner), tmp_path / "l.jsonl")
+    assert load_answers(tmp_path / "l.jsonl", "m")["i0"]["result"] == "{}"
