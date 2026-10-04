@@ -159,11 +159,16 @@ def score(sets, answers, judge, refute, models, n_boot: int = 2000) -> dict:
             returned = kept + sum(reasons.values())
             s["gate"][set_name] = {"returned": returned, "kept": kept, "by_reason": dict(reasons),
                                    "pass_rate": round(kept / returned, 4) if returned else None}
-        called = [a for a in done if a["tokens_in"]]
-        if called:
-            s["tokens"][m][set_name] = {"in_mean": round(sum(a["tokens_in"] for a in called) / len(called), 1),
-                                        "out_mean": round(sum(a["tokens_out"] for a in called) / len(called), 1),
-                                        "n": len(called)}
+        split = {i.item_id: i.split for i in sets.get(set_name, ())}
+        by_split = defaultdict(list)
+        for iid, r in recs.items():
+            if r["answer"] is not None and r["answer"]["tokens_in"] and iid in split:
+                by_split[split[iid]].append(r["answer"])
+        if by_split:
+            s["tokens"][m][set_name] = {
+                sp: {"in_mean": round(sum(a["tokens_in"] for a in c) / len(c), 1),
+                     "out_mean": round(sum(a["tokens_out"] for a in c) / len(c), 1), "n": len(c)}
+                for sp, c in sorted(by_split.items())}
     vals = [v["refuted"] for v in refute.values()]
     decided = [v for v in vals if v is not None]
     s["refute"] = {"claims": len(vals), "not_refuted": sum(1 for v in decided if v is False),

@@ -43,7 +43,8 @@ def _scores(**over):
                                  "errors": 0, "correct_rate": 0.9, "false_answer_rate": 0.0667}},
          "gate": {"thuman": {"returned": 10, "kept": 9, "pass_rate": 0.9, "by_reason": {}}},
          "refute": {"claims": 9, "not_refuted": 8, "unparsed": 0, "survival_rate": 0.8889},
-         "tokens": {H: {"thuman": {"in_mean": 3000.0, "out_mean": 200.0, "n": 14}}}}
+         "tokens": {H: {"thuman": {"tune": {"in_mean": 3000.0, "out_mean": 200.0, "n": 4},
+                                   "report": {"in_mean": 9.0, "out_mean": 9.0, "n": 10}}}}}
     s.update(over)
     return s
 
@@ -112,3 +113,18 @@ def test_absent_not_filed_answered_rate_and_judge_counts(tmp_path):
     assert (f["m4_abstain_absent_not_judged"], f["m4_abstain_absent_judge_unparsed"]) == (1, 1)
     out2, m42, data2 = _setup(tmp_path / "b", _scores())
     assert build_m4(m42, out2, data2, n_boot=20)["m4_abstain_absent_not_filed_answered_rate"] is None
+
+
+def test_model_comparison_tokens_are_tune_only_and_report_tokens_are_apart(tmp_path):
+    S = "claude-sonnet-5-5"
+    tok = {H: {"thuman": {"tune": {"in_mean": 1000.0, "out_mean": 100.0, "n": 1},
+                          "report": {"in_mean": 2000.0, "out_mean": 300.0, "n": 3}},
+               "tmachine": {"tune": {"in_mean": 4000.0, "out_mean": 400.0, "n": 3},
+                            "report": {"in_mean": 6000.0, "out_mean": 500.0, "n": 1}},
+               "abstain": {"report": {"in_mean": 99999.0, "out_mean": 99999.0, "n": 50}}},
+           S: {"thuman": {"tune": {"in_mean": 1500.0, "out_mean": 150.0, "n": 2}}}}
+    out, m4, data = _setup(tmp_path, _scores(tokens=tok))
+    f = build_m4(m4, out, data, n_boot=20)
+    assert (f["m4_cmp_model_haiku_tokens_in_mean"], f["m4_cmp_model_haiku_tokens_out_mean"]) == (3250.0, 325.0)
+    assert (f["m4_cmp_model_sonnet_tokens_in_mean"], f["m4_cmp_model_sonnet_tokens_out_mean"]) == (1500.0, 150.0)
+    assert (f["m4_tokens_haiku_report_in_mean"], f["m4_tokens_haiku_report_out_mean"]) == (3000.0, 350.0)

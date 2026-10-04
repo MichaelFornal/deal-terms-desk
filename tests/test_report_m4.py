@@ -79,3 +79,9 @@ def test_absent_not_filed_is_reported_apart_with_its_answered_share():
     row = [line for line in apart.splitlines() if line.startswith("| ") and "section's title" in line][0]
     assert "the answerer found the clause text" in row and "| 4 |" in row and "0.75" in row
     assert "answered but not yet judged: 3" in main and "judge reply unreadable: 2" in main
+
+
+def test_model_comparison_has_report_split_tokens_line():
+    text = render_m4(Every(m4_tokens_haiku_report_in_mean=3100.5, m4_tokens_haiku_report_out_mean=210.25))
+    sec = text.split("## Model comparison", 1)[1]
+    assert "Mean tokens per answer on the report split (answer model): in 3100.5, out 210.25" in sec

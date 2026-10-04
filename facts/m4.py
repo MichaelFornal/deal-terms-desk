@@ -25,6 +25,13 @@ def _mean(block):
     return round(block["mean"], 4) if block else None
 
 
+def _tokens_mean(tok, split, k):
+    """n-weighted mean tokens per called answer over the T-human and T-machine sets on one split."""
+    blocks = [tok[st][split] for st in ("thuman", "tmachine") if split in tok.get(st, {})]
+    n = sum(b["n"] for b in blocks)
+    return round(sum(b[f"{k}_mean"] * b["n"] for b in blocks) / n, 1) if n else None
+
+
 def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
     out_m4, out_dir, data_m4 = map(Path, (out_m4, out_dir, data_m4))
     needed = [out_m4 / "scores.json", data_m4 / "sets_summary.json", out_dir / "r6_items.jsonl",
@@ -81,10 +88,10 @@ def build_m4(out_m4, out_dir, data_m4, n_boot: int = 2000) -> dict:
         f[f"m4_cmp_model_{short}_thuman_tune_accuracy"] = _mean(th.get("tune", {}).get("accuracy"))
         f[f"m4_cmp_model_{short}_tmachine_tune_agree"] = _mean(tm.get("tune", {}).get("agree"))
         tok = s["tokens"].get(mid, {})
-        n = sum(v["n"] for v in tok.values())
-        for k in ("in", "out"):
-            f[f"m4_cmp_model_{short}_tokens_{k}_mean"] = (
-                round(sum(v[f"{k}_mean"] * v["n"] for v in tok.values()) / n, 1) if n else None)
+        for k in ("in", "out"):  # tune split only, so both models are compared on the same items
+            f[f"m4_cmp_model_{short}_tokens_{k}_mean"] = _tokens_mean(tok, "tune", k)
+            if short == "haiku":  # the answer model on the report split prices the live demo (M5)
+                f[f"m4_tokens_haiku_report_{k}_mean"] = _tokens_mean(tok, "report", k)
     for g, v in s["abstain"].items():
         for k in ABSTAIN_KEYS:
             f[f"m4_abstain_{g}_{k}"] = v.get(k)

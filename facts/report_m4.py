@@ -120,11 +120,14 @@ def _models(f) -> str:
         return (f"| {name} | {_v(f.get(f'm4_cmp_model_{s}_thuman_tune_accuracy'))} | "
                 f"{_v(f.get(f'm4_cmp_model_{s}_tmachine_tune_agree'))} | "
                 f"{_v(f.get(f'm4_cmp_model_{s}_tokens_in_mean'))} | {_v(f.get(f'm4_cmp_model_{s}_tokens_out_mean'))} |")
-    return ("## Model comparison\n\nThe same tune-split questions answered by two models. Tokens per answer price the "
-            "live demo in M5. The citation gate figures above are for the answer model only.\n\n"
+    return ("## Model comparison\n\nThe same tune-split questions answered by two models; tokens are per called answer "
+            "on the same items. The citation gate figures above are for the answer model only.\n\n"
             "| Model | T-human accuracy | T-machine agree (machine-built) | Tokens in | Tokens out |\n"
             "|---|---|---|---|---|\n"
-            + row("haiku", "claude-haiku-4-5-20251001") + "\n" + row("sonnet", "claude-sonnet-5-5") + "\n")
+            + row("haiku", "claude-haiku-4-5-20251001") + "\n" + row("sonnet", "claude-sonnet-5-5") + "\n\n"
+            "Mean tokens per answer on the report split (answer model): "
+            f"in {_v(f.get('m4_tokens_haiku_report_in_mean'))}, out {_v(f.get('m4_tokens_haiku_report_out_mean'))}. "
+            "These price the live demo in M5.\n")
 
 
 def render_m4(f) -> str:

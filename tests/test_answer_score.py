@@ -25,7 +25,7 @@ def test_thuman_accuracy_baseline_out_of_list_and_errors():
     assert r["n"] == 3 and abs(r["accuracy"]["mean"] - 2 / 3) < 1e-9
     assert abs(r["baseline"]["mean"] - 2 / 3) < 1e-9  # tune majority "A": right on c4, c6; wrong on c5
     assert r["out_of_list"] == 1 and r["errors"] == 1
-    assert s["gate"]["thuman"]["pass_rate"] == 1.0 and s["tokens"][M]["thuman"]["in_mean"] == 100
+    assert s["gate"]["thuman"]["pass_rate"] == 1.0 and s["tokens"][M]["thuman"]["report"]["in_mean"] == 100
 
 
 def test_tmachine_judge_and_abstention():
@@ -102,3 +102,14 @@ def test_absent_group_is_judged_and_other_groups_keep_the_state_rule():
     assert a["not_judged"] == 1 and a["judge_unparsed"] == 1 and a["n"] == 4 and a["correct_rate"] == 0.5
     nf = s["absent_not_filed"]
     assert nf["false_answer"] == 1 and nf["n"] == 1 and nf["not_judged"] == 0  # plain state rule, no judge
+
+
+def test_tokens_are_split_by_item_split_and_count_only_called_answers():
+    items = [th("c1", "Q", "A", "tune"), th("c2", "Q", "A", "tune"), th("c3", "Q", "A", "report")]
+    answers = {("thuman", M): {"c1|Q": ans(choice="A", tin=100, tout=10), "c2|Q": ans(choice="A", tin=300, tout=30),
+                               "c3|Q": ans(choice="A", tin=50, tout=5)}}
+    t = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["tokens"][M]["thuman"]
+    assert t == {"tune": {"in_mean": 200.0, "out_mean": 20.0, "n": 2}, "report": {"in_mean": 50.0, "out_mean": 5.0, "n": 1}}
+    answers[("thuman", M)]["c3|Q"] = ans(choice="A", tin=0, tout=0)  # no model call (e.g. no hits)
+    t = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["tokens"][M]["thuman"]
+    assert set(t) == {"tune"}
