@@ -84,6 +84,7 @@ class Answer:
     ms: float = 0.0
     retrieval_ms: float = 0.0
     prompt_sha: str | None = None
+    usage: dict = field(default_factory=dict)  # the reply's raw usage, so the CLI's own share can be separated
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,11 @@ class Answerer:
                 return Answer("which_deal", candidates=scope.candidates if scope else (),
                               retrieval_ms=(time.perf_counter() - t0) * 1000.0)
             contract_id, q, candidates = scope.contract_id, strip_alias(question, scope.alias), scope.candidates
+        elif self.ladder.resolver is not None:
+            # A picked deal: its own name says nothing about which clause to find, as on the resolved path.
+            rows = self.ladder.conn.execute("SELECT alias FROM aliases WHERE contract_id = ?", (contract_id,))
+            for (alias,) in sorted(rows, key=lambda r: -len(r[0])):
+                q = strip_alias(q, alias)
         got = self.ladder.run("R6n", q, contract_id, CONTEXT_K)
         ms = (time.perf_counter() - t0) * 1000.0
         if not got.hits:
@@ -154,13 +160,13 @@ class Answerer:
             state = "answered"
         else:
             state = "not_stated"
-        usage = reply.get("usage", {})
+        usage = reply.get("usage") or {}
         choice = obj.get("choice") if p.choices else None
         return Answer(state, tuple(c for _, c in kept), tuple(dropped),
                       state == "answered" and any(c.part == "amendment" for _, c in kept),
                       str(choice) if choice is not None else None, p.contract_id, p.candidates,
                       sum(usage.get(k, 0) for k in INPUT_KEYS), usage.get("output_tokens", 0), ms, p.retrieval_ms,
-                      p.prompt_sha)
+                      p.prompt_sha, dict(usage))
 
     def ask(self, question: str, contract_id: str | None = None, choices: tuple[str, ...] = ()) -> Answer:
         p = self.prepare(question, contract_id, choices)

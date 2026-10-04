@@ -197,3 +197,41 @@ def test_closing_rule_keeps_key_and_value_boundaries():
     s = '{"a": "x",\n "b": ["y", "z"], "c": {"d": "1"}, "e": true}'
     assert _repair_inner_quotes(s) == s
     assert json.loads(_repair_inner_quotes('{"quote": "ends (the "Company")", "ref": "P1"}'))["quote"] == 'ends (the "Company")'
+
+
+def _spy_r6n(ladder):
+    seen, real = [], ladder.run
+
+    def run(rung, query, contract_id=None, k=10, rewritten=None):
+        if rung == "R6n":
+            seen.append((query, contract_id))
+        return real(rung, query, contract_id, k, rewritten)
+    ladder.run = run
+    return seen
+
+
+def test_picked_deal_name_is_stripped_before_retrieval(deals_ladder):
+    seen = _spy_r6n(deals_ladder)
+    p = Answerer(deals_ladder, fake_claude(""), "m").prepare("What is the Acme Software outside date?", "edgar_0001")
+    assert seen == [("What is the outside date", "edgar_0001")]
+    assert isinstance(p, Prepared) and "Question: What is the Acme Software outside date?" in p.prompt
+
+
+def test_picked_deal_on_the_maud_index_keeps_the_question(ladder):
+    seen = _spy_r6n(ladder)
+    Answerer(ladder, fake_claude(""), "m").prepare("big termination fee", "big")
+    assert seen == [("big termination fee", "big")]
+
+
+def test_usage_is_carried_into_the_answer(ladder):
+    run = fake_claude(reply(state="not_stated", claims=[]))
+    a = Answerer(ladder, run, "m").ask("termination fee", "big")
+    assert a.usage and a.usage.get("output_tokens") == a.tokens_out
+    assert Answerer(None, None, "m").finish(quote_prepared("x"), {"result": reply(state="not_stated", claims=[])},
+                                            1.0).usage == {}
+
+
+def test_prompt_says_amending_text_replaces_the_passage():
+    p = render("q", [])
+    assert "[Amended by Amendment No. N]" in p and "replaces the passage above it" in p
+    assert "state the amended terms and quote the amending text" in p

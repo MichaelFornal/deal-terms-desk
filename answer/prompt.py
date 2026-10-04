@@ -10,6 +10,7 @@ Passages (each starts with its label; definitions and amending text belong to th
 Rules:
 - Answer in two to four short claims. Each claim is one plain sentence a non-lawyer can follow.
 - Every claim needs a quote copied word for word from one passage (no ellipses, no edits) and that passage's label.
+- Text under "[Amended by Amendment No. N]" replaces the passage above it where they differ: state the amended terms and quote the amending text.
 - If the agreement uses its own categories (for example vested and unvested options), state each category; do not pick one for the reader.
 - If the passages do not answer the question, use state "not_stated" and no claims.
 - If a passage says the answer is set out in a disclosure letter or schedule that is not included, use state "unfiled_schedule" with one claim quoting that reference.
