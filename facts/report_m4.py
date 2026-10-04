@@ -18,21 +18,21 @@ def _ci(f, name) -> str:
     return f"{_v(f.get(name))} ({_v(f.get(name + '_lo'))} to {_v(f.get(name + '_hi'))})"
 
 
-def _d(f, name) -> str:
-    delta, lo, hi = f.get(name + "_delta"), f.get(name + "_lo"), f.get(name + "_hi")
-    if delta is None or lo is None or hi is None:
-        return f"{_v(delta)} ({_v(lo)} to {_v(hi)})"
+def _change(value, lo, hi) -> str:
+    """A change with its CI and whether it helps, hurts or shows no measurable change (CI clear of zero or not)."""
+    if value is None or lo is None or hi is None:
+        return f"{_v(value)} ({_v(lo)} to {_v(hi)})"
     verdict = "helps" if lo > 0 else "hurts" if hi < 0 else "no measurable change"
-    return f"{delta} ({lo} to {hi}; {verdict})"
+    return f"{value} ({lo} to {hi}; {verdict})"
+
+
+def _d(f, name) -> str:
+    return _change(f.get(name + "_delta"), f.get(name + "_lo"), f.get(name + "_hi"))
 
 
 def _verdict(f, name) -> str:
     """Like _d, for a CI block whose name is the fact itself (mean, _lo, _hi)."""
-    m, lo, hi = f.get(name), f.get(name + "_lo"), f.get(name + "_hi")
-    if m is None or lo is None or hi is None:
-        return f"{_v(m)} ({_v(lo)} to {_v(hi)})"
-    verdict = "helps" if lo > 0 else "hurts" if hi < 0 else "no measurable change"
-    return f"{m} ({lo} to {hi}; {verdict})"
+    return _change(f.get(name), f.get(name + "_lo"), f.get(name + "_hi"))
 
 
 def _path(f) -> str:

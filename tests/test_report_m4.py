@@ -85,3 +85,16 @@ def test_model_comparison_has_report_split_tokens_line():
     text = render_m4(Every(m4_tokens_haiku_report_in_mean=3100.5, m4_tokens_haiku_report_out_mean=210.25))
     sec = text.split("## Model comparison", 1)[1]
     assert "Mean tokens per answer on the report split (answer model): in 3100.5, out 210.25" in sec
+
+
+def test_one_verdict_helper_serves_deltas_and_the_baseline_line():
+    from facts.report_m4 import _change
+    assert _change(0.1, 0.02, 0.2) == "0.1 (0.02 to 0.2; helps)"
+    assert _change(-0.2, -0.3, -0.1) == "-0.2 (-0.3 to -0.1; hurts)"
+    assert _change(0.0, -0.1, 0.1) == "0.0 (-0.1 to 0.1; no measurable change)"
+    assert _change(None, -0.1, 0.1) == "n/a (-0.1 to 0.1)"
+
+
+def test_abstention_table_headers_say_machine_built_key():
+    sec = render_m4(Every()).split("## Abstention", 1)[1].split("\n## ", 1)[0]
+    assert "| Correct decline (machine-built key) | False answer (machine-built key) |" in sec
