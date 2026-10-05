@@ -18,6 +18,16 @@ RETRIEVAL_FOR = {"R7n": "R6n"}
 SETTINGS_PATH = Path(__file__).with_name("settings.json")
 
 
+def _stages(hits, legs) -> dict:
+    """Where each returned hit stood in each leg before fusion: 1-based rank and the leg's own score (BM25: -bm25,
+    higher is better; dense: 1 - cosine distance). None where the leg did not return the passage."""
+    pos = [{h.passage_id: (rank, h.score) for rank, h in enumerate(leg, start=1)} for leg in legs]
+    return {h.passage_id: {name: ({"rank": p[h.passage_id][0], "score": p[h.passage_id][1]}
+                                  if h.passage_id in p else None)
+                           for name, p in zip(("bm25", "dense"), pos)}
+            for h in hits}
+
+
 def load_answer_path(path: Path = SETTINGS_PATH) -> str:
     return json.loads(Path(path).read_text(encoding="utf-8"))["answer_path"]
 
@@ -95,6 +105,7 @@ class Ladder:
             raise ValueError("R5 and R6 need the lexicon; run `dtd lexicon` first")
         t0 = time.perf_counter()
         adjust = 0.0
+        legs = None
         q = query if n < 5 else (rewritten if rewritten is not None else rewrite(query, self.lexicon))
         table = "passages_x_fts" if n == 6 else "passages_fts"
         if n == 1:
@@ -116,4 +127,5 @@ class Ladder:
                 hits = ([replace(head[i], score=scores[i]) for i in order] + fused[len(head):])[:k]
         ms = (time.perf_counter() - t0) * 1000.0 + adjust
         amended = tuple(dict.fromkeys(a[0] for h in hits[:CONTEXT_K] for a in self._amendments(h)))
-        return Retrieved(hits, ms, [self._shown(h, n == 6) for h in hits[:CONTEXT_K]], amended)
+        return Retrieved(hits, ms, [self._shown(h, n == 6) for h in hits[:CONTEXT_K]], amended,
+                         stages=_stages(hits, legs) if legs else {})
