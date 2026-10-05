@@ -132,7 +132,10 @@ class Desk:
                 else:
                     self.budget.release(rid)
                 return self._payload("budget_reached" if e.kind == "billing" else "error", q)
-            self.budget.settle(rid, reply.get("usage") or {})
+            try:  # missing or empty usage settles at worst case (fail closed)
+                self.budget.settle(rid, reply.get("usage") or None)
+            except sqlite3.OperationalError:  # ledger locked: the reservation stays open, counted at worst case
+                pass
             try:
                 answer = self.answerer.finish(prep, reply, (time.perf_counter() - t1) * 1000.0 + prep.retrieval_ms)
             except ParseError:

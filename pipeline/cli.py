@@ -821,7 +821,7 @@ def _m5_recall(args) -> int:
 
 def _api_client(key: str):
     import anthropic
-    return anthropic.Anthropic(api_key=key, max_retries=1, timeout=30.0)
+    return anthropic.Anthropic(api_key=key, max_retries=0, timeout=30.0)
 
 
 def _m5_calibrate(args) -> int:

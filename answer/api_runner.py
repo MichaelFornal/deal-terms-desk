@@ -45,14 +45,14 @@ def _kind(e: Exception) -> str:
 def make_api_runner(max_tokens: int, client=None, timeout: float = 30.0):
     """runner(prompt, model) -> {"result", "usage", "stop_reason"}: the `run_claude` contract over the Messages API.
     One user turn, no system prompt, no thinking, at most `max_tokens` out. The client is built on first use
-    (one retry, `timeout` seconds) unless one is given. A truncated or refused reply raises RunnerError with its
+    (no SDK retry: one billed attempt per reservation; `timeout` seconds) unless one is given. A truncated or refused reply raises RunnerError with its
     usage; it is never returned as an answer."""
     state, lock = {"client": client}, threading.Lock()
 
     def runner(prompt: str, model: str) -> dict:
         with lock:
             if state["client"] is None:
-                state["client"] = anthropic.Anthropic(max_retries=1, timeout=timeout)
+                state["client"] = anthropic.Anthropic(max_retries=0, timeout=timeout)
             c = state["client"]
         try:
             msg = c.messages.create(model=model, max_tokens=max_tokens,

@@ -246,17 +246,48 @@ def test_search_never_calls_the_model_even_with_the_budget_spent(tmp_path):
 
 
 def test_concurrent_asks_never_spend_past_the_cap(tmp_path):
-    run = fake_claude(NOT_STATED, input_tokens=100, output_tokens=100)
-    desk = make_desk(tmp_path, run, month_cap_usd=0.03, day_cap_usd=0.03, ask_slots=20)
+    """Every runner call is held open, so reservations pile up at worst case. Only as many calls as the cap covers
+    may start; the rest must be refused before the model is called. Non-atomic reservation fails this."""
+    gate, cond, state = threading.Event(), threading.Condition(), {"entered": 0, "done": 0}
+    calls: list = []
+
+    def runner(prompt, model):
+        calls.append(prompt)
+        with cond:
+            state["entered"] += 1
+            cond.notify_all()
+        assert gate.wait(30)
+        return {"result": NOT_STATED, "usage": {"input_tokens": 100, "output_tokens": 100}, "stop_reason": "end_turn"}
+
+    q, n = "termination fee clause", 20
+    desk = make_desk(tmp_path, runner, ask_slots=n)
+    prices = load_prices(PRICES)
+    worst = worst_case_usd(prices, len(desk.answerer.prepare(q, "edgar_0001").prompt), desk.config.max_tokens)
+    cap = worst * 2.5
+    desk.budget = Budget(tmp_path / "state" / "capped.db", cap, cap, prices)
     out: list[dict] = []
-    threads = [threading.Thread(target=lambda i=i: out.append(desk.ask(f"termination fee clause {i}", "edgar_0001")))
-               for i in range(20)]
+
+    def go():
+        got = desk.ask(q, "edgar_0001")
+        with cond:
+            out.append(got)
+            state["done"] += 1
+            cond.notify_all()
+
+    threads = [threading.Thread(target=go) for _ in range(n)]
     for t in threads:
         t.start()
-    for t in threads:
-        t.join()
-    assert desk.budget.spent()["month"] <= 0.03
-    assert {o["state"] for o in out} <= {"not_stated", "budget_reached"} and len(out) == 20
+    with cond:
+        settled = cond.wait_for(lambda: state["entered"] + state["done"] >= n, timeout=30)
+    try:
+        assert settled, "threads neither entered the runner nor returned"
+        assert len(calls) <= int(cap // worst) == 2
+        assert any(o["state"] == "budget_reached" for o in out)
+    finally:
+        gate.set()
+        for t in threads:
+            t.join(30)
+    assert len(out) == n and desk.budget.spent()["month"] <= cap
 
 
 def test_a_crash_between_reserve_and_settle_is_booked_at_worst_case_once(tmp_path):
@@ -294,10 +325,34 @@ def test_deals_lists_every_agreement_for_the_picker(tmp_path):
 
 def test_a_locked_ledger_reads_as_busy_and_never_calls_the_model(tmp_path):
     run = Scripted(NOT_STATED)
-    desk = make_desk(tmp_path, run)
+    desk = make_desk(tmp_path, run, ask_slots=1)
 
     def locked(*a, **k):
         raise sqlite3.OperationalError("database is locked")
     desk.budget.reserve = locked
     assert desk.ask("termination fee", "edgar_0001")["state"] == "busy"
     assert run.calls == [] and desk.slots.try_acquire() is True
+
+
+def test_a_reply_with_no_usage_is_booked_at_worst_case(tmp_path):
+    ok = reply(state="not_stated", claims=[])
+    desk = make_desk(tmp_path, lambda prompt, model: {"result": ok, "usage": {}, "stop_reason": "end_turn"})
+    assert desk.ask("termination fee", "edgar_0001")["state"] == "not_stated"
+    p = desk.answerer.prepare("termination fee", "edgar_0001")
+    worst = worst_case_usd(load_prices(PRICES), len(p.prompt), desk.config.max_tokens)
+    assert desk.budget.spent()["month"] == pytest.approx(worst, abs=1e-6)
+
+
+def test_a_locked_ledger_at_settle_leaves_the_reservation_open_and_still_answers(tmp_path):
+    run = Scripted(NOT_STATED)
+    desk = make_desk(tmp_path, run)
+
+    def locked(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    desk.budget.settle = locked
+    got = desk.ask("termination fee", "edgar_0001")
+    assert got["state"] == "not_stated" and got["served_from"] == "live"
+    rows = sqlite3.connect(desk.config.state_dir / "budget.db").execute("SELECT status FROM spend").fetchall()
+    assert rows == [("open",)]
+    again = desk.ask("termination fee", "edgar_0001")
+    assert again["served_from"] == "cache" and len(run.calls) == 1

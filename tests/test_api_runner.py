@@ -102,7 +102,7 @@ def test_the_client_is_built_lazily_once_with_one_retry(monkeypatch):
     assert built == []
     run("p", HAIKU)
     run("q", HAIKU)
-    assert built == [{"max_retries": 1, "timeout": 12.5}]
+    assert built == [{"max_retries": 0, "timeout": 12.5}]
 
 
 @pytest.mark.model
@@ -112,6 +112,6 @@ def test_one_real_call_through_the_dev_key():
         key = anthropic_key()
     except RuntimeError:
         pytest.skip("ANTHROPIC_API_KEY (the dtd-dev key) is not set")
-    run = make_api_runner(16, client=anthropic.Anthropic(api_key=key, max_retries=1, timeout=30.0))
+    run = make_api_runner(16, client=anthropic.Anthropic(api_key=key, max_retries=0, timeout=30.0))
     got = run("Reply with the single word: ok", HAIKU)
     assert got["result"].strip() and got["usage"]["input_tokens"] > 0 and got["stop_reason"] == "end_turn"
