@@ -5,15 +5,20 @@ description = "Deal Terms Desk pipeline, retrieval and evals"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "anthropic>=1.11,<2",
+    "fastapi>=0.142.2,<0.143",
     "fastembed>=0.8.1,<0.9",
     "sqlite-vec>=0.1.9,<0.2",
+    "uvicorn>=0.54,<0.55",
 ]
 
 [project.scripts]
 dtd = "pipeline.cli:entry"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "httpx2>=2.13,<3",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]
