@@ -91,3 +91,11 @@ def test_every_section_once_its_input_exists(tmp_path):
 def test_wall_clock_facts_are_unstable_for_the_check():
     assert is_unstable("m5_server_rss_mb") and is_unstable("m5_server_search_latency_ms_p95")
     assert is_unstable("m5_live_r6n_latency_ms_p50") and not is_unstable("m5_bundle_bytes")
+
+
+def test_every_measurement_run_key_is_unstable_and_the_rest_is_stable():
+    for k in ("m5_server_search_n", "m5_server_errors", "m5_server_embed_parity", "m5_server_embed_parity_n",
+              "m5_e2e_search_latency_ms_p95", "m5_e2e_ask_fresh_n"):
+        assert is_unstable(k), k
+    for k in ("m5_bundle_sha", "m5_prompt_parity_same", "m5_calibration_n"):
+        assert not is_unstable(k), k

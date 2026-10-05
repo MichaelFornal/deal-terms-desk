@@ -23,7 +23,7 @@ LBR_METHODS = ("naive", "rcts", "rcts_cohere")
 
 def is_unstable(name: str) -> bool:
     return ("latency_ms" in name or "load_avg" in name or name.endswith("index_bytes")
-            or name.endswith("rss_mb"))
+            or name.endswith("rss_mb") or name.startswith(("m5_server_", "m5_e2e_")))
 
 
 def slug(name: str) -> str:
