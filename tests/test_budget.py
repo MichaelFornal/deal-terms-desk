@@ -70,16 +70,20 @@ def test_the_month_cap_resets_on_the_first_in_utc(tmp_path):
 
 
 def _race(budgets, n=50):
-    got, start = [], threading.Barrier(n)
+    got, errors, start = [], [], threading.Barrier(n)
 
     def go(b):
-        start.wait()
-        got.append(b.reserve(CHARS, MAX_OUT))
+        try:
+            start.wait()
+            got.append(b.reserve(CHARS, MAX_OUT))
+        except BaseException as e:  # a thread that raised must fail the test, not just go missing
+            errors.append(e)
     threads = [threading.Thread(target=go, args=(budgets[k % len(budgets)],)) for k in range(n)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
+    assert errors == [] and len(got) == n
     return got
 
 
@@ -118,3 +122,49 @@ def test_state_is_reached_when_less_than_one_call_is_left(tmp_path):
     assert b.state(min_call_usd=0.03) == "ok"
     b.reserve(CHARS, MAX_OUT)
     assert b.state(min_call_usd=0.03) == "reached"  # $0.02 left is less than one call
+
+
+def _rows(tmp_path):
+    return sqlite3.connect(tmp_path / "spend.db").execute("SELECT id, status, usd FROM spend ORDER BY id").fetchall()
+
+
+USAGE = {"input_tokens": 1000, "output_tokens": 100}
+
+
+def test_settle_with_no_reservation_id_raises(tmp_path):
+    b = budget(tmp_path)
+    with pytest.raises(ValueError, match="None"):
+        b.settle(None, USAGE)
+    assert _rows(tmp_path) == []
+
+
+def test_settle_on_an_unknown_id_raises_and_changes_nothing(tmp_path):
+    b = budget(tmp_path)
+    rid = b.reserve(CHARS, MAX_OUT)
+    with pytest.raises(ValueError, match="999"):
+        b.settle(999, USAGE)
+    with pytest.raises(ValueError, match="999"):
+        b.settle(999, None)  # a ValueError, not an opaque TypeError
+    assert _rows(tmp_path) == [(rid, "open", 0.0)]
+    assert b.spent()["month"] == pytest.approx(0.03)
+
+
+def test_settle_on_a_released_row_raises_and_it_stays_released(tmp_path):
+    b = budget(tmp_path)
+    rid = b.reserve(CHARS, MAX_OUT)
+    b.release(rid)
+    for usage in (USAGE, None):
+        with pytest.raises(ValueError, match=str(rid)):
+            b.settle(rid, usage)
+    assert _rows(tmp_path) == [(rid, "released", 0.0)]
+
+
+def test_a_stale_reconciled_row_can_still_be_settled_at_actual(tmp_path):
+    clock = Clock(2026, 10, 5, 12, 0)
+    b = budget(tmp_path, clock=clock)
+    rid = b.reserve(CHARS, MAX_OUT)
+    clock.t += STALE_S + 1
+    b.reserve(CHARS, MAX_OUT)  # reconciles the first row at worst
+    assert _rows(tmp_path)[0][1:] == ("settled", pytest.approx(0.03))
+    assert b.settle(rid, USAGE) == pytest.approx(0.0015)
+    assert _rows(tmp_path)[0][1:] == ("settled", pytest.approx(0.0015))

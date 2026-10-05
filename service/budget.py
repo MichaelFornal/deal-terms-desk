@@ -84,8 +84,13 @@ class Budget:
         u = usage or {}
 
         def fn(c):
+            row = c.execute("SELECT worst, status FROM spend WHERE id = ?", (rid,)).fetchone()
+            if rid is None or row is None:
+                raise ValueError(f"settle: no reservation with id {rid!r}")
+            if row[1] == "released":
+                raise ValueError(f"settle: reservation {rid!r} was released and cannot be settled")
             if usage is None:
-                usd = c.execute("SELECT worst FROM spend WHERE id = ?", (rid,)).fetchone()[0]
+                usd = row[0]
             else:
                 usd = cost_usd(self.prices, u)
             c.execute("UPDATE spend SET status = 'settled', usd = ?, tokens_in = ?, tokens_out = ?, cache_write = ?,"
