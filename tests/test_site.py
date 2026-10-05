@@ -182,3 +182,16 @@ def test_markup_in_facts_and_examples_is_escaped(tmp_path):
     assert html.escape(evil[0]) in (tmp_path / "method.html").read_text()
     assert html.escape(evil[1]) in (tmp_path / "results.html").read_text()
     assert json.loads((tmp_path / "examples.json").read_text())[0]["question"] == evil[0]  # data file, fetched as text
+
+
+def test_every_m5_fact_sits_under_exactly_its_own_label():
+    """M5 labels follow where the judgement comes from, and a plain measurement (a time, a price, a count) sits
+    under no tier label: not even a table's."""
+    for t in results_tables():
+        cells = [(r, j, c) for r in t.rows for j, c in enumerate(r.cells)] + [(None, None, c) for c in t.note]
+        for row, j, c in cells:
+            col = t.head[j][1] if j is not None and j < len(t.head) else None
+            effective = col or (row.tier if row is not None else None) or t.tier
+            for key in cell_keys(c):
+                if key.startswith("m5_"):
+                    assert effective == tier_label(key), (t.id, key, effective)

@@ -53,12 +53,16 @@ def test_dtd_report_writes_the_m5_report_when_its_facts_exist(tmp_path, monkeypa
     assert (tmp_path / "REPORT_M5" / "REPORT.md").read_text() == render_m5(f)
 
 
-def test_every_machine_section_is_labelled_and_costs_name_dollars():
+def test_only_the_model_judged_fact_says_machine_built_and_costs_name_dollars():
+    """Tier labels follow where the judgement comes from: the API-vs-CLI state agreement is model against model;
+    parity, tokens, money, times and the cap trip are plain measurements."""
     text = render_m5(Every())
-    for heading in ("The same path the evals measured", "API calibration", "Cost and budget", "Server",
-                    "The cap trips"):
+    for heading in ("The same path the evals measured", "Cost and budget", "Server", "The cap trips"):
         sec = text.split(f"## {heading}", 1)[1].split("\n## ", 1)[0]
-        assert "machine-built" in sec, heading
+        assert "machine-built" not in sec, heading
+    sec = text.split("## API calibration\n", 1)[1].split("\n## ", 1)[0]
+    assert [line for line in sec.splitlines() if "machine-built" in line] == [
+        "| Answer state matches the other run (machine-built) | 0.5 | — |"]
     assert "US$0.5 on average" in text and "daily ceiling of US$0.5" in text
     assert "a share of" in text and "(n 0.5)" in text
 
@@ -68,3 +72,31 @@ def test_samples_left_out_of_the_timings_are_named():
     text = render_m5(f)
     assert "served other than meant, during the measurement: 4." in text
     assert "new questions the cache served: 1;" in text and "cached examples answered live, and billed: 2." in text
+
+
+def test_each_label_covers_exactly_the_facts_it_names(tmp_path):
+    """Render every fact as its own name. A line or section marked machine-built holds only machine-built facts,
+    every machine-built fact sits on one, and every human-labelled fact sits on a line, or under a table header,
+    marked human-labelled (MAUD). Plain measurements carry no label."""
+    from facts.labels import HUMAN, MACHINE, tier_label
+    from facts.m5 import build_m5
+    from tests.test_facts_m5 import every_input
+    keys = set(build_m5(*every_input(tmp_path))) | {"m4_r6n_report_recall_at_5", "m4_r6n_report_recall_at_5_lo",
+                                                    "m4_r6n_report_recall_at_5_hi"}
+    text = render_m5({k: f"<{k}>" for k in keys})
+    seen = set()
+    for section in re.split(r"\n(?=## )", text):
+        whole, header, in_table = "(machine-built)" in section.splitlines()[0], "", False
+        for line in section.splitlines():
+            row = line.startswith("|")
+            header = line if row and not in_table else header
+            in_table = row
+            machine = whole or "machine-built" in line
+            human = HUMAN in line or (row and HUMAN in header)
+            for key in re.findall(r"<(m\d_\w+)>", line):
+                seen.add(key)
+                want = tier_label(key)
+                assert machine == (want == MACHINE), (key, want, line)
+                assert human == (want == HUMAN), (key, want, line)
+    assert {"m5_calibration_state_agreement", "m5_calibration_accuracy_api", "m5_bundle_r6n_report_recall_at_5",
+            "m5_api_tokens_in_mean", "m5_server_rss_mb", "m5_cap_trip_budget_reached"} <= seen

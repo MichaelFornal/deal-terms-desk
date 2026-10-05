@@ -43,7 +43,9 @@ def test_with_only_the_bundle_the_later_sections_are_absent(tmp_path):
     assert not [k for k in f if k.startswith(later)]
 
 
-def test_every_section_once_its_input_exists(tmp_path):
+def every_input(tmp_path, calibration: dict | None = None, server: dict | None = None) -> tuple:
+    """Every input build_m5 reads, so it emits every M5 fact. `calibration` and `server` replace top-level fields
+    of calibration.json and server.json. -> the build_m5 arguments."""
     data_m5, live, out_m4, out_m5 = dirs(tmp_path)
     for name in ("r6n", "t_r7n_corpus"):
         _write(out_m4 / f"{name}.json", {"latency_ms": {"p50": 46.39566600235412, "p95": 300.0}})
@@ -60,19 +62,23 @@ def test_every_section_once_its_input_exists(tmp_path):
         "gate_pass_rate": {"api": 0.88, "cli": 0.86}, "state_agreement": 0.9,
         "thuman_accuracy": {"api": 0.6, "cli": 0.62, "diff": -0.02, "n": 19},
         "stop_rule": {"state_agreement_min": 0.8, "accuracy_diff_max": 0.15, "verdict": "go", "reasons": []},
-        "model": "claude-haiku-4-5-20251001", "max_tokens": 1024})
+        "model": "claude-haiku-4-5-20251001", "max_tokens": 1024} | (calibration or {}))
     span = {"n": 50, "p50": 20.0, "p95": 40.0}
     _write(data_m5 / "server.json", {
         "search": {"e2e": {"n": 50, "p50": 120.0, "p95": 200.0}, "server": span},
         "ask_cached": {"e2e": span, "server": span, "states": {}}, "ask_fresh": {"e2e": span, "server": span, "states": {}},
         "rss_mb": 900.0, "embed_parity": {"n": 50, "same": 49, "rate": 0.98}, "errors": 3,
-        "misrouted": {"fresh_served_from_cache": 1, "cached_answered_live": 2}})
+        "misrouted": {"fresh_served_from_cache": 1, "cached_answered_live": 2}} | (server or {}))
     _write(data_m5 / "cap_trip.json", {"budget_reached": True, "budget_cached": True, "ledger_unchanged": True,
                                        "health_budget": "reached"})
     hosting = _write(tmp_path / "hosting.json", dict(HOSTING_EMPTY, eur_usd=1.1, eur_usd_date="2026-10-10",
                                                      eur_usd_source="ECB reference rate", day_cap_usd=0.5,
                                                      checked="2026-10-10"))
-    f = build_m5(data_m5, live, out_m4, out_m5, PRICES, hosting)
+    return data_m5, live, out_m4, out_m5, PRICES, hosting
+
+
+def test_every_section_once_its_input_exists(tmp_path):
+    f = build_m5(*every_input(tmp_path))
     usd = round(4.49 * 1.1, 2)
     assert f["m5_hosting_usd_month"] == usd and f["m5_model_cap_usd"] == round(10.0 - usd, 2)
     assert f["m5_day_cap_usd"] == 0.5 and f["m5_answers_per_month"] == math.floor(round(10.0 - usd, 2) / 0.02)

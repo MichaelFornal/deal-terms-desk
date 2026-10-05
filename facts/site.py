@@ -195,12 +195,13 @@ def results_tables() -> tuple[Table, ...]:
                          K(f"m2_{r}_context_tokens_mean"))) for r in RUNGS)
               + (Row(("R6n", "R6 without the reranker: the path the live desk answers from",
                       CI("m4_r6n_report_recall_at_5"), DASH, DASH, DASH, D("m4_cmp_r6n_vs_r6_recall_at_5"),
-                      K("m5_live_r6n_latency_ms_p50"), K("m5_live_r6n_latency_ms_p95"), DASH)),
+                      DASH, DASH, DASH)),
                  Row(("R6n, live index", "The same rung over the one index file the live desk reads",
                       CI("m5_bundle_r6n_report_recall_at_5"), DASH, DASH, DASH, DASH, DASH, DASH, DASH))),
               ("Report split: ", K("m2_report_items"), " questions from ", K("m2_report_contracts"),
                " agreements. Intervals are bootstrap intervals clustered by agreement; changes are paired. Timings "
-               "were measured on the development machine; the live server's are in the last table.")),
+               "were measured on the development machine; the live path's and the live server's are in the last "
+               "table.")),
         Table("ladder_machine", "The retrieval ladder on the tech deals (report split)", MACHINE,
               (("Rung", None), ("What it adds", None), ("recall@5", None), ("MRR@10", None),
                ("recall@5 change from the rung above", None), ("ms p95", None), ("Context tokens", None)),
@@ -219,7 +220,7 @@ def results_tables() -> tuple[Table, ...]:
                       CI("m4_t_r7_corpus_report_recall_at_5"), DASH, DASH, DASH, DASH)),
                  Row(("R7n, all agreements", "R7 without the reranker: the live path",
                       CI("m4_t_r7n_corpus_report_recall_at_5"), DASH, D("m4_cmp_t_r7n_vs_t_r7_corpus_recall_at_5"),
-                      K("m5_live_t_r7n_corpus_latency_ms_p95"), DASH))),
+                      DASH, DASH))),
               ("Report split: ", K("m3_t_report_items"), " machine-built questions about ",
                K("m3_t_report_contracts"), " tech agreements, each a lay question naming the company. Across all "
                "agreements, a passage from the wrong agreement counts as a miss.")),
@@ -340,6 +341,12 @@ def results_tables() -> tuple[Table, ...]:
                Row(("Output tokens per answer, mean", K("m5_api_tokens_out_mean"))),
                Row(("Cost per new answer, mean, US dollars", K("m5_cost_per_answer_mean"))),
                Row(("New answers the monthly budget covers", K("m5_answers_per_month"))),
+               Row(("Live-path retrieval inside one agreement (R6n), development machine, ms p50",
+                    K("m5_live_r6n_latency_ms_p50"))),
+               Row(("Live-path retrieval inside one agreement (R6n), development machine, ms p95",
+                    K("m5_live_r6n_latency_ms_p95"))),
+               Row(("Live-path retrieval across all agreements (R7n), development machine, ms p95",
+                    K("m5_live_t_r7n_corpus_latency_ms_p95"))),
                Row(("Search on the server, ms p50", K("m5_server_search_latency_ms_p50"))),
                Row(("Search on the server, ms p95", K("m5_server_search_latency_ms_p95"))),
                Row(("A new answer on the server, ms p50", K("m5_server_ask_fresh_latency_ms_p50"))),
@@ -429,7 +436,8 @@ METHOD = (
          "categories; the answer quotes the categories and does not pick one for you.",),
         ("The answer evaluations ran through the Claude command-line tool, not the API the live desk calls. A "
          "calibration sample of ", K("m5_calibration_n"), " questions run both ways agreed on the answer state in ",
-         K("m5_calibration_state_agreement"), " of cases."),
+         K("m5_calibration_state_agreement"), " of cases (", MACHINE, ": the two runs were compared with each other, "
+         "not with lawyers' labels)."),
         ("Answer accuracy on MAUD was measured on an index of MAUD agreements alone. On the live index, which also "
          "holds the tech deals, the live rung's recall@5 on MAUD's questions is ",
          CI("m5_bundle_r6n_report_recall_at_5"), " (", HUMAN, ")."),
