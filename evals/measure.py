@@ -9,6 +9,19 @@ from service.cache import normalise_question
 
 SEARCH_K = 10
 MAX_WAITS = 5
+MAX_SLEEP_S = 30.0  # one wait never exceeds this, whatever Retry-After asks for
+DEFAULT_SLEEP_S = 1.0  # Retry-After missing or not a number
+
+
+def _retry_after(value) -> float:
+    """Seconds to wait: the header if it is a number, capped; a small default otherwise."""
+    try:
+        secs = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_SLEEP_S
+    if secs != secs or secs < 0:  # NaN or negative
+        return DEFAULT_SLEEP_S
+    return min(secs, MAX_SLEEP_S)
 
 
 def _call(url: str, body: dict | None = None, timeout: float = 120.0) -> tuple[dict, float]:
@@ -25,7 +38,7 @@ def _call(url: str, body: dict | None = None, timeout: float = 120.0) -> tuple[d
         except urllib.error.HTTPError as e:
             if e.code != 429:
                 raise
-            time.sleep(float(e.headers.get("Retry-After") or 1))
+            time.sleep(_retry_after(e.headers.get("Retry-After")))
     raise RuntimeError(f"still rate-limited after {MAX_WAITS} waits: {url}")
 
 
@@ -42,34 +55,58 @@ def reference_hits(ladder, questions: list[str]) -> dict[str, list[int]]:
             for q in questions}
 
 
+def _reason(e: Exception) -> str:
+    return f"{type(e).__name__}: {e}"[:120]
+
+
 def measure(base_url: str, questions: list[str], fresh: list[str], reference: dict | None = None,
             cached=()) -> dict:
     """Search latency over `questions`, answer latency for `cached` (example questions, served from the cache) and
     `fresh` (new, billed questions), peak memory, and, given `reference`, how often the server's top passages
-    match this machine's. Server-side ms come from each payload; end-to-end ms include the network."""
+    match this machine's. Server-side ms come from each payload; end-to-end ms include the network.
+    A request that fails (HTTP error, timeout, bad body, missing field) is counted in `errors` with its route and
+    reason, its sample is skipped and the run goes on, so one bad request never loses the others."""
     base = base_url.rstrip("/")
+    errors: list[dict] = []
     e2e, server, same = [], [], 0
     for q in questions:
-        got, ms = _call(f"{base}/api/search?" + urllib.parse.urlencode({"q": q}))
+        try:
+            got, ms = _call(f"{base}/api/search?" + urllib.parse.urlencode({"q": q}))
+            server_ms, ids = float(got["ms"]), [h["passage_id"] for h in got["hits"]]
+        except Exception as e:  # noqa: BLE001 - every failure is a counted sample, not a crash
+            errors.append({"route": "search", "reason": _reason(e)})
+            continue
         e2e.append(ms)
-        server.append(got["ms"])
-        if reference is not None and [h["passage_id"] for h in got["hits"]] == reference.get(q):
+        server.append(server_ms)
+        if reference is not None and ids == reference.get(q):
             same += 1
 
-    def asks(qs) -> dict:
+    def asks(route, qs) -> dict:
         a_e2e, a_server, states = [], [], {}
         for q in qs:
-            got, ms = _call(f"{base}/api/ask", {"question": q, "deal": None})
+            try:
+                got, ms = _call(f"{base}/api/ask", {"question": q, "deal": None})
+                server_ms, state = float(got["ms"]), got["state"]
+            except Exception as e:  # noqa: BLE001
+                errors.append({"route": route, "reason": _reason(e)})
+                continue
             a_e2e.append(ms)
-            a_server.append(got["ms"])
-            states[got["state"]] = states.get(got["state"], 0) + 1
+            a_server.append(server_ms)
+            states[state] = states.get(state, 0) + 1
         return {"e2e": _dist(a_e2e), "server": _dist(a_server), "states": dict(sorted(states.items()))}
 
-    out = {"base": base, "search": {"e2e": _dist(e2e), "server": _dist(server)}, "ask_cached": asks(cached),
-           "ask_fresh": asks(fresh)}
-    health, _ = _call(f"{base}/api/health")
-    out |= {"rss_mb": health["rss_mb"], "git_sha": health["git_sha"], "bundle_sha": health["bundle_sha"]}
+    out = {"base": base, "search": {"e2e": _dist(e2e), "server": _dist(server)}, "ask_cached": asks("ask_cached", cached),
+           "ask_fresh": asks("ask_fresh", fresh)}
+    try:
+        health, _ = _call(f"{base}/api/health")
+        if not isinstance(health, dict):
+            raise ValueError("health is not an object")
+    except Exception as e:  # noqa: BLE001
+        errors.append({"route": "health", "reason": _reason(e)})
+        health = {}
+    out |= {"rss_mb": health.get("rss_mb"), "git_sha": health.get("git_sha"), "bundle_sha": health.get("bundle_sha")}
+    out["errors"], out["error_log"] = len(errors), errors[:20]
     if reference is not None:
-        out["embed_parity"] = {"n": len(questions), "same": same,
-                               "rate": round(same / len(questions), 4) if questions else None}
+        n = len(server)
+        out["embed_parity"] = {"n": n, "same": same, "rate": round(same / n, 4) if n else None}
     return out

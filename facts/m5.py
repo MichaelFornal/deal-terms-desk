@@ -71,6 +71,9 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
             for q in ("p50", "p95"):
                 f[f"m5_server_{part}_latency_ms_{q}"] = s[part]["server"][q]
                 f[f"m5_e2e_{part}_latency_ms_{q}"] = s[part]["e2e"][q]
+            f[f"m5_server_{part}_n"], f[f"m5_e2e_{part}_n"] = s[part]["server"]["n"], s[part]["e2e"]["n"]
+        if "errors" in s:
+            f["m5_server_errors"] = s["errors"]
         f["m5_server_rss_mb"] = s["rss_mb"]
         if "embed_parity" in s:
             f["m5_server_embed_parity"], f["m5_server_embed_parity_n"] = s["embed_parity"]["rate"], s["embed_parity"]["n"]

@@ -82,6 +82,8 @@ def test_every_section_once_its_input_exists(tmp_path):
     assert f["m5_calibration_stop_rule"] == "go" and f["m5_calibration_accuracy_cli"] == 0.62
     assert f["m5_calibration_gate_pass_api"] == 0.88 and f["m5_calibration_estimator_ok"] is True
     assert f["m5_server_search_latency_ms_p95"] == 40.0 and f["m5_e2e_search_latency_ms_p95"] == 200.0
+    assert f["m5_server_search_n"] == 50 and f["m5_e2e_search_n"] == 50 and f["m5_server_ask_fresh_n"] == 50
+    assert f["m5_e2e_ask_cached_n"] == 50
     assert f["m5_server_rss_mb"] == 900.0 and f["m5_server_embed_parity"] == 0.98
     assert f["m5_cap_trip_budget_reached"] is True and f["m5_cap_trip_ledger_unchanged"] is True
 

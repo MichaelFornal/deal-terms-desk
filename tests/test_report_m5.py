@@ -51,3 +51,13 @@ def test_dtd_report_writes_the_m5_report_when_its_facts_exist(tmp_path, monkeypa
         monkeypatch.setattr(cli, name, tmp_path / name / "REPORT.md")
     assert cli.entry(["report"]) == 0
     assert (tmp_path / "REPORT_M5" / "REPORT.md").read_text() == render_m5(f)
+
+
+def test_every_machine_section_is_labelled_and_costs_name_dollars():
+    text = render_m5(Every())
+    for heading in ("The same path the evals measured", "API calibration", "Cost and budget", "Server",
+                    "The cap trips"):
+        sec = text.split(f"## {heading}", 1)[1].split("\n## ", 1)[0]
+        assert "machine-built" in sec, heading
+    assert "US$0.5 on average" in text and "daily ceiling of US$0.5" in text
+    assert "a share of" in text and "(n 0.5)" in text

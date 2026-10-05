@@ -91,3 +91,76 @@ def test_dtd_m5_measure_writes_server_json(tmp_path, monkeypatch):
     assert len(seen["questions"]) == 4 and len(seen["fresh"]) == 2 and seen["cached"]
     assert not set(seen["questions"]) & set(seen["fresh"])
     assert json.loads((tmp_path / "m5" / "server.json").read_text())["rss_mb"] == 1.0
+
+
+class Flaky(BaseHTTPRequestHandler):
+    """Search: 'boom' -> 500, 'junk' -> not JSON, 'nomsp' -> no ms. Ask: 'boom' -> 500. Health lacks rss_mb."""
+    retry = "abc"
+
+    def _raw(self, code, body: bytes, headers=()):
+        self.send_response(code)
+        for k, v in headers:
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path == "/api/health":
+            return self._raw(200, b'{"git_sha": "g", "bundle_sha": "b"}')
+        q = parse_qs(u.query)["q"][0]
+        if q == "limited":
+            return self._raw(429, b"{}", [("Retry-After", Flaky.retry)])
+        if q == "boom":
+            return self._raw(500, b"{}")
+        if q == "junk":
+            return self._raw(200, b"<html>")
+        if q == "nomsp":
+            return self._raw(200, b'{"hits": []}')
+        self._raw(200, b'{"hits": [{"passage_id": 1}], "ms": 4.0}')
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if body["question"] == "boom":
+            return self._raw(500, b"{}")
+        self._raw(200, b'{"state": "answered", "ms": 8.0}')
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def flaky():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Flaky)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+
+
+def test_failed_requests_are_counted_and_the_other_samples_survive(flaky):
+    got = measure(flaky, ["ok", "boom", "junk", "nomsp", "ok2"], ["boom", "fresh"], {}, cached=["c"])
+    assert got["search"]["server"]["n"] == 2 and got["search"]["e2e"]["n"] == 2
+    assert got["ask_fresh"]["server"]["n"] == 1 and got["ask_cached"]["server"]["n"] == 1
+    assert got["rss_mb"] is None and got["bundle_sha"] == "b"
+    assert got["errors"] == 4 and {e["route"] for e in got["error_log"]} == {"search", "ask_fresh"}
+
+
+def test_nothing_succeeding_gives_none_percentiles(flaky):
+    got = measure(flaky, ["boom"], [], None)
+    assert got["search"]["server"] == {"n": 0, "p50": None, "p95": None} and got["errors"] == 1
+
+
+def test_retry_after_is_capped_parsed_defensively_and_given_up_on(flaky, monkeypatch):
+    from evals import measure as m
+    slept = []
+    monkeypatch.setattr(m.time, "sleep", slept.append)
+    Flaky.retry = "3600"
+    got = measure(flaky, ["limited"], [], None)
+    assert slept == [m.MAX_SLEEP_S] * (m.MAX_WAITS + 1) and got["errors"] == 1
+    assert "still rate-limited" in got["error_log"][0]["reason"]
+    slept.clear()
+    Flaky.retry = "soon"
+    measure(flaky, ["limited"], [], None)
+    assert slept == [m.DEFAULT_SLEEP_S] * (m.MAX_WAITS + 1)
+    Flaky.retry = "abc"
