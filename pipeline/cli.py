@@ -18,6 +18,7 @@ from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.live_parity import prompt_parity, r7n_parity
+from evals.measure import measure, reference_hits
 from evals.llm_rewrite import rewrite_all
 from evals.maud_labels import load_rows
 from evals.run_answers import answer_all, load_answers
@@ -31,12 +32,14 @@ from facts.m0 import build_m0
 from facts.m2 import build_m2, is_unstable
 from facts.m3 import build_m3, present_m3
 from facts.m4 import build_m4, present_m4
+from facts.m5 import build_m5, present_m5
 from facts.m2 import present as m2_present
 from facts.report import render
 from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
 from facts.report_m4 import render_m4
+from facts.report_m5 import render_m5
 from facts.site import render_site
 from pipeline import m0
 from service.app import build_desk
@@ -66,6 +69,7 @@ from service.prices import load_prices
 FACTS = Path("facts.json")
 ENV_FILE = Path(".env")
 PRICES = Path("service/prices.json")
+HOSTING = Path("deploy/hosting.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
 EXAMPLES = Path("site/examples.json")
@@ -74,6 +78,7 @@ REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
 REPORT_M3 = Path("docs/m3/REPORT.md")
 REPORT_M4 = Path("docs/m4/REPORT.md")
+REPORT_M5 = Path("docs/m5/REPORT.md")
 M0_STAGES = ("search", "candidates", "fetch", "deals", "sample", "press", "measure")
 NEEDS_SEC = {"search", "candidates", "fetch", "deals", "press"}
 REWRITES = "llm_rewrites.jsonl"
@@ -377,6 +382,8 @@ def _all_facts() -> dict:
     facts = build_facts(INDEX, OUT / "r1.json", _csv_paths())
     if m2_present(OUT):
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
+    if present_m5(DATA / "m5"):
+        facts |= build_m5(DATA / "m5", DATA / "live", _out_m4(), OUT / "m5", PRICES, HOSTING)
     if present_m3(OUT / "m3"):
         facts |= build_m3(OUT / "m3", OUT, DATA / "m3", EDGAR, DEALS_INDEX)
     if present_m4(_out_m4()):
@@ -741,6 +748,9 @@ def _cmd_report(args) -> int:
     if "m4_thuman_haiku_report_accuracy" in facts:
         REPORT_M4.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M4.write_text(render_m4(facts), encoding="utf-8")
+    if "m5_bundle_sha" in facts:
+        REPORT_M5.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M5.write_text(render_m5(facts), encoding="utf-8")
     if "m0_gate_pass" in facts:
         REPORT_M0.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M0.write_text(render_m0(facts), encoding="utf-8")
@@ -870,7 +880,27 @@ def _m5_calibrate(args) -> int:
     return 0
 
 
-M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall, "calibrate": _m5_calibrate}  # Task 11 adds measure
+def _m5_measure(args) -> int:
+    """Run from the development machine against the live URL: the reference searches run here, over the same
+    bundle the box serves, so the parity compares the two machines' query embeddings."""
+    if not args.base:
+        print("--base is required, e.g. https://deals.forn.al", file=sys.stderr)
+        return 2
+    items = [i for i in read_items(_data_m4() / "tmachine_items.jsonl") if i.split == "tune"]
+    picked = sorted(items, key=lambda i: hashlib.sha1(i.item_id.encode()).hexdigest())
+    questions = [i.question for i in picked[:args.search_n]]
+    fresh = [i.question for i in picked[args.search_n:args.search_n + args.fresh]]
+    cached = [e["question"] for e in json.loads(EXAMPLES.read_text(encoding="utf-8"))]
+    ladder = build_live_ladder(_live_db(), Embedder(), load_lexicon(LEXICON_PATH), load_settings(SETTINGS_PATH))
+    got = measure(args.base, questions, fresh, reference_hits(ladder, questions), cached=cached)
+    out = _data_m5() / "server.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_atomic(out, json.dumps(got, indent=2, sort_keys=True))
+    print(json.dumps({"search": got.get("search"), "rss_mb": got.get("rss_mb")}))
+    return 0
+
+
+M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall, "calibrate": _m5_calibrate, "measure": _m5_measure}
 
 
 def _cmd_m5(args) -> int:
@@ -954,6 +984,9 @@ def entry(argv: list[str] | None = None) -> int:
     m5p.add_argument("--max-tokens", type=int, default=1024)
     m5p.add_argument("--workers", type=int, default=3)
     m5p.add_argument("--max-new", type=int, default=None)
+    m5p.add_argument("--base", default=None)
+    m5p.add_argument("--search-n", type=int, default=50)
+    m5p.add_argument("--fresh", type=int, default=3)
     m5p.set_defaults(fn=_cmd_m5)
     args = parser.parse_args(argv)
     return args.fn(args)
