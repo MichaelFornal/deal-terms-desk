@@ -33,6 +33,8 @@ def fetch(url, body=None, headers=None, timeout=120.0):
             return r.status, r.headers, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.headers, e.read()
+    except (urllib.error.URLError, OSError) as e:  # refused, DNS, timeout, reset: a failed check, not a traceback
+        return 0, {}, json.dumps({"fetch_error": str(e)}).encode("utf-8")
 
 
 def _json(raw: bytes):

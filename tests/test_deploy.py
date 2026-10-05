@@ -52,6 +52,41 @@ def test_push_refuses_a_dirty_tree_and_ships_only_committed_code():
     subprocess.run(["bash", "-n", "deploy/push.sh"], check=True)
 
 
+def test_push_validates_before_the_swap_and_can_revert():
+    text = Path("deploy/push.sh").read_text()
+    swap = text.index("current.next")
+    assert text.index("caddy validate --adapter caddyfile --config") < swap
+    assert text.index("systemd-analyze verify") < swap
+    assert text.index('PREV="$(ssh') < text.index('install_release "$REL"')
+    assert 'install_release "$PREV"' in text and "reverting to the previous release" in text
+    assert "readlink /srv/dtd/current" in text
+
+
+def test_push_warms_every_time_and_checks_the_result():
+    text = Path("deploy/push.sh").read_text()
+    assert "dtd warm --examples" in text and "TEMPLATE_SHA" not in text and '"$OLD"' not in text
+    assert '"unfiled_schedule"' in text and 'got["states"]' in text and "warm failed" in text
+
+
+def test_push_checks_env_file_bounds_curl_and_chowns_rsync():
+    text = Path("deploy/push.sh").read_text()
+    assert "stat -c '%U %a' /etc/dtd/env" in text and '"root 600"' in text
+    for line in text.splitlines():
+        if "curl " in line and not line.lstrip().startswith("#"):
+            assert "--max-time 10" in line, line
+        if line.lstrip().startswith("rsync "):
+            assert "--chown=root:root" in line, line
+    assert "cd $REL &&" not in text
+
+
+def test_provision_is_resumable_noninteractive_and_keeps_a_way_in():
+    text = Path("deploy/provision.sh").read_text()
+    assert "gpg --batch --yes --dearmor" in text
+    assert "--force-confdef" in text and "--force-confold" in text and "</dev/null" in text
+    assert text.index("/root/.ssh/authorized_keys") < text.index("PasswordAuthentication no")
+    assert "[ ! -s /root/.ssh/authorized_keys ]" in text
+
+
 def test_provision_locks_the_box_down():
     text = Path("deploy/provision.sh").read_text()
     for s in ("set -euo pipefail", "ufw allow 22/tcp", "ufw allow 80/tcp", "ufw allow 443/tcp",
@@ -160,3 +195,12 @@ def test_the_ledger_is_read_over_ssh_as_the_service_user(monkeypatch):
     monkeypatch.setattr(smoke.subprocess, "check_output", lambda cmd, text: seen.append(cmd) or "3|0.01\n")
     assert smoke.ledger_over_ssh("root@box")() == "3|0.01"
     assert seen[0][:2] == ["ssh", "root@box"] and "sudo -u dtd sqlite3 /var/lib/dtd/budget.db" in seen[0][2]
+
+
+def test_smoke_reports_a_dead_box_as_failures_not_a_traceback():
+    with ThreadingHTTPServer(("127.0.0.1", 0), Box) as srv:
+        dead = f"http://127.0.0.1:{srv.server_address[1]}"
+    # the server is closed: connection refused
+    assert smoke.check_health(dead, {}) == ["health: status 0"]
+    assert smoke.check_deals(dead) and smoke.check_pages(dead) and smoke.check_invalid(dead)
+    assert smoke.check_burst(dead, "q", tries=2) == ["burst: no 429 after 2 searches"]
