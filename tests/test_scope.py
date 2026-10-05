@@ -1,5 +1,6 @@
 import sqlite3
 
+from retrieval.index import build_index
 from retrieval.scope import Resolver, Scope, strip_alias
 
 
@@ -55,5 +56,45 @@ def test_strip_alias_drops_the_whole_run_and_keeps_the_rest_in_order():
     assert strip_alias(q, "linear technology") == "What happens to employees stock options"
     assert strip_alias("AT&T employees' benefits", "at and t") == "employees benefits"
     assert strip_alias("Acme Software", "acme software") == "Acme Software"  # nothing left: the original
-    assert strip_alias("Is it true that True Corp pays?", "true") == "Is it true that Corp pays"
+    assert strip_alias("Is it true that True Corp pays?", "true") == "Is it true that pays"
     assert strip_alias("acme fee and Acme options", "acme software") == "acme fee and Acme options"
+
+
+def make_with_fts(tmp_path, rows, docs):
+    db = tmp_path / "d.db"
+    build_index(db, docs)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE aliases(alias TEXT, contract_id TEXT, kind TEXT)")
+    conn.executemany("INSERT INTO aliases VALUES (?, ?, ?)", rows)
+    return Resolver(conn)
+
+
+def _common_docs(word: str, n: int) -> dict[str, str]:
+    # one contract with n sections that each use `word`; build_index cuts on "Section x.y"
+    return {"contract_9": "\n\n".join(f"Section 1.{i} Terms. The {word} amount is due." for i in range(1, n + 1))}
+
+
+def test_sentence_initial_common_word_does_not_scope(tmp_path, monkeypatch):
+    import retrieval.scope as scope
+    monkeypatch.setattr(scope, "COMMON_MIN_PASSAGES", 3)
+    r = make_with_fts(tmp_path, [("base", "edgar_2", "target"), ("true", "edgar_1", "target")],
+                      _common_docs("base", 5) | {"contract_8": _common_docs("true", 5)["contract_9"]})
+    assert r.resolve("Base salary continues for a year?") == Scope(None, None, ())
+    assert r.resolve("What about Base?").contract_id == "edgar_2"  # not at a sentence start: still a name
+    assert r.resolve("True Corp options").contract_id == "edgar_1"  # a corporate suffix follows: a name
+    assert r.resolve("True salary continues") == Scope(None, None, ())  # common, no suffix: not a name
+
+
+def test_rare_sentence_initial_alias_still_scopes(tmp_path, monkeypatch):
+    import retrieval.scope as scope
+    monkeypatch.setattr(scope, "COMMON_MIN_PASSAGES", 3)
+    r = make_with_fts(tmp_path, [("oracle", "edgar_1", "target")], _common_docs("base", 5))
+    assert r.resolve("Oracle options").contract_id == "edgar_1"
+    assert r.resolve("Fees? Oracle pays.").contract_id == "edgar_1"
+
+
+def test_strip_alias_drops_suffix_and_possessive_after_the_name():
+    assert strip_alias("What happens to Linear Technology Corporation's options?", "linear technology") == \
+        "What happens to options"
+    assert strip_alias("Acme Software, Inc. termination fee", "acme software") == "termination fee"
+    assert strip_alias("Does the Company pay Acme Software?", "acme software") == "Does the Company pay"

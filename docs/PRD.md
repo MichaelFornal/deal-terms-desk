@@ -228,6 +228,12 @@ third lead family with employees' pay and benefits after the deal, which is not 
 was measured present in nearly all of the same sample. Earn-out questions stay in the evals as
 abstention items (§5.2), where their absence is the correct answer.
 
+**M4 decisions (2026-10-04, recorded in `docs/superpowers/specs/2026-10-04-m4-answers-design.md`):** the §5.2
+break-up fee cross-check is dropped, because M0 found no press release that restates the fee. The answer path
+leaves out the R4 reranker, which lowered recall in M2 and M3 (R7 without it, measured as R7n). A question that
+names no deal, or names several, gets a "which agreement?" state instead of an answer. T-human answers are
+scored by having the model pick one of MAUD's answer options.
+
 ## 10. Risks and stated limits (these appear on the Method page)
 
 - **The tech half may be thin or low on startup pull.** These are public-company acquisitions;

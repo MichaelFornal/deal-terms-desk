@@ -105,6 +105,7 @@
       3.64990234375
     ]
   },
+  "answer_path": "R7n",
   "rule": "Fusion: highest tune recall@5 on R3 (ties: smaller depth, then larger k0). Reranker, then rerank depth: highest tune recall@5 on R4 among settings whose p95 latency on the development machine is at most 3000 ms (ties: faster); if none qualifies, the fastest, with live_path_ok false.",
   "settings": {
     "depth": 100,

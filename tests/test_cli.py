@@ -752,3 +752,58 @@ def test_m3_tier_with_kept_items_missing_from_a_rung_exits_2(data, monkeypatch, 
     assert cli.entry(["m3", "tier"]) == 2
     err = capsys.readouterr().err
     assert "dtd eval --rung R4" in err and "dtd eval --rung R1" not in err
+
+
+def test_m4_recall_refuses_without_inputs(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "INDEX", tmp_path / "missing.db")
+    assert cli.entry(["m4", "recall"]) == 2
+    assert "run M2 and M3 first" in capsys.readouterr().err
+
+
+def test_m4_answer_refuses_without_set_or_items(tmp_path, monkeypatch, capsys):
+    assert cli.entry(["m4", "answer"]) == 2
+    assert "--set is required" in capsys.readouterr().err
+    monkeypatch.setattr(cli, "DATA", tmp_path)
+    assert cli.entry(["m4", "answer", "--set", "thuman"]) == 2
+    assert "dtd m4 sets" in capsys.readouterr().err
+
+
+def test_m4_judge_also_judges_the_absent_abstain_group(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from evals.answer_sets import AnswerItem, write_items
+    d = tmp_path / "m4"
+    monkeypatch.setattr(cli, "DATA", tmp_path)
+    write_items(d / "tmachine_items.jsonl", [AnswerItem("t1", "tmachine", "f", "report", None, "q", (), "e", {})])
+    write_items(d / "abstain_items.jsonl",
+                [AnswerItem("a1", "abstain", "absent", "report", "c", "q", (), "not_stated", {"a": "x", "b": "y"}),
+                 AnswerItem("n1", "abstain", "absent_not_filed", "report", "c", "q", (), "not_stated", {"a": "x", "b": "y"}),
+                 AnswerItem("e1", "abstain", "earnout", "report", "c", "q", (), "not_stated")])
+    paths = []
+
+    def fake_load(path, model, items):
+        paths.append(Path(path).name)
+        return {i.item_id: {"answer": {}} for i in items} if model == cli.HAIKU else {}
+    monkeypatch.setattr(cli, "load_answers", fake_load)
+    monkeypatch.setattr(cli, "judge_all", lambda items, answers, *a, **k: {i.item_id: {"verdict": "agree"} for i in items})
+    assert cli._m4_judge(Namespace(workers=1)) == 0
+    out = json.loads((d / "judge.json").read_text())
+    assert out["abstain:" + cli.HAIKU] == {"a1": {"verdict": "agree"}} and out[cli.HAIKU] == {"t1": {"verdict": "agree"}}
+    assert f"answers_abstain_{cli.HAIKU}.jsonl" in paths
+
+
+def test_m4_judge_loops_over_the_answer_models_not_the_judge(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from evals.answer_sets import AnswerItem, write_items
+    d = tmp_path / "m4"
+    monkeypatch.setattr(cli, "DATA", tmp_path)
+    write_items(d / "tmachine_items.jsonl", [AnswerItem("t1", "tmachine", "f", "report", None, "q", (), "e", {})])
+    paths = []
+
+    def fake_load(path, model, items):
+        paths.append(Path(path).name)
+        return {}
+    monkeypatch.setattr(cli, "load_answers", fake_load)
+    assert cli._m4_judge(Namespace(workers=1)) == 0
+    assert paths == [f"answers_tmachine_{cli.HAIKU}.jsonl", f"answers_tmachine_{cli.SONNET}.jsonl"]

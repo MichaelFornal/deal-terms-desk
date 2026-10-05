@@ -5,11 +5,17 @@ import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
+from answer.answerer import Answerer
+from evals.answer_score import score as score_answers
+from evals.answer_judge import judge_all, refute_all
+from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
 from evals.llm_rewrite import rewrite_all
+from evals.maud_labels import load_rows
+from evals.run_answers import answer_all, load_answers
 from evals.run_rung import Context, evaluate, load_context, with_passages
 from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
 from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
@@ -19,11 +25,13 @@ from facts.build import UNSTABLE
 from facts.m0 import build_m0
 from facts.m2 import build_m2, is_unstable
 from facts.m3 import build_m3, present_m3
+from facts.m4 import build_m4, present_m4
 from facts.m2 import present as m2_present
 from facts.report import render
 from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
+from facts.report_m4 import render_m4
 from pipeline import m0
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
@@ -37,7 +45,7 @@ from pipeline.tech_corpus import assemble
 from retrieval import vectors
 from retrieval.deals import add_deals, maud_duplicates
 from retrieval.index import build_index
-from retrieval.ladder import RUNGS, SETTINGS_PATH, Ladder, load_settings
+from retrieval.ladder import ANSWER_RUNGS, RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
@@ -49,6 +57,7 @@ EXTERNAL = Path("facts/external.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
 REPORT_M3 = Path("docs/m3/REPORT.md")
+REPORT_M4 = Path("docs/m4/REPORT.md")
 M0_STAGES = ("search", "candidates", "fetch", "deals", "sample", "press", "measure")
 NEEDS_SEC = {"search", "candidates", "fetch", "deals", "press"}
 REWRITES = "llm_rewrites.jsonl"
@@ -327,6 +336,8 @@ def _all_facts() -> dict:
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
     if present_m3(OUT / "m3"):
         facts |= build_m3(OUT / "m3", OUT, DATA / "m3", EDGAR, DEALS_INDEX)
+    if present_m4(_out_m4()):
+        facts |= build_m4(_out_m4(), OUT, DATA / "m4")
     if (DATA / "m0" / "measure.json").exists():
         facts |= build_m0(DATA / "m0", facts, DATA / "sec")
     return facts
@@ -375,6 +386,148 @@ def _cmd_failures(args) -> int:
         return 2
     print(json.dumps({"classified": done}))
     return 0
+
+
+def _out_m4() -> Path:
+    return OUT / "m4"
+
+
+def _data_m4() -> Path:
+    return DATA / "m4"
+
+
+def _m4_recall() -> int:
+    tm = DATA / "m3" / "tmachine.jsonl"
+    if not (INDEX.exists() and DEALS_INDEX.exists() and _has_vectors(DEALS_INDEX) and tm.exists()
+            and LEXICON_PATH.exists() and _csv_paths()):
+        print("need maud.db, deals.db with vectors, data/m3/tmachine.jsonl and the lexicon; run M2 and M3 first",
+              file=sys.stderr)
+        return 2
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    _eval_rung("R6n", INDEX, "R6n", ctx, _out_m4())  # T-human, within agreement, next to M2's r6.json
+    contracts, amendment_texts = _deals_texts()
+    rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
+    items = items_from_rows(rows)
+    tctx = with_passages(Context(items, {"source": "T-machine (machine-built)", "items": len(items)}, contracts, {}),
+                         DEALS_INDEX)
+    ladder = _deals_ladder(contracts, amendment_texts)
+    kw = {"count_tokens": ladder.embedder.count_tokens, "extra": {"settings": asdict(ladder.settings)}}
+    evaluate(tctx, "T-R6n", lambda q, c, k: ladder.run("R6n", q, c, k), _out_m4(), **kw)
+    # R7 is rerun after Task 1's resolver fixes so R7n is compared with the same resolver
+    evaluate(tctx, "T-R7-corpus", lambda q, c, k: ladder.run("R7", q, None, k), _out_m4(), scope="corpus-wide", **kw)
+    evaluate(tctx, "T-R7n-corpus", lambda q, c, k: ladder.run("R7n", q, None, k), _out_m4(), scope="corpus-wide", **kw)
+    _write_atomic(_out_m4() / "r7_scope.json", json.dumps(scope_report(items, ladder.resolver), indent=2, sort_keys=True))
+    print(json.dumps({"written": sorted(p.name for p in _out_m4().iterdir())}))
+    return 0
+
+
+def _m4_sets() -> int:
+    tm = DATA / "m3" / "tmachine.jsonl"
+    if not (INDEX.exists() and DEALS_INDEX.exists() and tm.exists() and _csv_paths()):
+        print("need maud.db, deals.db, data/m3/tmachine.jsonl and the label CSVs", file=sys.stderr)
+        return 2
+    maud_ids = {r[0] for r in sqlite3.connect(INDEX).execute("SELECT contract_id FROM contracts")}
+    th, ex = thuman_items(load_rows(_csv_paths()), maud_ids)
+    rows = [json.loads(line) for line in tm.read_text(encoding="utf-8").splitlines() if line]
+    deals = {d["contract_id"]: d for d in map(json.loads, (EDGAR / "deals.jsonl").read_text().splitlines()) if d}
+    sample = [json.loads(line) for line in (DATA / "m0" / "sample.jsonl").read_text().splitlines() if line]
+    names = [n for c in map(json.loads, (DATA / "m0" / "candidates.jsonl").read_text().splitlines()) for n in c["names"]]
+    conn = sqlite3.connect(DEALS_INDEX)
+    ab = abstain_items(rows, sample, deals, names, Resolver(conn), conn)
+    tmi = tmachine_items(rows)
+    write_items(_data_m4() / "thuman_items.jsonl", th)
+    write_items(_data_m4() / "tmachine_items.jsonl", tmi)
+    write_items(_data_m4() / "abstain_items.jsonl", ab)
+    summary = {"thuman": len(th), "thuman_excluded": ex, "tmachine": len(tmi),
+               "abstain": {g: sum(1 for i in ab if i.group == g) for g in sorted({i.group for i in ab})}}
+    _write_atomic(_data_m4() / "sets_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
+def _m4_answer(args) -> int:
+    if not args.set_name:
+        print("--set is required: thuman, tmachine or abstain", file=sys.stderr)
+        return 2
+    path = _data_m4() / f"{args.set_name}_items.jsonl"
+    if not path.exists():
+        print(f"{path} missing; run `dtd m4 sets` first", file=sys.stderr)
+        return 2
+    items = [i for i in read_items(path) if args.split is None or i.split == args.split]
+    if args.set_name == "thuman":
+        ladder = _ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))})
+    else:
+        ladder = _deals_ladder(*_deals_texts())
+    ledger = _data_m4() / f"answers_{args.set_name}_{args.model}.jsonl"
+    try:
+        summary = answer_all(items, Answerer(ladder, run_claude, args.model), ledger, workers=args.workers,
+                             max_new=args.max_new)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    print(json.dumps(summary))
+    return 0
+
+
+HAIKU = "claude-haiku-4-5-20251001"
+SONNET = "claude-sonnet-5-5"
+
+
+def _m4_judge(args) -> int:
+    items = read_items(_data_m4() / "tmachine_items.jsonl")
+    jobs = [(model, items, _data_m4() / f"answers_tmachine_{model}.jsonl") for model in (HAIKU, SONNET)]
+    if (_data_m4() / "abstain_items.jsonl").exists():  # the absent group: an answer is judged against the two passes
+        absent = [i for i in read_items(_data_m4() / "abstain_items.jsonl") if i.group == "absent"]
+        jobs.append(("abstain:" + HAIKU, absent, _data_m4() / f"answers_abstain_{HAIKU}.jsonl"))
+    out = {}
+    for key, its, path in jobs:
+        answers = load_answers(path, key.removeprefix("abstain:"), its)
+        if answers:
+            try:
+                out[key] = judge_all(its, answers, run_claude, _data_m4() / "judge_ledger.jsonl", workers=args.workers)
+            except RuntimeError as e:
+                print(str(e), file=sys.stderr)
+                return 2
+    _write_atomic(_data_m4() / "judge.json", json.dumps(out, indent=2, sort_keys=True))
+    print(json.dumps({m: len(v) for m, v in out.items()}))
+    return 0
+
+
+def _m4_refute(args) -> int:
+    answers = {}
+    for s in ("thuman", "tmachine"):
+        items = {i.item_id: i for i in read_items(_data_m4() / f"{s}_items.jsonl")}
+        for iid, rec in load_answers(_data_m4() / f"answers_{s}_{HAIKU}.jsonl", HAIKU, items.values()).items():
+            if items[iid].split == "report":
+                answers[f"{s}:{iid}"] = rec
+    try:
+        out = refute_all(answers, run_claude, _data_m4() / "refute_ledger.jsonl", workers=args.workers)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    _write_atomic(_data_m4() / "refute.json", json.dumps(out, indent=2, sort_keys=True))
+    print(json.dumps({"claims": len(out)}))
+    return 0
+
+
+def _m4_score(args) -> int:
+    sets = {s: read_items(_data_m4() / f"{s}_items.jsonl") for s in ("thuman", "tmachine", "abstain")
+            if (_data_m4() / f"{s}_items.jsonl").exists()}
+    answers = {(s, m): load_answers(_data_m4() / f"answers_{s}_{m}.jsonl", m, sets[s]) for s in sets for m in (HAIKU, SONNET)}
+    answers = {k: v for k, v in answers.items() if v}
+    judge = json.loads((_data_m4() / "judge.json").read_text()) if (_data_m4() / "judge.json").exists() else {}
+    refute = json.loads((_data_m4() / "refute.json").read_text()) if (_data_m4() / "refute.json").exists() else {}
+    s = score_answers(sets, answers, judge, refute, (HAIKU, SONNET))
+    _out_m4().mkdir(parents=True, exist_ok=True)
+    _write_atomic(_out_m4() / "scores.json", json.dumps(s, indent=2, sort_keys=True))
+    print(json.dumps({"written": str(_out_m4() / "scores.json")}))
+    return 0
+
+
+def _cmd_m4(args) -> int:
+    stages = {"recall": lambda: _m4_recall(), "sets": lambda: _m4_sets(), "answer": lambda: _m4_answer(args),
+              "judge": lambda: _m4_judge(args), "refute": lambda: _m4_refute(args), "score": lambda: _m4_score(args)}
+    return stages[args.stage]()
 
 
 def _cmd_m3(args) -> int:
@@ -537,6 +690,9 @@ def _cmd_report(args) -> int:
     if "m3_t_r1_report_recall_at_5" in facts:
         REPORT_M3.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M3.write_text(render_m3(facts), encoding="utf-8")
+    if "m4_thuman_haiku_report_accuracy" in facts:
+        REPORT_M4.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M4.write_text(render_m4(facts), encoding="utf-8")
     if "m0_gate_pass" in facts:
         REPORT_M0.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M0.write_text(render_m0(facts), encoding="utf-8")
@@ -576,6 +732,14 @@ def entry(argv: list[str] | None = None) -> int:
     m3p.add_argument("--workers", type=int, default=4)
     m3p.add_argument("--max-new", type=int, default=None)
     m3p.set_defaults(fn=_cmd_m3)
+    m4p = sub.add_parser("m4")
+    m4p.add_argument("stage", choices=("recall", "sets", "answer", "judge", "refute", "score"))
+    m4p.add_argument("--set", dest="set_name", choices=("thuman", "tmachine", "abstain"), default=None)
+    m4p.add_argument("--model", default="claude-haiku-4-5-20251001")
+    m4p.add_argument("--split", choices=("tune", "report"), default=None)
+    m4p.add_argument("--workers", type=int, default=4)
+    m4p.add_argument("--max-new", type=int, default=None)
+    m4p.set_defaults(fn=_cmd_m4)
     args = parser.parse_args(argv)
     return args.fn(args)
 

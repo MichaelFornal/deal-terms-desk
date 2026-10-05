@@ -12,7 +12,12 @@ from retrieval.scope import strip_alias
 
 RUNGS = ("R1", "R2", "R3", "R4", "R5", "R6")
 DEAL_RUNGS = RUNGS + ("R7",)
+ANSWER_RUNGS = ("R6n", "R7n")  # R6 and R7 without the reranker, which lowered recall in M2 and M3: the answer path
 SETTINGS_PATH = Path(__file__).with_name("settings.json")
+
+
+def load_answer_path(path: Path = SETTINGS_PATH) -> str:
+    return json.loads(Path(path).read_text(encoding="utf-8"))["answer_path"]
 
 
 @dataclass(frozen=True)
@@ -71,19 +76,20 @@ class Ladder:
 
     def run(self, rung: str, query: str, contract_id: str | None = None, k: int = 10,
             rewritten: str | None = None) -> Retrieved:
-        if rung not in DEAL_RUNGS:
-            raise ValueError(f"unknown rung {rung!r}; expected one of {DEAL_RUNGS}")
-        if rung == "R7":
+        if rung not in DEAL_RUNGS + ANSWER_RUNGS:
+            raise ValueError(f"unknown rung {rung!r}; expected one of {DEAL_RUNGS + ANSWER_RUNGS}")
+        if rung in ("R7", "R7n"):
             if self.resolver is None:
-                raise ValueError("R7 needs a resolver over the deals index")
+                raise ValueError(f"{rung} needs a resolver over the deals index")
             t0 = time.perf_counter()
             scope = self.resolver.resolve(query)
             resolve_ms = (time.perf_counter() - t0) * 1000.0
             # Inside one agreement the company's name is everywhere, so it only misleads the search: drop it.
             q = strip_alias(query, scope.alias) if scope.contract_id else query
-            got = self.run("R6", q, scope.contract_id, k, rewritten)
+            got = self.run("R6" if rung == "R7" else "R6n", q, scope.contract_id, k, rewritten)
             return replace(got, scope=scope, ms=got.ms + resolve_ms)
-        n = RUNGS.index(rung) + 1
+        rerank = rung != "R6n"
+        n = 6 if rung == "R6n" else RUNGS.index(rung) + 1
         if n >= 5 and rewritten is None and self.lexicon is None:
             raise ValueError("R5 and R6 need the lexicon; run `dtd lexicon` first")
         t0 = time.perf_counter()
@@ -98,7 +104,7 @@ class Ladder:
             depth = max(k, self.settings.depth)
             legs = [bm25.search(self.conn, q, contract_id, depth, table=table), self._dense(q, contract_id, depth)]
             fused = rrf(legs, self.settings.rrf_k0, 2 * depth)
-            if n == 3:
+            if n == 3 or not rerank:
                 hits = fused[:k]
             else:
                 head = fused[:self.settings.rerank_depth]

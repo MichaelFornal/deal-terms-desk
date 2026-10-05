@@ -192,3 +192,39 @@ def test_r7_latency_includes_the_resolver(deals_ladder):
             return real.resolve(q)
     deals_ladder.resolver = Slow()
     assert deals_ladder.run("R7", "Acme Software outside date", k=5).ms >= 50.0
+
+
+from retrieval.ladder import ANSWER_RUNGS, load_answer_path
+
+
+def test_r6n_is_r6_without_the_reranker(ladder):
+    got = ladder.run("R6n", "termination fee amount in cash", "big", k=5)
+    want = ladder.run("R3", "termination fee amount in cash", "big", k=5)
+    # same fusion as R3 but on the lexicon-rewritten query over the definitions table; never reranked
+    assert got.hits and all(h.contract_id == "big" for h in got.hits)
+    assert any("$50,000,000" in c for c in got.context)  # definitions are shown, as in R6
+    assert ANSWER_RUNGS == ("R6n", "R7n")
+    assert want.hits  # R3 still runs
+
+
+def test_r6n_never_calls_the_reranker(ladder):
+    class Boom:
+        def score(self, q, texts):
+            raise AssertionError("reranker called")
+    ladder.reranker = Boom()
+    assert ladder.run("R6n", "termination fee", "big", k=5).hits
+
+
+def test_r7n_scopes_strips_and_skips_the_reranker(deals_ladder):
+    class Boom:
+        def score(self, q, texts):
+            raise AssertionError("reranker called")
+    deals_ladder.reranker = Boom()
+    got = deals_ladder.run("R7n", "What is the Acme Software outside date?", k=5)
+    assert got.scope.contract_id == "edgar_0001" and all(h.contract_id == "edgar_0001" for h in got.hits)
+    same = deals_ladder.run("R6n", "What is the outside date", "edgar_0001", k=5)
+    assert [h.passage_id for h in got.hits] == [h.passage_id for h in same.hits]
+
+
+def test_answer_path_is_r7n():
+    assert load_answer_path() == "R7n"
