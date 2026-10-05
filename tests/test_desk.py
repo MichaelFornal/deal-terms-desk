@@ -356,3 +356,45 @@ def test_a_locked_ledger_at_settle_leaves_the_reservation_open_and_still_answers
     assert rows == [("open",)]
     again = desk.ask("termination fee", "edgar_0001")
     assert again["served_from"] == "cache" and len(run.calls) == 1
+
+
+LOCKED_AFTER = [RunnerError("overloaded", "upstream busy"), RunnerError("timeout", "no reply"),
+                RunnerError("truncated", "max_tokens", {"input_tokens": 1000, "output_tokens": 1024,
+                                                        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0})]
+
+
+@pytest.mark.parametrize("error", LOCKED_AFTER, ids=[e.kind for e in LOCKED_AFTER])
+def test_a_locked_ledger_after_a_failed_call_leaves_the_reservation_open_and_reads_as_error(tmp_path, error):
+    """Release, settle at worst case and settle at actual usage: whichever the failure needs, a locked ledger leaves
+    the reservation open, counted at worst case, and the visitor gets the error state, not a 500."""
+    run = Scripted(error)
+    desk = make_desk(tmp_path, run, ask_slots=1)
+
+    def locked(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    desk.budget.settle = desk.budget.release = locked
+    got = desk.ask("termination fee", "edgar_0001")
+    assert got["state"] == "error" and got["served_from"] is None and len(run.calls) == 1
+    rows = sqlite3.connect(desk.config.state_dir / "budget.db").execute("SELECT status FROM spend").fetchall()
+    assert rows == [("open",)]
+    p = desk.answerer.prepare("termination fee", "edgar_0001")
+    worst = worst_case_usd(load_prices(PRICES), len(p.prompt), desk.config.max_tokens)
+    assert desk.budget.spent()["month"] == pytest.approx(worst, abs=1e-6)
+    assert desk.slots.try_acquire() is True  # the slot was given back
+
+
+def test_a_client_error_outside_the_sdk_is_booked_at_worst_case_and_reads_as_error(tmp_path):
+    from answer.api_runner import make_api_runner
+
+    class Keyless:
+        """A client whose request fails outside the SDK's error classes, as a missing key does."""
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kw):
+            raise TypeError("Could not resolve authentication method")
+    desk = make_desk(tmp_path, make_api_runner(1024, client=Keyless()))
+    assert desk.ask("termination fee", "edgar_0001")["state"] == "error"
+    p = desk.answerer.prepare("termination fee", "edgar_0001")
+    worst = worst_case_usd(load_prices(PRICES), len(p.prompt), desk.config.max_tokens)
+    assert desk.budget.spent()["month"] == pytest.approx(worst, abs=1e-6)

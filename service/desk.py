@@ -125,12 +125,15 @@ class Desk:
             try:
                 reply = self.runner(prep.prompt, self.config.model)
             except RunnerError as e:
-                if e.usage:
-                    self.budget.settle(rid, e.usage)
-                elif e.kind in MAYBE_BILLED:
-                    self.budget.settle(rid, None)
-                else:
-                    self.budget.release(rid)
+                try:
+                    if e.usage:
+                        self.budget.settle(rid, e.usage)
+                    elif e.kind in MAYBE_BILLED:
+                        self.budget.settle(rid, None)
+                    else:
+                        self.budget.release(rid)
+                except sqlite3.OperationalError:  # ledger locked: the reservation stays open, counted at worst case
+                    pass
                 return self._payload("budget_reached" if e.kind == "billing" else "error", q)
             try:  # missing or empty usage settles at worst case (fail closed)
                 self.budget.settle(rid, reply.get("usage") or None)

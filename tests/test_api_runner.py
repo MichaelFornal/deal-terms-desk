@@ -115,3 +115,13 @@ def test_one_real_call_through_the_dev_key():
     run = make_api_runner(16, client=anthropic.Anthropic(api_key=key, max_retries=0, timeout=30.0))
     got = run("Reply with the single word: ok", HAIKU)
     assert got["result"].strip() and got["usage"]["input_tokens"] > 0 and got["stop_reason"] == "end_turn"
+
+
+def test_a_client_error_outside_the_sdk_is_a_lost_connection_with_no_usage():
+    """A missing key surfaces at request time as a TypeError, outside the SDK's error classes. It must reach Desk as
+    a RunnerError (booked at worst case, state error), never escape as a 500."""
+    error = TypeError("Could not resolve authentication method. Expected either api_key or auth_token to be set.")
+    with pytest.raises(RunnerError) as e:
+        make_api_runner(64, client=FakeClient(error=error))("p", HAIKU)
+    assert e.value.kind == "connection" and e.value.usage == {}
+    assert "TypeError" in str(e.value) and "auth" in str(e.value)

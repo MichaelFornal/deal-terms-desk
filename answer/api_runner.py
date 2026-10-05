@@ -59,6 +59,9 @@ def make_api_runner(max_tokens: int, client=None, timeout: float = 30.0):
                                     messages=[{"role": "user", "content": prompt}])
         except anthropic.AnthropicError as e:
             raise RunnerError(_kind(e), str(e)[:300]) from None
+        except Exception as e:  # noqa: BLE001 - outside the SDK's classes (a missing key is a TypeError at request
+            # time): whether it was billed is unknown, so it is a lost connection, which Desk books at worst case
+            raise RunnerError("connection", f"{type(e).__name__}: {e}"[:300]) from None
         usage = _usage(msg.usage)
         if msg.stop_reason in TRUNCATED:
             raise RunnerError("truncated", f"reply stopped at {msg.stop_reason} (max_tokens={max_tokens})", usage)
