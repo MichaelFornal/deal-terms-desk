@@ -96,6 +96,11 @@ def _fill(conn: sqlite3.Connection, texts: dict[str, str], amendment_texts: dict
     conn.executemany("INSERT INTO meta VALUES (?, ?)", sorted(meta.items()))
 
 
+def _clear(tmp: Path) -> None:
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        tmp.with_name(tmp.name + suffix).unlink(missing_ok=True)
+
+
 def build_bundle(deals_db: Path, out: Path, *, texts: dict[str, str], amendment_texts: dict[str, str],
                  deals_jsonl: Path, settings_path: Path, lexicon_path: Path) -> dict:
     deals_db, out = Path(deals_db), Path(out)
@@ -109,7 +114,8 @@ def build_bundle(deals_db: Path, out: Path, *, texts: dict[str, str], amendment_
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".building")
     part = man.with_name(man.name + ".tmp")
-    tmp.unlink(missing_ok=True)  # a SIGKILLed earlier build leaves this behind; VACUUM INTO refuses an existing file
+    _clear(tmp)  # a SIGKILLed earlier build leaves these behind; VACUUM INTO refuses an existing file, and a stale
+    # journal beside a fresh temp file could be rolled into it
     try:
         src = sqlite3.connect(deals_db)
         try:
@@ -130,6 +136,6 @@ def build_bundle(deals_db: Path, out: Path, *, texts: dict[str, str], amendment_
         os.replace(tmp, out)
         os.replace(part, man)
     finally:
-        tmp.unlink(missing_ok=True)
+        _clear(tmp)
         part.unlink(missing_ok=True)
     return {k: doc[k] for k in keys} | {"rebuilt": True}

@@ -133,3 +133,25 @@ def test_an_indexed_contract_without_text_is_refused(src, tmp_path):
     with pytest.raises(ValueError, match="no text"):
         bundle(dict(src, texts={"edgar_0001": src["texts"]["edgar_0001"]}), tmp_path / "live.db")
     assert _no_bundle_files(tmp_path)
+
+
+def test_stale_journal_files_beside_the_temp_file_are_not_applied_to_a_new_build(src, tmp_path):
+    from evals.live_parity import r7n_parity
+    from retrieval.ladder import Ladder, Settings
+    from retrieval.live import build_live_ladder
+    from retrieval.scope import Resolver
+    out = tmp_path / "live" / "live.db"
+    out.parent.mkdir()
+    stale = [out.with_name("live.db.building" + s) for s in ("", "-journal", "-wal", "-shm")]
+    for p in stale:
+        p.write_bytes(b"\xd9\xd5\x05\xf9 stale junk " * 64)
+    s = bundle(src, out)
+    assert s["rebuilt"] and not any(p.exists() for p in stale) and bundle_is_current(out)
+    assert sqlite3.connect(out).execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    settings = Settings(depth=10, rrf_k0=60, reranker="fake-reranker", rerank_depth=3)
+    conn = connect(src["db"])
+    ref = Ladder(conn, src["texts"], FakeEmbedder(), None, LEXICON, settings,
+                 amendment_texts=src["amendment_texts"], resolver=Resolver(conn))
+    live = build_live_ladder(out, FakeEmbedder(), LEXICON, settings)
+    qs = [("What is the Acme Software outside date?", None), ("termination fee", "edgar_0001")]
+    assert r7n_parity(qs, live, ref, k=5) == {"checked": 2, "same": 2, "differ": []}
