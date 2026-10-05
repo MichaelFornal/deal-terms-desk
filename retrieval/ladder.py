@@ -8,11 +8,13 @@ from retrieval.dense import search_dense
 from retrieval.hybrid import rrf
 from retrieval.lexicon import rewrite
 from retrieval.result import CONTEXT_K, Retrieved
-from retrieval.scope import strip_alias
+from retrieval.scope import scope_question
 
 RUNGS = ("R1", "R2", "R3", "R4", "R5", "R6")
 DEAL_RUNGS = RUNGS + ("R7",)
 ANSWER_RUNGS = ("R6n", "R7n")  # R6 and R7 without the reranker, which lowered recall in M2 and M3: the answer path
+# The answer path settings.json names -> the rung run inside the deal once the Answerer has scoped the question.
+RETRIEVAL_FOR = {"R7n": "R6n"}
 SETTINGS_PATH = Path(__file__).with_name("settings.json")
 
 
@@ -82,10 +84,9 @@ class Ladder:
             if self.resolver is None:
                 raise ValueError(f"{rung} needs a resolver over the deals index")
             t0 = time.perf_counter()
-            scope = self.resolver.resolve(query)
+            # A picked deal is kept; otherwise the resolver finds one. Either way the deal's own name is dropped.
+            scope, q = scope_question(self.resolver, query, contract_id)
             resolve_ms = (time.perf_counter() - t0) * 1000.0
-            # Inside one agreement the company's name is everywhere, so it only misleads the search: drop it.
-            q = strip_alias(query, scope.alias) if scope.contract_id else query
             got = self.run("R6" if rung == "R7" else "R6n", q, scope.contract_id, k, rewritten)
             return replace(got, scope=scope, ms=got.ms + resolve_ms)
         rerank = rung != "R6n"

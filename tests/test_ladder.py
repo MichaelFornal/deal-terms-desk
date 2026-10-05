@@ -146,13 +146,13 @@ def test_r7_needs_a_resolver(ladder):
         ladder.run("R7", "termination fee")
 
 
-def _spy_r6(ladder):
+def _spy_r6(ladder, rung="R6"):
     seen, real = [], ladder.run
 
-    def run(rung, query, contract_id=None, k=10, rewritten=None):
-        if rung == "R6":
+    def run(rung_, query, contract_id=None, k=10, rewritten=None):
+        if rung_ == rung:
             seen.append((query, contract_id))
-        return real(rung, query, contract_id, k, rewritten)
+        return real(rung_, query, contract_id, k, rewritten)
     ladder.run = run
     return seen
 
@@ -228,3 +228,14 @@ def test_r7n_scopes_strips_and_skips_the_reranker(deals_ladder):
 
 def test_answer_path_is_r7n():
     assert load_answer_path() == "R7n"
+
+
+def test_r7n_keeps_a_picked_deal_and_drops_only_its_own_names(deals_ladder):
+    seen = _spy_r6(deals_ladder, "R6n")
+    got = deals_ladder.run("R7n", "Acme Software outside date", "contract_1", k=5)
+    assert got.scope == Scope("contract_1", None, ())
+    assert got.hits and all(h.contract_id == "contract_1" for h in got.hits)
+    assert seen == [("Acme Software outside date", "contract_1")]
+    seen.clear()
+    deals_ladder.run("R7n", "What is the Acme Software outside date?", "edgar_0001", k=5)
+    assert seen == [("What is the outside date", "edgar_0001")]

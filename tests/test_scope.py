@@ -1,7 +1,9 @@
 import sqlite3
 
+import pytest
+
 from retrieval.index import build_index
-from retrieval.scope import Resolver, Scope, strip_alias
+from retrieval.scope import Resolver, Scope, scope_question, strip_alias
 
 
 def make(rows):
@@ -98,3 +100,27 @@ def test_strip_alias_drops_suffix_and_possessive_after_the_name():
         "What happens to options"
     assert strip_alias("Acme Software, Inc. termination fee", "acme software") == "termination fee"
     assert strip_alias("Does the Company pay Acme Software?", "acme software") == "Does the Company pay"
+
+
+def test_scope_question_keeps_a_picked_deal_and_drops_every_name_of_it_longest_first():
+    r = make([("acme software", "edgar_1", "target"), ("acme", "edgar_1", "target"),
+              ("big parent", "edgar_1", "parent"), ("zeta", "edgar_2", "target")])
+    assert scope_question(r, "Acme Software and Big Parent fee", "edgar_1") == (Scope("edgar_1", None, ()), "and fee")
+    # another deal's name is left alone: the visitor picked edgar_1
+    assert scope_question(r, "Zeta fee", "edgar_1") == (Scope("edgar_1", None, ()), "Zeta fee")
+
+
+def test_scope_question_without_a_resolver_keeps_a_picked_question_as_is():
+    assert scope_question(None, "Acme fee", "contract_1") == (Scope("contract_1", None, ()), "Acme fee")
+
+
+def test_scope_question_resolves_and_strips_only_when_one_deal_is_found():
+    r = make([("acme software", "edgar_1", "target"), ("oracle", "edgar_2", "parent"), ("oracle", "edgar_3", "parent")])
+    assert scope_question(r, "Acme Software fee") == (Scope("edgar_1", "acme software", ("edgar_1",)), "fee")
+    assert scope_question(r, "Oracle fee") == (Scope(None, "oracle", ("edgar_2", "edgar_3")), "Oracle fee")
+    assert scope_question(r, "fee") == (Scope(None, None, ()), "fee")
+
+
+def test_scope_question_needs_a_resolver_when_no_deal_is_picked():
+    with pytest.raises(ValueError, match="resolver"):
+        scope_question(None, "fee")

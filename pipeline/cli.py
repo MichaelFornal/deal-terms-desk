@@ -13,6 +13,7 @@ from evals.bootstrap import split_of
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
+from evals.live_parity import prompt_parity
 from evals.llm_rewrite import rewrite_all
 from evals.maud_labels import load_rows
 from evals.run_answers import answer_all, load_answers
@@ -704,6 +705,53 @@ def _cmd_report(args) -> int:
     return 0
 
 
+def _out_m5() -> Path:
+    return OUT / "m5"
+
+
+def _data_m5() -> Path:
+    return DATA / "m5"
+
+
+def _no_model_call(prompt, model):
+    raise RuntimeError("this stage only prepares prompts; it never calls a model")
+
+
+def _m5_parity(args) -> int:
+    """Re-prepare every M4 answer item with the ladder M4 used and compare each prompt's hash with the ledgered
+    one, so the live answer path is provably the measured one. Exit 1 if any differ."""
+    sets = ("thuman", "tmachine", "abstain")
+    needed = ([INDEX, DEALS_INDEX] + [_data_m4() / f"{s}_items.jsonl" for s in sets]
+              + [_data_m4() / f"answers_{s}_{HAIKU}.jsonl" for s in sets])
+    missing = [str(p) for p in needed if not p.exists()]
+    if missing:
+        print("missing: " + ", ".join(missing) + "; run M3, `dtd m4 sets` and `dtd m4 answer` first",
+              file=sys.stderr)
+        return 2
+    out, deals = {}, None
+    for s in sets:
+        items = read_items(_data_m4() / f"{s}_items.jsonl")
+        records = load_answers(_data_m4() / f"answers_{s}_{HAIKU}.jsonl", HAIKU, items)
+        if s == "thuman":  # as `dtd m4 answer`: T-human on maud.db, the other sets on deals.db
+            ladder = _ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))})
+        else:
+            deals = deals or _deals_ladder(*_deals_texts())
+            ladder = deals
+        out[s] = prompt_parity(items, Answerer(ladder, _no_model_call, HAIKU), records)
+        print(json.dumps({s: {"checked": out[s]["checked"], "same": out[s]["same"]}}), file=sys.stderr, flush=True)
+    _out_m5().mkdir(parents=True, exist_ok=True)
+    _write_atomic(_out_m5() / "parity.json", json.dumps(out, indent=2, sort_keys=True))
+    print(json.dumps({s: {"checked": v["checked"], "same": v["same"]} for s, v in out.items()}))
+    return 1 if any(v["differ"] for v in out.values()) else 0
+
+
+M5_STAGES = {"parity": _m5_parity}  # Tasks 4, 5 and 11 add recall, calibrate and measure
+
+
+def _cmd_m5(args) -> int:
+    return M5_STAGES[args.stage](args)
+
+
 def entry(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dtd")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -745,6 +793,9 @@ def entry(argv: list[str] | None = None) -> int:
     m4p.add_argument("--workers", type=int, default=4)
     m4p.add_argument("--max-new", type=int, default=None)
     m4p.set_defaults(fn=_cmd_m4)
+    m5p = sub.add_parser("m5")
+    m5p.add_argument("stage", choices=tuple(M5_STAGES))
+    m5p.set_defaults(fn=_cmd_m5)
     args = parser.parse_args(argv)
     return args.fn(args)
 

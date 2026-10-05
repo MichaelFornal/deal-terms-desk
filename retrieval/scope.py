@@ -116,3 +116,24 @@ class Resolver:
             alias = " ".join(sorted(top)[0])
             return Scope(cids[0], alias, tuple(cids)) if len(cids) == 1 else Scope(None, alias, tuple(cids))
         return Scope(None, None, ())
+
+
+def scope_question(resolver: "Resolver | None", question: str,
+                   contract_id: str | None = None) -> tuple[Scope, str]:
+    """The deal a question is about, and the question to search it with. Inside one agreement the company's own
+    name is everywhere, so it only misleads the search and is dropped.
+
+    A picked deal (contract_id) is taken as given: every alias of it is dropped, longest first, and the question is
+    unchanged when there is no resolver (the MAUD index has no aliases). Otherwise the resolver decides, and the
+    alias it matched is dropped only when it found exactly one deal."""
+    if contract_id is not None:
+        q = question
+        if resolver is not None:
+            rows = resolver.conn.execute("SELECT alias FROM aliases WHERE contract_id = ?", (contract_id,))
+            for (alias,) in sorted(rows, key=lambda r: -len(r[0])):
+                q = strip_alias(q, alias)
+        return Scope(contract_id, None, ()), q
+    if resolver is None:
+        raise ValueError("a question with no picked deal needs a resolver over the deals index")
+    scope = resolver.resolve(question)
+    return scope, (strip_alias(question, scope.alias) if scope.contract_id else question)

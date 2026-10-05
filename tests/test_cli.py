@@ -839,3 +839,8 @@ def test_facts_are_written_atomically(data, monkeypatch):
     with pytest.raises(OSError, match="disk full"):
         cli.entry(["facts"])
     assert path.read_text() == '{"kept": 1}' and not (data / "facts.json.tmp").exists()
+
+
+def test_m5_parity_refuses_without_m4_inputs(data, capsys):
+    assert cli.entry(["m5", "parity"]) == 2
+    assert "dtd m4 sets" in capsys.readouterr().err
