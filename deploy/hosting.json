@@ -1,0 +1,12 @@
+{
+  "provider": "Hetzner Cloud",
+  "plan": "CAX11",
+  "eur_month": 4.49,
+  "extras_eur_month": null,
+  "eur_usd": null,
+  "eur_usd_date": null,
+  "eur_usd_source": null,
+  "budget_usd_month": 10.0,
+  "day_cap_usd": null,
+  "checked": null
+}

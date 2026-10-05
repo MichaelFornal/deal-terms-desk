@@ -1,0 +1,22 @@
+[Unit]
+Description=Deal Terms Desk API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dtd
+Group=dtd
+WorkingDirectory=/srv/dtd/current
+EnvironmentFile=/etc/dtd/env
+ExecStart=/srv/dtd/current/.venv/bin/uvicorn --factory service.app:create_app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=2
+MemoryMax=2G
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dtd
+
+[Install]
+WantedBy=multi-user.target
