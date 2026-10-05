@@ -29,10 +29,15 @@ function safeLink(url, text) {
 }
 
 async function call(url, options) {
-  const res = await fetch(url, options);
+  let res;
+  try { res = await fetch(url, options); } catch (e) { return { status: 0, body: null }; }
   let body = null;
   try { body = await res.json(); } catch (e) { body = null; }
   return { status: res.status, body: body };
+}
+
+function stateNote(state) {
+  return Object.hasOwn(STATES, state) ? STATES[state] : STATES.error;
 }
 
 function failure(status) {
@@ -58,13 +63,20 @@ function renderAnswer(box, data) {
   if (data.deal) {
     box.appendChild(el("p", { class: "deal" }, [el("span", { text: "Agreement: " }), safeLink(data.deal.link, dealName(data.deal))]));
   }
-  const note = STATES[data.state];
-  if (note) box.appendChild(el("p", { class: "state state-" + data.state, text: note }));
-  if (data.state === "which_deal") {
+  const known = Object.hasOwn(STATES, data.state);
+  const note = stateNote(data.state);
+  if (note) box.appendChild(el("p", { class: "state state-" + (known ? data.state : "error"), text: note }));
+  // A cached reply under an exhausted budget carries the real outcome in cached_state: show it too.
+  const outcome = data.state === "budget_cached" && data.cached_state ? data.cached_state : data.state;
+  if (outcome !== data.state) {
+    const cachedNote = stateNote(outcome);
+    if (cachedNote) box.appendChild(el("p", { class: "state state-" + (Object.hasOwn(STATES, outcome) ? outcome : "error"), text: cachedNote }));
+  }
+  if (outcome === "which_deal") {
     const list = el("ul", { class: "candidates" });
     for (const c of data.candidates || []) {
       const pick = el("button", { type: "button", text: c.name });
-      pick.addEventListener("click", () => { document.getElementById("deal").value = c.id; ask(); });
+      pick.addEventListener("click", () => { document.getElementById("deal").value = c.id; ask(null, c.id); });
       list.appendChild(el("li", {}, [pick]));
     }
     box.appendChild(list);
@@ -83,15 +95,28 @@ function renderAnswer(box, data) {
   if (data.served_from === "cache") box.appendChild(el("p", { class: "meta", text: "Served from the answer cache." }));
 }
 
-async function ask(event) {
+let latest = 0;
+
+function busy(form, on) {
+  const button = form.querySelector("button[type=submit]");
+  if (button) button.disabled = on;
+}
+
+async function ask(event, dealId) {
   if (event) event.preventDefault();
+  const form = document.getElementById("ask-form");
+  if (form.querySelector("button[type=submit]").disabled) return;
   const box = document.getElementById("answer");
   const question = document.getElementById("question").value;
-  const deal = document.getElementById("deal").value || null;
+  const deal = dealId || document.getElementById("deal").value || null;
+  const mine = ++latest;
+  busy(form, true);
   box.replaceChildren(el("p", { class: "meta", text: "Reading the agreement…" }));
   const { status, body } = await call("/api/ask", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: question, deal: deal })
   });
+  busy(form, false);
+  if (mine !== latest) return;
   if (status !== 200 || !body) { box.replaceChildren(el("p", { class: "state state-error", text: failure(status) })); return; }
   renderAnswer(box, body);
 }
@@ -132,12 +157,18 @@ function renderSearch(box, data) {
 
 async function search(event) {
   if (event) event.preventDefault();
+  const form = document.getElementById("search-form");
+  if (form.querySelector("button[type=submit]").disabled) return;
   const box = document.getElementById("results");
+  const mine = ++latest;
+  busy(form, true);
   const params = new URLSearchParams({ q: document.getElementById("q").value });
   const deal = document.getElementById("deal").value;
   if (deal) params.set("deal", deal);
   box.replaceChildren(el("p", { class: "meta", text: "Searching…" }));
   const { status, body } = await call("/api/search?" + params.toString());
+  busy(form, false);
+  if (mine !== latest) return;
   if (status !== 200 || !body) { box.replaceChildren(el("p", { class: "state state-error", text: failure(status) })); return; }
   renderSearch(box, body);
 }

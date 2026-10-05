@@ -9,7 +9,7 @@ import pytest
 
 from evals.tmachine import FAMILIES
 from facts.labels import MACHINE, is_machine_built, tier_label
-from facts.site import METHOD, Facts, cell_keys, render_cell, render_site, render_table, results_tables
+from facts.site import K, METHOD, Facts, cell_keys, render_cell, render_site, render_table, results_tables
 from retrieval.scope import Resolver
 
 EXAMPLES = json.loads(Path("site/examples.json").read_text())
@@ -130,3 +130,55 @@ def test_dtd_site_writes_the_pages(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "SITE_DIST", tmp_path / "dist")
     assert cli.entry(["site"]) == 0
     assert (tmp_path / "dist" / "index.html").exists() and (tmp_path / "dist" / "static" / "app.js").exists()
+
+
+def test_app_js_shows_the_cached_outcome_under_a_spent_budget():
+    js = Path("site/static/app.js").read_text()
+    assert "cached_state" in js and "budget_cached" in js
+
+
+def test_app_js_survives_network_errors_and_double_submits():
+    js = Path("site/static/app.js").read_text()
+    assert "catch (e) { return { status: 0" in js  # a rejected fetch becomes the error copy
+    assert "disabled = on" in js and "++latest" in js and "mine !== latest" in js
+    assert "ask(null, c.id)" in js  # a candidate pick does not go through the select
+    assert "Object.hasOwn(STATES" in js and "STATES[data.state]" not in js
+
+
+def test_every_href_goes_through_safe_link_and_it_demands_https():
+    js = Path("site/static/app.js").read_text()
+    assert js.count("href") == 1 and 'rel: "noopener noreferrer"' in js
+    assert 'startsWith("https://")' in js
+    assert re.search(r'function safeLink\(url, text\) \{\n  if \(typeof url !== "string" \|\| !url\.startsWith\("https://"\)\)', js)
+
+
+def test_judge_sentence_follows_the_facts(tmp_path):
+    base = {**facts(), "m3_tm_model_a": "alpha", "m3_tm_model_b": "beta"}
+    for judge, want, unwanted in (("beta", "helped build", "separate model"), ("gamma", "separate model", "helped build")):
+        render_site({**base, "m4_judge_model": judge}, tmp_path / judge, EXAMPLES)
+        page = (tmp_path / judge / "method.html").read_text()
+        assert want in page and unwanted not in page and "third model" not in page
+
+
+def test_r7n_follows_the_rerun_r7_row():
+    t = {t.id: t for t in results_tables()}["ladder_machine"]
+    i = next(i for i, r in enumerate(t.rows) if r.cells[0].startswith("R7n"))
+    assert t.rows[i - 1].cells[2].key == "m4_t_r7_corpus_report_recall_at_5"
+    assert any(r.cells[2].key == "m3_t_r7_corpus_report_recall_at_5" for r in t.rows)
+
+
+def test_booleans_render_as_yes_and_no():
+    F = Facts({"a": True, "b": False})
+    assert render_cell(F, K("a")) == "yes" and render_cell(F, K("b")) == "no"
+
+
+def test_markup_in_facts_and_examples_is_escaped(tmp_path):
+    evil = ['<script>alert(1)</script>', '"><img src=x onerror=1>']
+    f = {**facts(), "m4_answer_model": evil[0], "m5_price_model": evil[1]}
+    render_site(f, tmp_path, [{"family": "equity_awards", "question": evil[0]}])
+    for name in ("method.html", "results.html"):
+        page = (tmp_path / name).read_text()
+        assert "<script>alert" not in page and "<img src=x" not in page, name
+    assert html.escape(evil[0]) in (tmp_path / "method.html").read_text()
+    assert html.escape(evil[1]) in (tmp_path / "results.html").read_text()
+    assert json.loads((tmp_path / "examples.json").read_text())[0]["question"] == evil[0]  # data file, fetched as text

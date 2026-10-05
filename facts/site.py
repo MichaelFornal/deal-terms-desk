@@ -48,6 +48,11 @@ class A:
 
 
 @dataclass(frozen=True)
+class Judge:
+    """The sentence naming the judge model, worded by whether it also helped build the machine-built key."""
+
+
+@dataclass(frozen=True)
 class Row:
     cells: tuple
     tier: str | None = None  # the answer key behind this row's facts, when rows differ within a table
@@ -90,7 +95,9 @@ def cell_keys(c) -> list[str]:
 
 
 def _s(x) -> str:
-    return PENDING if x is None else html.escape(str(x))
+    if x is None:
+        return PENDING
+    return ("yes" if x else "no") if isinstance(x, bool) else html.escape(str(x))
 
 
 def _change(v, lo, hi) -> str:
@@ -107,6 +114,13 @@ def render_cell(F: Facts, c) -> str:
         return f'<a href="{html.escape(c.href)}">{html.escape(c.text)}</a>'
     if isinstance(c, K):
         return _s(F.get(c.key))
+    if isinstance(c, Judge):
+        judge = F.get("m4_judge_model")
+        if judge in (F.get("m3_tm_model_a"), F.get("m3_tm_model_b")):
+            return (f"The judge model ({_s(judge)}) is one of those two models, so it judged answers against a key "
+                    "it helped build; it may favour answers like its own, and its agreement rates should be read "
+                    "with that in mind.")
+        return f"A separate model ({_s(judge)}) judged answers against that key."
     if isinstance(c, CI):
         v = F.get(c.key)
         return PENDING if v is None else f"{_s(v)} ({_s(F.get(c.key + '_lo'))} to {_s(F.get(c.key + '_hi'))})"
@@ -196,10 +210,13 @@ def results_tables() -> tuple[Table, ...]:
               + (Row(("R6, all agreements", "No deal scoping: every agreement searched at once",
                       CI("m3_t_r6_corpus_report_recall_at_5"), K("m3_t_r6_corpus_report_mrr_at_10"), DASH,
                       K("m3_t_r6_corpus_latency_ms_p95"), K("m3_t_r6_corpus_context_tokens_mean"))),
-                 Row(("R7, all agreements", "R6 inside the deal the question names",
+                 Row(("R7, all agreements (first run)", "R6 inside the deal the question names",
                       CI("m3_t_r7_corpus_report_recall_at_5"), K("m3_t_r7_corpus_report_mrr_at_10"),
                       D("m3_cmp_t_r7_vs_t_r6_corpus_recall_at_5"), K("m3_t_r7_corpus_latency_ms_p95"),
                       K("m3_t_r7_corpus_context_tokens_mean"))),
+                 Row(("R7, re-run for the answers, all agreements",
+                      "The same R7 as re-run in the answer milestone: the rung the live path's change is paired against",
+                      CI("m4_t_r7_corpus_report_recall_at_5"), DASH, DASH, DASH, DASH)),
                  Row(("R7n, all agreements", "R7 without the reranker: the live path",
                       CI("m4_t_r7n_corpus_report_recall_at_5"), DASH, D("m4_cmp_t_r7n_vs_t_r7_corpus_recall_at_5"),
                       K("m5_live_t_r7n_corpus_latency_ms_p95"), DASH))),
@@ -371,8 +388,7 @@ METHOD = (
         ("Numbers marked ", HUMAN, " are scored against the lawyers' labels in MAUD."),
         ("Numbers marked machine-built come from model passes, not lawyers. For the tech deals, two models (",
          K("m3_tm_model_a"), " and ", K("m3_tm_model_b"), ") each located the governing clause and stated the "
-         "answer; only items where both agreed were kept. A third model (", K("m4_judge_model"), ") judged "
-         "answers against that key. The lexicon that maps lay words to contract words was machine-built by ",
+         "answer; only items where both agreed were kept. ", Judge(), " The lexicon that maps lay words to contract words was machine-built by ",
          K("m2_lexicon_model"), "."),
         ("To test whether the machine-built key can be trusted, the same two-pass procedure was run on MAUD's own "
          "questions, so those questions have two keys; the Results page shows how often they agree. That is "
