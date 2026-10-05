@@ -65,7 +65,8 @@ def test_every_section_once_its_input_exists(tmp_path):
     _write(data_m5 / "server.json", {
         "search": {"e2e": {"n": 50, "p50": 120.0, "p95": 200.0}, "server": span},
         "ask_cached": {"e2e": span, "server": span, "states": {}}, "ask_fresh": {"e2e": span, "server": span, "states": {}},
-        "rss_mb": 900.0, "embed_parity": {"n": 50, "same": 49, "rate": 0.98}})
+        "rss_mb": 900.0, "embed_parity": {"n": 50, "same": 49, "rate": 0.98}, "errors": 3,
+        "misrouted": {"fresh_served_from_cache": 1, "cached_answered_live": 2}})
     _write(data_m5 / "cap_trip.json", {"budget_reached": True, "budget_cached": True, "ledger_unchanged": True,
                                        "health_budget": "reached"})
     hosting = _write(tmp_path / "hosting.json", dict(HOSTING_EMPTY, eur_usd=1.1, eur_usd_date="2026-10-10",
@@ -84,7 +85,8 @@ def test_every_section_once_its_input_exists(tmp_path):
     assert f["m5_server_search_latency_ms_p95"] == 40.0 and f["m5_e2e_search_latency_ms_p95"] == 200.0
     assert f["m5_server_search_n"] == 50 and f["m5_e2e_search_n"] == 50 and f["m5_server_ask_fresh_n"] == 50
     assert f["m5_e2e_ask_cached_n"] == 50
-    assert f["m5_server_rss_mb"] == 900.0 and f["m5_server_embed_parity"] == 0.98
+    assert f["m5_server_rss_mb"] == 900.0 and f["m5_server_embed_parity"] == 0.98 and f["m5_server_errors"] == 3
+    assert f["m5_server_fresh_served_from_cache"] == 1 and f["m5_server_cached_answered_live"] == 2
     assert f["m5_cap_trip_budget_reached"] is True and f["m5_cap_trip_ledger_unchanged"] is True
 
 
@@ -95,6 +97,7 @@ def test_wall_clock_facts_are_unstable_for_the_check():
 
 def test_every_measurement_run_key_is_unstable_and_the_rest_is_stable():
     for k in ("m5_server_search_n", "m5_server_errors", "m5_server_embed_parity", "m5_server_embed_parity_n",
+              "m5_server_fresh_served_from_cache", "m5_server_cached_answered_live",
               "m5_e2e_search_latency_ms_p95", "m5_e2e_ask_fresh_n"):
         assert is_unstable(k), k
     for k in ("m5_bundle_sha", "m5_prompt_parity_same", "m5_calibration_n"):

@@ -64,6 +64,9 @@ def measure(base_url: str, questions: list[str], fresh: list[str], reference: di
     """Search latency over `questions`, answer latency for `cached` (example questions, served from the cache) and
     `fresh` (new, billed questions), peak memory, and, given `reference`, how often the server's top passages
     match this machine's. Server-side ms come from each payload; end-to-end ms include the network.
+    An answer is timed under what served it (`served_from`: live -> ask_fresh, cache -> ask_cached). One served
+    other than meant is counted in `errors` with its reason and in `misrouted`; one with no answer (busy, …) is
+    counted in `errors` and timed nowhere.
     A request that fails (HTTP error, timeout, bad body, missing field) is counted in `errors` with its route and
     reason, its sample is skipped and the run goes on, so one bad request never loses the others."""
     base = base_url.rstrip("/")
@@ -81,22 +84,40 @@ def measure(base_url: str, questions: list[str], fresh: list[str], reference: di
         if reference is not None and ids == reference.get(q):
             same += 1
 
-    def asks(route, qs) -> dict:
-        a_e2e, a_server, states = [], [], {}
+    # Answer samples are timed by what served them, not by what was meant: a rerun finds the "fresh" questions in
+    # the cache, and an example missing from the cache is answered live (and billed).
+    timed = {"live": ([], []), "cache": ([], [])}  # served_from -> (e2e ms, server ms)
+    states = {"ask_fresh": {}, "ask_cached": {}}  # every reply a route's questions got, whatever served it
+    misrouted = {"fresh_served_from_cache": 0, "cached_answered_live": 0}
+    for route, qs, meant, what in (("ask_cached", cached, "cache", "cached example"),
+                                   ("ask_fresh", fresh, "live", "fresh question")):
         for q in qs:
             try:
                 got, ms = _call(f"{base}/api/ask", {"question": q, "deal": None})
-                server_ms, state = float(got["ms"]), got["state"]
+                server_ms, state, served = float(got["ms"]), got["state"], got["served_from"]
             except Exception as e:  # noqa: BLE001
                 errors.append({"route": route, "reason": _reason(e)})
                 continue
-            a_e2e.append(ms)
-            a_server.append(server_ms)
-            states[state] = states.get(state, 0) + 1
-        return {"e2e": _dist(a_e2e), "server": _dist(a_server), "states": dict(sorted(states.items()))}
+            states[route][state] = states[route].get(state, 0) + 1
+            if not isinstance(served, str) or served not in timed:  # which_deal, busy, …: no answer to time
+                errors.append({"route": route, "reason": f"{what} got no answer (state {state})"})
+                continue
+            timed[served][0].append(ms)
+            timed[served][1].append(server_ms)
+            if served != meant:
+                if served == "cache":
+                    misrouted["fresh_served_from_cache"] += 1
+                    errors.append({"route": route, "reason": "fresh question was served from cache"})
+                else:
+                    misrouted["cached_answered_live"] += 1
+                    errors.append({"route": route, "reason": "cached example was answered live (billed)"})
 
-    out = {"base": base, "search": {"e2e": _dist(e2e), "server": _dist(server)}, "ask_cached": asks("ask_cached", cached),
-           "ask_fresh": asks("ask_fresh", fresh)}
+    def asks(route, served) -> dict:
+        a_e2e, a_server = timed[served]
+        return {"e2e": _dist(a_e2e), "server": _dist(a_server), "states": dict(sorted(states[route].items()))}
+
+    out = {"base": base, "search": {"e2e": _dist(e2e), "server": _dist(server)},
+           "ask_cached": asks("ask_cached", "cache"), "ask_fresh": asks("ask_fresh", "live"), "misrouted": misrouted}
     try:
         health, _ = _call(f"{base}/api/health")
         if not isinstance(health, dict):

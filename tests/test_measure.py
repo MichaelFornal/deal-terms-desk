@@ -38,7 +38,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        self._send(200, {"state": "answered" if "fresh" in body["question"] else "budget_cached", "ms": 9.0})
+        fresh = "fresh" in body["question"]
+        self._send(200, {"state": "answered" if fresh else "budget_cached", "served_from": "live" if fresh else "cache",
+                         "ms": 9.0})
 
     def log_message(self, *args):
         pass
@@ -124,7 +126,8 @@ class Flaky(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if body["question"] == "boom":
             return self._raw(500, b"{}")
-        self._raw(200, b'{"state": "answered", "ms": 8.0}')
+        served = "cache" if body["question"] == "c" else "live"
+        self._raw(200, json.dumps({"state": "answered", "served_from": served, "ms": 8.0}).encode())
 
     def log_message(self, *args):
         pass
@@ -164,3 +167,56 @@ def test_retry_after_is_capped_parsed_defensively_and_given_up_on(flaky, monkeyp
     measure(flaky, ["limited"], [], None)
     assert slept == [m.DEFAULT_SLEEP_S] * (m.MAX_WAITS + 1)
     Flaky.retry = "abc"
+
+
+class Routed(BaseHTTPRequestHandler):
+    """Ask only. What serves each question is the server's business, whatever the caller meant to measure."""
+    replies = {"new question": ("answered", "live", 900.0), "already cached": ("answered", "cache", 9.0),
+               "an example": ("answered", "cache", 8.0), "example missing from the cache": ("not_stated", "live", 950.0),
+               "too busy": ("busy", None, 1.0), "no served_from": ("answered", "absent", 5.0)}
+
+    def _send(self, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        self._send({"rss_mb": 1.0})
+
+    def do_POST(self):
+        q = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["question"]
+        state, served, ms = Routed.replies[q]
+        self._send({"state": state, "ms": ms} | ({} if served == "absent" else {"served_from": served}))
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def routed():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Routed)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+
+
+def test_ask_samples_are_timed_by_what_served_them(routed):
+    """A rerun finds the "fresh" questions cached, and an example missing from the cache is billed: neither may be
+    reported as the other. Each such sample is counted with its reason."""
+    got = measure(routed, [], ["new question", "already cached", "too busy", "no served_from"], None,
+                  cached=["an example", "example missing from the cache"])
+    fresh, cached = got["ask_fresh"]["server"], got["ask_cached"]["server"]
+    assert fresh["n"] == 2 and fresh["p50"] >= 900.0  # the new question and the example answered live
+    assert cached["n"] == 2 and cached["p95"] <= 9.0  # the example and the fresh question the cache served
+    assert got["ask_fresh"]["e2e"]["n"] == 2 and got["ask_cached"]["e2e"]["n"] == 2
+    log = got["error_log"]
+    assert {"route": "ask_fresh", "reason": "fresh question was served from cache"} in log
+    assert {"route": "ask_cached", "reason": "cached example was answered live (billed)"} in log
+    assert {"route": "ask_fresh", "reason": "fresh question got no answer (state busy)"} in log
+    assert any(e["route"] == "ask_fresh" and "served_from" in e["reason"] for e in log)  # a missing field
+    assert got["errors"] == 4 and got["misrouted"] == {"fresh_served_from_cache": 1, "cached_answered_live": 1}
+    # every reply a route's questions got, whatever served it
+    assert got["ask_fresh"]["states"] == {"answered": 2, "busy": 1}
+    assert got["ask_cached"]["states"] == {"answered": 1, "not_stated": 1}

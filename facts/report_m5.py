@@ -68,7 +68,7 @@ Measured against the live service from the development machine. Server times are
 | Cached answer | {_pn(f, 'm5_server_ask_cached_latency_ms_p50', 'm5_server_ask_cached_latency_ms_p95', 'm5_server_ask_cached_n')} | {_pn(f, 'm5_e2e_ask_cached_latency_ms_p50', 'm5_e2e_ask_cached_latency_ms_p95', 'm5_e2e_ask_cached_n')} |
 | New answer | {_pn(f, 'm5_server_ask_fresh_latency_ms_p50', 'm5_server_ask_fresh_latency_ms_p95', 'm5_server_ask_fresh_n')} | {_pn(f, 'm5_e2e_ask_fresh_latency_ms_p50', 'm5_e2e_ask_fresh_latency_ms_p95', 'm5_e2e_ask_fresh_n')} |
 
-Requests that failed during the measurement: {_v(f, 'm5_server_errors')}. Peak memory of the service (machine-built): {_v(f, 'm5_server_rss_mb')} MB. The server's searches returned the same top passages as the development machine's for {_v(f, 'm5_server_embed_parity_n')} questions, a share of {_v(f, 'm5_server_embed_parity')} (query embeddings are computed on each machine).
+Requests that failed, or were served other than meant, during the measurement: {_v(f, 'm5_server_errors')}. Of these, new questions the cache served: {_v(f, 'm5_server_fresh_served_from_cache')}; cached examples answered live, and billed: {_v(f, 'm5_server_cached_answered_live')}. Each answer is timed under what served it. Peak memory of the service (machine-built): {_v(f, 'm5_server_rss_mb')} MB. The server's searches returned the same top passages as the development machine's for {_v(f, 'm5_server_embed_parity_n')} questions, a share of {_v(f, 'm5_server_embed_parity')} (query embeddings are computed on each machine).
 
 ## The cap trips (machine-built)
 

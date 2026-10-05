@@ -74,6 +74,9 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
             f[f"m5_server_{part}_n"], f[f"m5_e2e_{part}_n"] = s[part]["server"]["n"], s[part]["e2e"]["n"]
         if "errors" in s:
             f["m5_server_errors"] = s["errors"]
+        if "misrouted" in s:  # answers served other than meant: counted in errors, timed under what served them
+            f["m5_server_fresh_served_from_cache"] = s["misrouted"]["fresh_served_from_cache"]
+            f["m5_server_cached_answered_live"] = s["misrouted"]["cached_answered_live"]
         f["m5_server_rss_mb"] = s["rss_mb"]
         if "embed_parity" in s:
             f["m5_server_embed_parity"], f["m5_server_embed_parity_n"] = s["embed_parity"]["rate"], s["embed_parity"]["n"]

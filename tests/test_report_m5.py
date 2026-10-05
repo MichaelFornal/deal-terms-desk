@@ -61,3 +61,10 @@ def test_every_machine_section_is_labelled_and_costs_name_dollars():
         assert "machine-built" in sec, heading
     assert "US$0.5 on average" in text and "daily ceiling of US$0.5" in text
     assert "a share of" in text and "(n 0.5)" in text
+
+
+def test_samples_left_out_of_the_timings_are_named():
+    f = Every(m5_server_errors=4, m5_server_fresh_served_from_cache=1, m5_server_cached_answered_live=2)
+    text = render_m5(f)
+    assert "served other than meant, during the measurement: 4." in text
+    assert "new questions the cache served: 1;" in text and "cached examples answered live, and billed: 2." in text
