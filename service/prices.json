@@ -1,0 +1,9 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "input_per_mtok": 1.00,
+  "output_per_mtok": 5.00,
+  "cache_write_per_mtok": 1.25,
+  "cache_read_per_mtok": 0.10,
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "checked": "2026-10-05"
+}
