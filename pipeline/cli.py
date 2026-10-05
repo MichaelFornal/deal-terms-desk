@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import sqlite3
 import sys
@@ -13,7 +14,7 @@ from evals.bootstrap import split_of
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
-from evals.live_parity import prompt_parity
+from evals.live_parity import prompt_parity, r7n_parity
 from evals.llm_rewrite import rewrite_all
 from evals.maud_labels import load_rows
 from evals.run_answers import answer_all, load_answers
@@ -34,6 +35,7 @@ from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
 from facts.report_m4 import render_m4
 from pipeline import m0
+from pipeline.bundle import MANIFEST, build_bundle, bundle_is_current
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
@@ -48,6 +50,7 @@ from retrieval.deals import add_deals, maud_duplicates
 from retrieval.index import build_index
 from retrieval.ladder import ANSWER_RUNGS, RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
+from retrieval.live import build_live_ladder
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
 from retrieval.scope import Resolver
@@ -113,6 +116,33 @@ def _build_deals() -> int:
     summary |= {"maud_duplicates": len(pairs), "maud_duplicate_pairs": pairs}
     (DATA / "m3").mkdir(parents=True, exist_ok=True)
     _write_atomic(DATA / "m3" / "deals_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
+def _live_db() -> Path:
+    return DATA / "live" / "live.db"
+
+
+def _cmd_bundle(args) -> int:
+    if not DEALS_INDEX.exists() or not _has_vectors(DEALS_INDEX):
+        print("deals index missing or has no vectors; run `dtd build --deals` then `dtd embed --deals` first",
+              file=sys.stderr)
+        return 2
+    if not (EDGAR / "deals.jsonl").exists():
+        print(f"{EDGAR / 'deals.jsonl'} missing; run `dtd m3 corpus` first", file=sys.stderr)
+        return 2
+    if not (SETTINGS_PATH.exists() and LEXICON_PATH.exists()):
+        print("retrieval settings or lexicon missing; run `dtd tune` and `dtd lexicon` first", file=sys.stderr)
+        return 2
+    contracts, amendment_texts = _deals_texts()
+    try:
+        summary = build_bundle(DEALS_INDEX, _live_db(), texts=contracts, amendment_texts=amendment_texts,
+                               deals_jsonl=EDGAR / "deals.jsonl", settings_path=SETTINGS_PATH,
+                               lexicon_path=LEXICON_PATH)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     print(json.dumps(summary))
     return 0
 
@@ -745,7 +775,41 @@ def _m5_parity(args) -> int:
     return 1 if any(v["differ"] for v in out.values()) else 0
 
 
-M5_STAGES = {"parity": _m5_parity}  # Tasks 4, 5 and 11 add recall, calibrate and measure
+PARITY_N = 200  # questions sampled for R7n bundle-vs-deals.db parity
+
+
+def _m5_recall(args) -> int:
+    """T-human R6n recall over the live bundle's MAUD agreements (the evals ran on maud.db; this measures the index
+    visitors get), and R7n parity between the bundle and deals.db on a stable sample of M4's questions."""
+    live = _live_db()
+    if not bundle_is_current(live):
+        print(f"{live} missing or not matching its manifest; run `dtd bundle` first", file=sys.stderr)
+        return 2
+    sets = [_data_m4() / f"{s}_items.jsonl" for s in ("tmachine", "abstain")]
+    if not (INDEX.exists() and _csv_paths() and LEXICON_PATH.exists() and all(p.exists() for p in sets)):
+        print("need maud.db, the label CSVs, the lexicon and M4's item sets; run M2 and `dtd m4 sets` first",
+              file=sys.stderr)
+        return 2
+    embedder, _ = _models()
+    settings = load_settings(SETTINGS_PATH)
+    ladder = build_live_ladder(live, embedder, load_lexicon(LEXICON_PATH), settings)
+    sha = json.loads(live.with_name(MANIFEST).read_text(encoding="utf-8"))["sha256"]
+    maud_ids = {r[0] for r in ladder.conn.execute("SELECT contract_id FROM deals WHERE source = 'maud'")}
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    ctx = with_passages(replace(ctx, items=[i for i in ctx.items if i.contract_id in maud_ids]), live)
+    evaluate(ctx, "bundle-R6n", lambda q, c, k: ladder.run("R6n", q, c, k), _out_m5(),
+             count_tokens=embedder.count_tokens, extra={"settings": asdict(settings), "bundle_sha256": sha})
+    items = [i for p in sets for i in read_items(p)]
+    sample = sorted(items, key=lambda i: hashlib.sha1(i.item_id.encode()).hexdigest())[:PARITY_N]
+    par = r7n_parity([(i.question, i.contract_id) for i in sample], ladder, _deals_ladder(*_deals_texts()))
+    _write_atomic(_out_m5() / "bundle_parity.json",
+                  json.dumps(par | {"bundle_sha256": sha}, indent=2, sort_keys=True))
+    print(json.dumps({"bundle_r6n": str(_out_m5() / "bundle_r6n.json"),
+                      "parity": {"checked": par["checked"], "same": par["same"]}}))
+    return 1 if par["differ"] else 0
+
+
+M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall}  # Tasks 5 and 11 add calibrate and measure
 
 
 def _cmd_m5(args) -> int:
@@ -777,6 +841,7 @@ def entry(argv: list[str] | None = None) -> int:
     facts.set_defaults(fn=_cmd_facts)
     sub.add_parser("failures").set_defaults(fn=_cmd_failures)
     sub.add_parser("report").set_defaults(fn=_cmd_report)
+    sub.add_parser("bundle").set_defaults(fn=_cmd_bundle)
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)

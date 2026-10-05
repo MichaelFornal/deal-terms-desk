@@ -844,3 +844,28 @@ def test_facts_are_written_atomically(data, monkeypatch):
 def test_m5_parity_refuses_without_m4_inputs(data, capsys):
     assert cli.entry(["m5", "parity"]) == 2
     assert "dtd m4 sets" in capsys.readouterr().err
+
+
+def test_bundle_builds_the_live_file_and_skips_an_unchanged_rerun(data, monkeypatch, capsys):
+    _m3_setup(data, monkeypatch)
+    assert cli.entry(["embed", "--deals"]) == 0
+    (data / "settings.json").write_text(json.dumps({"settings": {}, "answer_path": "R7n"}))
+    (data / "lexicon.json").write_text(json.dumps({"entries": {}}))
+    capsys.readouterr()
+    assert cli.entry(["bundle"]) == 0
+    first = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert first["rebuilt"] and (data / "data" / "live" / "live.db").exists()
+    assert (data / "data" / "live" / "bundle.json").exists()
+    assert cli.entry(["bundle"]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == first | {"rebuilt": False}
+
+
+def test_bundle_before_embed_deals_names_the_command(data, capsys):
+    assert cli.entry(["bundle"]) == 2
+    assert "dtd embed --deals" in capsys.readouterr().err
+    assert not (data / "index" / "deals.db").exists()  # the check did not create an empty index
+
+
+def test_m5_recall_refuses_without_a_current_bundle(data, capsys):
+    assert cli.entry(["m5", "recall"]) == 2
+    assert "dtd bundle" in capsys.readouterr().err

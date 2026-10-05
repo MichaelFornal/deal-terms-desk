@@ -17,3 +17,18 @@ def prompt_parity(items, answerer, records: dict[str, dict]) -> dict:
         else:
             differ.append(item.item_id)
     return {"checked": checked, "same": same, "differ": differ}
+
+
+def r7n_parity(questions: list[tuple[str, str | None]], a, b, k: int = 10) -> dict:
+    """R7n through two ladders (the live bundle and the deals.db the evals used): same hits in the same order, same
+    shown context and same scope for every question, or the questions where they differ."""
+    checked, same, differ = 0, 0, []
+    for q, cid in questions:
+        ra, rb = a.run("R7n", q, cid, k), b.run("R7n", q, cid, k)
+        checked += 1
+        if ([h.passage_id for h in ra.hits] == [h.passage_id for h in rb.hits] and ra.context == rb.context
+                and ra.scope == rb.scope):
+            same += 1
+        else:
+            differ.append({"question": q, "contract_id": cid})
+    return {"checked": checked, "same": same, "differ": differ}
