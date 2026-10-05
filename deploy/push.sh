@@ -39,24 +39,63 @@ if [ "$(ssh "$DTD_HOST" "stat -c '%U %a' /etc/dtd/env" 2>/dev/null || true)" != 
   exit 1
 fi
 
-# Code: the committed tree only, never the working tree. .complete marks a finished release.
+# The caps the box enforces (/etc/dtd/env, read as root) must be the caps the site publishes (facts.json, computed
+# from deploy/hosting.json). Checked before anything ships.
+caps_match() {  # $1 = "<DTD_MONTH_CAP_USD>|<DTD_DAY_CAP_USD>" as the box has them
+  uv run python - "$1" <<'CAPS'
+import json, sys
+facts = json.load(open("facts.json"))
+box = (sys.argv[1].split("|") + ["", ""])[:2]
+bad = []
+for env, key, raw in (("DTD_MONTH_CAP_USD", "m5_model_cap_usd", box[0]), ("DTD_DAY_CAP_USD", "m5_day_cap_usd", box[1])):
+    want, raw = facts.get(key), raw.strip()
+    if want is None:
+        bad.append(f"facts.json has no {key} (fill in deploy/hosting.json, then run dtd facts)")
+    elif not raw:
+        bad.append(f"/etc/dtd/env does not set {env}; facts.json {key}={want}")
+    else:
+        try:
+            have = float(raw)
+        except ValueError:
+            bad.append(f"/etc/dtd/env {env}={raw!r} is not a number; facts.json {key}={want}")
+            continue
+        if not abs(have - want) <= 1e-6:
+            bad.append(f"/etc/dtd/env {env}={raw} but facts.json {key}={want}")
+for b in bad:
+    print(f"refusing to deploy: the box would enforce a cap the site does not publish: {b}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+CAPS
+}
+BOX_CAPS="$(ssh "$DTD_HOST" "$LOAD_ENV; printf '%s|%s' \"\${DTD_MONTH_CAP_USD:-}\" \"\${DTD_DAY_CAP_USD:-}\"" || true)"
+if ! caps_match "$BOX_CAPS"; then
+  echo "  fix: set DTD_MONTH_CAP_USD and DTD_DAY_CAP_USD in /etc/dtd/env to the published caps, or correct" \
+    "deploy/hosting.json and rerun dtd facts" >&2
+  exit 1
+fi
+
+# Code: the committed tree only, never the working tree. .complete marks a finished release. Bytecode is compiled
+# here: the release is read-only to the service (ProtectSystem=strict), so Python could never cache it later.
 if ! ssh "$DTD_HOST" test -f "$REL/.complete"; then
   ssh "$DTD_HOST" "rm -rf '$REL' && mkdir -p '$REL'"
   git archive --format=tar HEAD | ssh "$DTD_HOST" "tar -x --no-same-owner -C '$REL'"
-  ssh "$DTD_HOST" "cd '$REL' && echo $SHA > GIT_SHA && UV_PYTHON_PREFERENCE=only-system uv sync --frozen --no-dev && touch .complete"
+  ssh "$DTD_HOST" "cd '$REL' && echo $SHA > GIT_SHA && UV_PYTHON_PREFERENCE=only-system UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev && touch .complete"
 fi
 
 # Bundle: only when the box lacks this exact file. Resumable, then checked against its sha256.
 if ! ssh "$DTD_HOST" test -f "$BUN/live.db"; then
   ssh "$DTD_HOST" "mkdir -p '$BUN'"
-  rsync -a --chown=root:root --partial data/live/live.db "$DTD_HOST:$BUN/live.db.part"
+  rsync -a --partial data/live/live.db "$DTD_HOST:$BUN/live.db.part"
   ssh "$DTD_HOST" "cd '$BUN' && echo '$BUNDLE_SHA  live.db.part' | sha256sum -c --quiet - && mv live.db.part live.db"
 fi
-rsync -a --chown=root:root data/live/bundle.json "$DTD_HOST:$BUN/bundle.json"
+rsync -a data/live/bundle.json "$DTD_HOST:$BUN/bundle.json"
 ssh "$DTD_HOST" "ln -sfn '$BUN/live.db' '$REL/live.db'"
 
 # Site: rendered from this commit's facts.json.
-rsync -a --chown=root:root --delete site/dist/ "$DTD_HOST:$REL/site/dist/"
+rsync -a --delete site/dist/ "$DTD_HOST:$REL/site/dist/"
+
+# rsync -a keeps the sender's owner, and macOS's openrsync has no --chown, so ownership is set on the box: the
+# release (code, venv, site) and the bundle belong to root, and the service user can only read them.
+ssh "$DTD_HOST" "chown -R root:root '$REL' '$BUN'"
 
 # The embedding model, downloaded once into the service's cache, as the service user.
 ssh "$DTD_HOST" "cd '$REL' && { $LOAD_ENV; $AS_DTD .venv/bin/python -c 'from retrieval.models import Embedder; Embedder().embed_query(\"warm up\")'; }"

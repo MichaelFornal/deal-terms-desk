@@ -4,6 +4,8 @@
 # Then write /etc/dtd/env (see deploy/env.example; owner root:root, mode 600) and run deploy/push.sh.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+# Ubuntu's needrestart would ask which services to restart after an upgrade; "a" restarts them without asking.
+export NEEDRESTART_MODE=a
 # stdin is this script under `bash -s`, so every apt command reads /dev/null and never prompts.
 APT_OPTS=(-yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 

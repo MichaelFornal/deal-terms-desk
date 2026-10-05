@@ -2,6 +2,7 @@ import importlib.util
 import json
 import re
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,7 +22,28 @@ def test_caddy_sets_the_exact_csp_and_proxies_only_the_api():
     assert f'Content-Security-Policy "{CSP}"' in text and smoke.CSP == CSP
     assert "unsafe-inline" not in text and "unsafe-eval" not in text
     assert "handle /api/*" in text and "reverse_proxy 127.0.0.1:8000" in text
-    assert "root * /srv/dtd/current/site/dist" in text and not re.search(r"^\s*log\b", text, re.M)
+    assert "root * /srv/dtd/current/site/dist" in text
+    assert not re.search(r"^\s*log\b", site_block(text), re.M)  # no access log
+
+
+def global_block(text: str) -> re.Match:
+    """The global options block: the first block in the file, before the site address."""
+    return re.match(r"(?:[ \t]*(?:#[^\n]*)?\n)*\{\n(.*?)\n\}\n", text, re.S)
+
+
+def site_block(text: str) -> str:
+    return text[global_block(text).end():]
+
+
+def test_caddy_error_log_keeps_no_visitor_data():
+    """Proxy errors (a 502 while dtd restarts) still reach the journal, without the address, the URL (it holds the
+    search query) or the headers."""
+    text = Path("deploy/Caddyfile").read_text()
+    block = global_block(text).group(1)
+    assert re.search(r"^\tlog default \{\n\t\tformat filter \{\n", block, re.M), block
+    for field in ("request>remote_ip", "request>client_ip", "request>uri", "request>headers"):
+        assert re.search(rf"^\t\t\t{re.escape(field)} delete$", block, re.M), field
+    assert "deals.forn.al {" in site_block(text) and "deals.forn.al" not in block
 
 
 def test_caddy_caps_the_api_request_body():
@@ -45,7 +67,8 @@ def test_service_unit_runs_one_worker_without_access_logs():
 def test_push_refuses_a_dirty_tree_and_ships_only_committed_code():
     text = Path("deploy/push.sh").read_text()
     for s in ("set -euo pipefail", "git status --porcelain", "git archive", "dtd facts --check", "dtd bundle",
-              "dtd site", "uv sync --frozen --no-dev", "UV_PYTHON_PREFERENCE=only-system", "/api/health",
+              "dtd site", "UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev", "UV_PYTHON_PREFERENCE=only-system",
+              "/api/health",
               "sha256sum -c", "dtd warm"):
         assert s in text, s
     assert not re.search(r"rsync[^\n]*\s\.\s", text)  # the code never leaves as the working tree
@@ -68,15 +91,20 @@ def test_push_warms_every_time_and_checks_the_result():
     assert '"unfiled_schedule"' in text and 'got["states"]' in text and "warm failed" in text
 
 
-def test_push_checks_env_file_bounds_curl_and_chowns_rsync():
+def test_push_checks_env_file_bounds_curl_and_owns_files_on_the_box():
+    """macOS ships openrsync, which has no --chown: ownership is set on the box, as root, before validation."""
     text = Path("deploy/push.sh").read_text()
     assert "stat -c '%U %a' /etc/dtd/env" in text and '"root 600"' in text
-    for line in text.splitlines():
+    rsyncs = []
+    for i, line in enumerate(text.splitlines(keepends=True)):
         if "curl " in line and not line.lstrip().startswith("#"):
             assert "--max-time 10" in line, line
         if line.lstrip().startswith("rsync "):
-            assert "--chown=root:root" in line, line
-    assert "cd $REL &&" not in text
+            assert "--chown" not in line, line
+            rsyncs.append(text.index(line))
+    chown = text.index('ssh "$DTD_HOST" "chown -R root:root \'$REL\' \'$BUN\'"')
+    assert len(rsyncs) == 3 and max(rsyncs) < chown < text.index("caddy validate") < text.index("current.next")
+    assert "tar -x --no-same-owner" in text and "cd $REL &&" not in text
 
 
 def test_provision_is_resumable_noninteractive_and_keeps_a_way_in():
@@ -85,6 +113,9 @@ def test_provision_is_resumable_noninteractive_and_keeps_a_way_in():
     assert "--force-confdef" in text and "--force-confold" in text and "</dev/null" in text
     assert text.index("/root/.ssh/authorized_keys") < text.index("PasswordAuthentication no")
     assert "[ ! -s /root/.ssh/authorized_keys ]" in text
+    # Ubuntu's needrestart asks which services to restart after an upgrade; "a" restarts them without asking.
+    assert "export DEBIAN_FRONTEND=noninteractive" in text and "export NEEDRESTART_MODE=a" in text
+    assert text.index("export NEEDRESTART_MODE=a") < text.index("apt-get")
 
 
 def test_provision_locks_the_box_down():
@@ -94,6 +125,35 @@ def test_provision_locks_the_box_down():
               "UV_INSTALL_DIR=/usr/local/bin"):
         assert s in text, s
     subprocess.run(["bash", "-n", "deploy/provision.sh"], check=True)
+
+
+def caps_check(tmp_path, facts: dict, box: str) -> subprocess.CompletedProcess:
+    """Run push.sh's cap comparison as push.sh does: in the repo root, with the box's two values as one argument."""
+    text = Path("deploy/push.sh").read_text()
+    code = re.search(r"<<'CAPS'\n(.*?)\nCAPS\n", text, re.S).group(1)
+    (tmp_path / "facts.json").write_text(json.dumps(facts))
+    return subprocess.run([sys.executable, "-", box], input=code, text=True, capture_output=True, cwd=tmp_path)
+
+
+def test_push_refuses_caps_that_differ_from_the_published_ones(tmp_path):
+    text = Path("deploy/push.sh").read_text()
+    # read as root from the env file the service loads, before anything ships
+    assert 'BOX_CAPS="$(ssh "$DTD_HOST" "$LOAD_ENV; printf' in text
+    assert text.index("/etc/dtd/env must exist") < text.index("BOX_CAPS=") < text.index("git archive")
+    assert 'caps_match "$BOX_CAPS"' in text
+    pub = {"m5_model_cap_usd": 5.06, "m5_day_cap_usd": 0.5}
+    assert caps_check(tmp_path, pub, "5.06|0.5").returncode == 0
+    assert caps_check(tmp_path, pub, "5.0600000001|0.50").returncode == 0  # within 1e-6
+    got = caps_check(tmp_path, pub, "6|0.5")
+    assert got.returncode == 1 and "refusing to deploy" in got.stderr
+    assert "DTD_MONTH_CAP_USD=6" in got.stderr and "m5_model_cap_usd=5.06" in got.stderr
+    assert "DTD_DAY_CAP_USD" not in got.stderr
+    got = caps_check(tmp_path, pub, "5.06|")
+    assert got.returncode == 1 and "/etc/dtd/env does not set DTD_DAY_CAP_USD" in got.stderr
+    got = caps_check(tmp_path, {"m5_day_cap_usd": 0.5}, "5.06|0.5")
+    assert got.returncode == 1 and "facts.json has no m5_model_cap_usd" in got.stderr
+    got = caps_check(tmp_path, pub, "five|0.5")
+    assert got.returncode == 1 and "DTD_MONTH_CAP_USD" in got.stderr and "not a number" in got.stderr
 
 
 def test_hosting_record_has_every_field_the_facts_read():
