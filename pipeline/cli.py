@@ -6,11 +6,14 @@ import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from answer.answerer import Answerer
+from answer.answerer import Answerer, Prepared
+from answer.api_runner import make_api_runner
 from evals.answer_score import score as score_answers
 from evals.answer_judge import judge_all, refute_all
 from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
+from evals.calibrate import calibration_sample, ledger_path, run_calibration
+from evals.calibrate import summarise as summarise_calibration
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
@@ -39,7 +42,7 @@ from pipeline.bundle import MANIFEST, build_bundle, bundle_is_current
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
-from pipeline.env import sec_contact
+from pipeline.env import anthropic_key, sec_contact
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
 from pipeline.paths import CACHE, DATA, CSV_NAMES, DEALS_INDEX, EDGAR, INDEX, INDEX_FIXED, OUT, RAW
@@ -54,8 +57,11 @@ from retrieval.live import build_live_ladder
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
 from retrieval.scope import Resolver
+from service.prices import load_prices
 
 FACTS = Path("facts.json")
+ENV_FILE = Path(".env")
+PRICES = Path("service/prices.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
@@ -809,7 +815,56 @@ def _m5_recall(args) -> int:
     return 1 if par["differ"] else 0
 
 
-M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall}  # Tasks 5 and 11 add calibrate and measure
+def _api_client(key: str):
+    import anthropic
+    return anthropic.Anthropic(api_key=key, max_retries=1, timeout=30.0)
+
+
+def _m5_calibrate(args) -> int:
+    """Tune-split items through the API (the dtd-dev key), compared with M4's CLI answers to the same items."""
+    try:
+        key = anthropic_key(ENV_FILE)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    sets = {s: _data_m4() / f"{s}_items.jsonl" for s in ("thuman", "tmachine")}
+    cli_ledgers = {s: _data_m4() / f"answers_{s}_{HAIKU}.jsonl" for s in sets}
+    needed = [*sets.values(), *cli_ledgers.values(), PRICES, INDEX, DEALS_INDEX]
+    missing = [str(p) for p in needed if not p.exists()]
+    if missing:
+        print("calibration inputs missing: " + ", ".join(missing) + "; run M4 (`dtd m4 sets`, `dtd m4 answer`) "
+              "first", file=sys.stderr)
+        return 2
+    sample = calibration_sample(read_items(sets["thuman"]) + read_items(sets["tmachine"]), args.n)
+    th = [i for i in sample if i.set == "thuman"]
+    tm = [i for i in sample if i.set == "tmachine"]
+    runner = make_api_runner(args.max_tokens, client=_api_client(key))
+    th_ans = Answerer(_ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))}),
+                      runner, HAIKU)  # the ladders `dtd m4 answer` used, so prompts match M4's
+    tm_ans = Answerer(_deals_ladder(*_deals_texts()), runner, HAIKU)
+    ledger = ledger_path(_data_m5(), HAIKU, args.max_tokens)
+    try:
+        run = run_calibration([(th, th_ans), (tm, tm_ans)], ledger, workers=args.workers, max_new=args.max_new)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    api = load_answers(ledger, HAIKU, sample)
+    cli_recs = load_answers(cli_ledgers["thuman"], HAIKU, th) | load_answers(cli_ledgers["tmachine"], HAIKU, tm)
+    chars = {}
+    for items, ans in ((th, th_ans), (tm, tm_ans)):
+        for i in items:
+            p = ans.prepare(i.question, i.contract_id, i.choices)
+            if isinstance(p, Prepared):
+                chars[i.item_id] = len(p.prompt)
+    summary = summarise_calibration(sample, api, cli_recs, chars, load_prices(PRICES), args.max_tokens)
+    summary |= {"model": HAIKU, "max_tokens": args.max_tokens, "ledger": ledger.name, "run": run}
+    _data_m5().mkdir(parents=True, exist_ok=True)
+    _write_atomic(_data_m5() / "calibration.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps({k: summary[k] for k in ("n", "paired", "errors", "truncated", "cost_usd_total", "stop_rule")}))
+    return 0
+
+
+M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall, "calibrate": _m5_calibrate}  # Task 11 adds measure
 
 
 def _cmd_m5(args) -> int:
@@ -860,6 +915,10 @@ def entry(argv: list[str] | None = None) -> int:
     m4p.set_defaults(fn=_cmd_m4)
     m5p = sub.add_parser("m5")
     m5p.add_argument("stage", choices=tuple(M5_STAGES))
+    m5p.add_argument("--n", type=int, default=40)
+    m5p.add_argument("--max-tokens", type=int, default=1024)
+    m5p.add_argument("--workers", type=int, default=3)
+    m5p.add_argument("--max-new", type=int, default=None)
     m5p.set_defaults(fn=_cmd_m5)
     args = parser.parse_args(argv)
     return args.fn(args)

@@ -38,9 +38,16 @@ def load_answers(ledger_path: Path, model: str, items) -> dict[str, dict]:
     return out
 
 
+PERMANENT_RUNNER = ("runner: truncated", "runner: refusal")  # the model's own reply at this cap: a retry repeats it
+
+
 def _is_done(rec: dict | None) -> bool:
-    """A runner failure is transient, so a rerun retries it; a parse failure is permanent."""
-    return rec is not None and not (rec.get("error") or "").startswith("runner:")
+    """A runner failure is transient, so a rerun retries it; a parse failure is permanent, and so is an API reply
+    that was truncated at the output cap or refused (a retry would pay for the same reply)."""
+    if rec is None:
+        return False
+    err = rec.get("error") or ""
+    return not err.startswith("runner:") or err.startswith(PERMANENT_RUNNER)
 
 
 def answer_all(items, answerer, ledger_path: Path, workers: int = 4, max_new: int | None = None,

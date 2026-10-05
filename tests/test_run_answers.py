@@ -183,3 +183,17 @@ def test_raw_reply_is_stored(tmp_path):
     runner.calls = []
     answer_all(items(1), FakeAnswerer(runner), tmp_path / "l.jsonl")
     assert load_answers(tmp_path / "l.jsonl", "m", items(1))["i0"]["result"] == "{}"
+
+
+def test_truncated_and_refused_api_replies_are_not_retried(tmp_path):
+    from answer.api_runner import RunnerError
+
+    def cut(prompt, model):
+        raise RunnerError("truncated" if prompt.endswith("0") else "refusal", "x", {"input_tokens": 5})
+    led = tmp_path / "l.jsonl"
+    answer_all(items(2), FakeAnswerer(cut), led, max_error_rate=1.0)
+    errors = sorted(r["error"].split(":")[1].strip() for r in load_answers(led, "m", items(2)).values())
+    assert errors == ["refusal", "truncated"]
+    runner.calls = []
+    s = answer_all(items(2), FakeAnswerer(runner), led)
+    assert s["new_calls"] == 0 and s["done"] == 2 and runner.calls == []
