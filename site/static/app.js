@@ -6,8 +6,8 @@ const STATES = {
   not_stated: "Not stated in this agreement.",
   unfiled_schedule: "Stated in a schedule that was not filed with the agreement.",
   which_deal: "Which agreement? Name the company in your question, or pick one:",
-  budget_cached: "Monthly budget reached, showing a cached answer.",
-  budget_reached: "Monthly budget reached. New questions wait until next month; Search still works.",
+  budget_cached: "The desk's model budget is used up for now (a daily or monthly cap), so this is a cached answer. Cached answers and Search still work.",
+  budget_reached: "The desk's model budget is used up for now (a daily or monthly cap), so new questions can't be answered until it resets. Cached answers and Search still work.",
   busy: "The desk is busy. Try again shortly, or use Search.",
   error: "No answer this time. Try again, or use Search."
 };

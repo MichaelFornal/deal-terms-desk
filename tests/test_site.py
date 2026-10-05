@@ -195,3 +195,38 @@ def test_every_m5_fact_sits_under_exactly_its_own_label():
             for key in cell_keys(c):
                 if key.startswith("m5_"):
                     assert effective == tier_label(key), (t.id, key, effective)
+
+
+def test_budget_copy_says_used_up_for_now_without_naming_one_cap():
+    """Either cap trips the budget states, and the daily one trips first: the copy must not promise next month."""
+    js = Path("site/static/app.js").read_text()
+    for state in ("budget_cached", "budget_reached"):
+        copy = re.search(rf'^  {state}: "([^"]*)",?$', js, re.M).group(1)
+        assert "model budget is used up for now (a daily or monthly cap)" in copy, state
+        assert "Cached answers and Search still work" in copy or "cached answers and Search still work" in copy
+        assert "Monthly" not in copy and "next month" not in copy, state
+
+
+def test_ask_and_search_copy_claim_only_what_is_true(tmp_path):
+    """MAUD agreements link to their source text, not a filing; Search is rate-limited per address, but it never
+    spends model budget."""
+    index, search = (Path("site/templates") / n for n in ("index.html", "search.html"))
+    assert "links to its source text" in index.read_text() and "filing" not in index.read_text()
+    assert "Search never spends model budget." in search.read_text() and "capped" not in search.read_text()
+    render_site(facts(), tmp_path, EXAMPLES)
+    method = visible((tmp_path / "method.html").read_text())
+    assert "never capped" not in method and "Search never spends model budget." in method
+    assert "with a link to its source text" in method and "with a link to the filing" not in method
+
+
+def test_method_counts_the_live_index_from_the_bundle(tmp_path):
+    """The bundle's own counts, table-of-contents passages included; M3's passage count leaves those out."""
+    keys = [k for _, paragraphs in METHOD for p in paragraphs for c in p for k in cell_keys(c)]
+    assert "m5_bundle_passages" in keys and "m5_bundle_contracts" in keys and "m3_deals_passages" not in keys
+    f = {k: v for k, v in facts().items() if not k.startswith("m5_")}
+    render_site(f, tmp_path / "pending", EXAMPLES)
+    assert "The live index holds pending agreements in pending passages" in visible(
+        (tmp_path / "pending" / "method.html").read_text())
+    render_site({**f, "m5_bundle_contracts": 406, "m5_bundle_passages": 88628}, tmp_path / "built", EXAMPLES)
+    assert "The live index holds 406 agreements in 88628 passages" in visible(
+        (tmp_path / "built" / "method.html").read_text())

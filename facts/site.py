@@ -376,7 +376,7 @@ RESULTS_INTRO = ("Every number on this page is generated from the project's meas
 METHOD = (
     ("What this is", (
         ("Ask what a signed acquisition agreement says about employee stock, break-up fees, or employees' pay and "
-         "benefits after the deal, and get the clause quoted from the contract with a link to the filing. ",
+         "benefits after the deal, and get the clause quoted from the contract with a link to its source text. ",
          DISCLAIMER, " The system can be wrong; every claim shows its source so you can check it."),
     )),
     ("The agreements", (
@@ -388,7 +388,7 @@ METHOD = (
         ("The second is technology-company acquisitions filed on EDGAR: the merger agreement attached to a "
          "current report, signed on or after ", K("m0_start"), ", whose target's industry code is in ",
          K("m0_sic_ranges"), ". They are chosen by that rule, not by hand: ", K("m3_corpus_kept"),
-         " agreements. The live index holds ", K("m3_deals_deals"), " agreements in ", K("m3_deals_passages"),
+         " agreements. The live index holds ", K("m5_bundle_contracts"), " agreements in ", K("m5_bundle_passages"),
          " passages, cut on article and section boundaries."),
     )),
     ("Which numbers a person checked", (
@@ -423,7 +423,7 @@ METHOD = (
          K("m5_day_cap_usd"), ". Prices were checked on ", K("m5_price_checked"), ": ",
          K("m5_price_input_per_mtok"), " US dollars per million input tokens and ", K("m5_price_output_per_mtok"),
          " per million output tokens. When the budget is spent, the desk shows cached answers only and says so. "
-         "Search is never capped."),
+         "Search never spends model budget."),
     )),
     ("Stated limits", (
         ("The tech half is public-company acquisitions: small private exits rarely file their agreements.",),
