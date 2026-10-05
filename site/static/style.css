@@ -1,0 +1,26 @@
+:root { --ink: #1d1d1f; --muted: #5f6368; --line: #d9d9de; --accent: #1f4e8c; --warn: #8a4b00; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 17px/1.55 Georgia, "Times New Roman", serif; color: var(--ink); background: #fbfbf8; }
+.top { display: flex; gap: 1.5rem; align-items: baseline; padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); }
+.brand { font-weight: bold; color: var(--ink); text-decoration: none; }
+nav a { margin-right: 1rem; color: var(--accent); }
+nav a[aria-current="page"] { font-weight: bold; text-decoration: none; color: var(--ink); }
+main { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+footer { max-width: 60rem; margin: 2rem auto; padding: 0 1.5rem; color: var(--muted); font-size: 0.9rem; }
+.disclaimer { font-weight: bold; color: var(--ink); }
+.lede { color: var(--muted); }
+.box { display: grid; gap: 0.5rem; margin: 1rem 0; }
+textarea, input, select, button { font: inherit; padding: 0.5rem; }
+button { cursor: pointer; background: var(--accent); color: #fff; border: 0; border-radius: 4px; }
+.examples { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+.chip { background: #eef2f8; color: var(--accent); border: 1px solid var(--line); }
+.state { font-weight: bold; }
+.state-budget_cached, .state-budget_reached, .state-busy, .state-error { color: var(--warn); }
+blockquote { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.source, .meta { color: var(--muted); font-size: 0.9rem; }
+.passage { white-space: pre-wrap; font: 0.95rem/1.5 Georgia, serif; background: #fff; border: 1px solid var(--line); padding: 0.75rem; }
+table { border-collapse: collapse; margin: 1rem 0 0.5rem; width: 100%; font-size: 0.92rem; }
+caption { text-align: left; font-weight: bold; margin-bottom: 0.25rem; }
+th, td { border-bottom: 1px solid var(--line); padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+.tier { font-weight: normal; font-style: italic; color: var(--warn); }
+.note { color: var(--muted); font-size: 0.9rem; }

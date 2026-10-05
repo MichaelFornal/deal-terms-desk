@@ -37,6 +37,7 @@ from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
 from facts.report_m4 import render_m4
+from facts.site import render_site
 from pipeline import m0
 from service.app import build_desk
 from service.config import from_env
@@ -68,6 +69,7 @@ PRICES = Path("service/prices.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
 EXAMPLES = Path("site/examples.json")
+SITE_DIST = Path("site/dist")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
 REPORT_M3 = Path("docs/m3/REPORT.md")
@@ -884,6 +886,20 @@ def _cmd_warm(args) -> int:
     return 0
 
 
+def _cmd_site(args) -> int:
+    if not FACTS.exists():
+        print("facts.json missing; run `dtd facts` first", file=sys.stderr)
+        return 2
+    try:
+        written = render_site(json.loads(FACTS.read_text(encoding="utf-8")), SITE_DIST,
+                              json.loads(EXAMPLES.read_text(encoding="utf-8")), strict=args.strict)
+    except KeyError as e:
+        print(f"a fact the site prints is missing: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps({"written": [str(p) for p in written]}))
+    return 0
+
+
 def entry(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dtd")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -912,6 +928,9 @@ def entry(argv: list[str] | None = None) -> int:
     warm_p = sub.add_parser("warm")
     warm_p.add_argument("--examples", default=str(EXAMPLES))
     warm_p.set_defaults(fn=_cmd_warm)
+    site_p = sub.add_parser("site")
+    site_p.add_argument("--strict", action="store_true", help="fail on any missing fact, M5 ones included (M6)")
+    site_p.set_defaults(fn=_cmd_site)
     sub.add_parser("bundle").set_defaults(fn=_cmd_bundle)
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
