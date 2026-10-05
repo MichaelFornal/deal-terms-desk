@@ -16,6 +16,27 @@ def _norm(s) -> str | None:
     return None if s is None else normalise(str(s))
 
 
+def _key(s: str) -> str:
+    return " ".join(normalise(s).replace('"', "").split()).casefold()
+
+
+def _segment(option: str) -> str | None:
+    parts = normalise(option).split('"')
+    return parts[1] if len(parts) >= 3 else None
+
+
+def match_choice(choice, options) -> str | None:
+    """The one option a model's choice means, or None. Tolerates dropped quote marks, case, and a bare quoted segment."""
+    if choice is None or not _key(str(choice)):
+        return None
+    k = _key(str(choice))
+    hit = [o for o in options if _key(o) == k]
+    if len(hit) == 1:
+        return hit[0]
+    hit = [o for o in options if (seg := _segment(o)) is not None and _key(seg) == k]
+    return hit[0] if len(hit) == 1 else None
+
+
 def _baseline(tune_items) -> dict[str, str]:
     votes = defaultdict(Counter)
     for i in tune_items:
@@ -38,9 +59,9 @@ def _thuman(items, recs, n_boot):
             if r["answer"] is None:
                 err += 1
                 continue
-            choice = _norm(r["answer"]["choice"])
-            ool += choice not in {_norm(o) for o in i.choices}
-            right = choice is not None and choice == _norm(i.expected)
+            matched = match_choice(r["answer"]["choice"], i.choices)
+            ool += matched is None
+            right = matched is not None and _norm(matched) == _norm(i.expected)
             a = (i.contract_id, float(right))
             b = (i.contract_id, float(base.get(i.item_id.split("|", 1)[1]) == i.expected))
             c = (i.contract_id, float(right and r["answer"]["state"] == "answered"))

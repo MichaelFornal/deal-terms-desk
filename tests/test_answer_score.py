@@ -1,4 +1,4 @@
-from evals.answer_score import score
+from evals.answer_score import match_choice, score
 from evals.answer_sets import AnswerItem
 
 M = "haiku"
@@ -122,3 +122,30 @@ def test_gate_is_counted_per_split():
     g = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["gate"]["thuman"]
     assert g["tune"] == {"returned": 4, "kept": 2, "by_reason": {"quote_not_found": 2}, "pass_rate": 0.5}
     assert g["report"]["returned"] == 3 and g["report"]["kept"] == 2 and g["report"]["pass_rate"] == 0.6667
+
+
+FID = ('"Reasonably likely/expected" to be inconsistent with fiduciary duties', '"Inconsistent" with fiduciary duties')
+ENT = ('"entitled to seek" specific performance', '"entitled to" specific performance')
+
+
+def test_match_choice_real_shapes():
+    assert match_choice("Reasonably likely/expected to be inconsistent with fiduciary duties", FID) == FID[0]
+    assert match_choice('Inconsistent" with fiduciary duties', FID) == FID[1]
+    assert match_choice("INCONSISTENT with Fiduciary duties", FID) == FID[1]  # case
+    assert match_choice("entitled to", ENT) == ENT[1]
+    assert match_choice("entitled to seek", ENT) == ENT[0]
+
+
+def test_match_choice_ambiguous_or_empty_is_none():
+    assert match_choice("x y", ('"x" y', 'x "y"')) is None  # both keys equal "x y"
+    assert match_choice("entitled to", ('"entitled to" a', '"entitled to" b')) is None
+    assert match_choice(None, ENT) is None and match_choice("  ", ENT) is None
+    assert match_choice("nothing", ENT) is None
+
+
+def test_scoring_uses_match_choice():
+    items = [AnswerItem(f"c{k}|Q", "thuman", "Cat", "report", f"c{k}", "Q", ENT, ENT[1]) for k in range(2)]
+    answers = {("thuman", M): {"c0|Q": ans(choice="entitled to"), "c1|Q": ans(choice="entitled to seek")}}
+    r = score({"thuman": items}, answers, {}, {}, (M,), n_boot=50)["thuman"][M]["report"]
+    assert abs(r["accuracy"]["mean"] - 0.5) < 1e-9 and abs(r["accuracy_cited"]["mean"] - 0.5) < 1e-9
+    assert r["out_of_list"] == 0
