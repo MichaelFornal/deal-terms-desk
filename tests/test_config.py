@@ -53,3 +53,10 @@ def test_git_sha_comes_from_the_env_then_the_release_file_then_unknown(tmp_path,
     (tmp_path / "GIT_SHA").write_text("abc1234\n")  # push.sh writes this into each release
     assert from_env({"DTD_MONTH_CAP_USD": "1"}).git_sha == "abc1234"
     assert from_env({"DTD_MONTH_CAP_USD": "1", "DTD_GIT_SHA": "def5678"}).git_sha == "def5678"
+
+
+@pytest.mark.parametrize("name", ["DTD_MONTH_CAP_USD", "DTD_DAY_CAP_USD"])
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_non_finite_caps_are_refused_by_name(name, value):
+    with pytest.raises(ValueError, match=name):
+        from_env({"DTD_MONTH_CAP_USD": "4.5"} | {name: value})

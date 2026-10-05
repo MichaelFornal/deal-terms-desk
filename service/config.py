@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,8 +30,8 @@ def _num(env, name: str, cast, default):
         value = cast(raw)
     except ValueError:
         raise ValueError(f"{name} must be a {cast.__name__}, got {raw!r}") from None
-    if value <= 0:
-        raise ValueError(f"{name} must be positive, got {raw!r}")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive, finite number, got {raw!r}")
     return value
 
 
