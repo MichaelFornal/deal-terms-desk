@@ -360,12 +360,17 @@ def _cmd_facts(args) -> int:
         return 2
     if args.check:
         stored = json.loads(FACTS.read_text(encoding="utf-8")) if FACTS.exists() else {}
-        stale = sorted(n for n in fresh if n not in UNSTABLE and not is_unstable(n) and stored.get(n) != fresh[n])
+
+        def stable(n: str) -> bool:
+            return n not in UNSTABLE and not is_unstable(n)
+        stale = sorted(n for n in fresh if stable(n) and stored.get(n) != fresh[n])
+        gone = sorted(n for n in stored if n not in fresh and stable(n))
         if stale:
             print("stale facts: " + ", ".join(stale), file=sys.stderr)
-            return 1
-        return 0
-    FACTS.write_text(json.dumps(fresh, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if gone:
+            print("facts no longer built: " + ", ".join(gone), file=sys.stderr)
+        return 1 if stale or gone else 0
+    _write_atomic(FACTS, json.dumps(fresh, indent=2, sort_keys=True) + "\n")
     return 0
 
 

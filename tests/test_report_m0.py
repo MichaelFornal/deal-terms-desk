@@ -1,4 +1,8 @@
+import json
 import re
+from pathlib import Path
+
+import pytest
 
 from facts.report_m0 import render_m0
 
@@ -88,3 +92,11 @@ def test_the_index_size_estimate_names_the_current_index():
     text = render_m0(Every(m0_estimate_index_bytes=SENTINEL))
     assert "Estimated index size from the current section-aware index's bytes per passage" in text
     assert "M2's bytes per passage" not in text
+
+
+def test_committed_m0_report_is_rendered_from_committed_facts():
+    root = Path(__file__).resolve().parent.parent
+    f = json.loads((root / "facts.json").read_text(encoding="utf-8"))
+    if "m0_gate_pass" not in f:
+        pytest.skip("M0 facts not committed")
+    assert (root / "docs" / "m0" / "REPORT.md").read_text(encoding="utf-8") == render_m0(f)
