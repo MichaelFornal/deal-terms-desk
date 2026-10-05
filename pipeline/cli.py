@@ -38,6 +38,9 @@ from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
 from facts.report_m4 import render_m4
 from pipeline import m0
+from service.app import build_desk
+from service.config import from_env
+from service.warm import warm
 from pipeline.bundle import MANIFEST, build_bundle, bundle_is_current
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
@@ -64,6 +67,7 @@ ENV_FILE = Path(".env")
 PRICES = Path("service/prices.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
+EXAMPLES = Path("site/examples.json")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
 REPORT_M3 = Path("docs/m3/REPORT.md")
@@ -871,6 +875,15 @@ def _cmd_m5(args) -> int:
     return M5_STAGES[args.stage](args)
 
 
+def _cmd_warm(args) -> int:
+    examples = json.loads(Path(args.examples).read_text(encoding="utf-8"))
+    config = from_env()
+    # warming is the operator's own call: it must not run out of the visitors' hourly fresh-call allowance
+    desk = build_desk(replace(config, fresh_per_hour=max(config.fresh_per_hour, len(examples))))
+    print(json.dumps(warm(desk, examples)))
+    return 0
+
+
 def entry(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dtd")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -896,6 +909,9 @@ def entry(argv: list[str] | None = None) -> int:
     facts.set_defaults(fn=_cmd_facts)
     sub.add_parser("failures").set_defaults(fn=_cmd_failures)
     sub.add_parser("report").set_defaults(fn=_cmd_report)
+    warm_p = sub.add_parser("warm")
+    warm_p.add_argument("--examples", default=str(EXAMPLES))
+    warm_p.set_defaults(fn=_cmd_warm)
     sub.add_parser("bundle").set_defaults(fn=_cmd_bundle)
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
