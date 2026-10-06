@@ -5,6 +5,8 @@ set -euo pipefail
 : "${DTD_HOST:?set DTD_HOST to the ssh target, for example root@deals.forn.al}"
 BASE="${DTD_BASE:-https://deals.forn.al}"
 cd "$(git rev-parse --show-toplevel)"
+# Sourced first, so a missing helper fails the push before anything ships.
+. deploy/hostport.sh
 
 dirty() { [ -n "$(git status --porcelain)" ]; }
 if dirty; then
@@ -153,7 +155,22 @@ install_release() {  # $1 = release directory on the box
   && install -m 644 '$1/deploy/dtd.service' /etc/systemd/system/dtd.service \
   && systemctl daemon-reload && systemctl enable --now caddy dtd && systemctl reload caddy && systemctl restart dtd"
 }
-install_release "$REL"
+# Leave the new release: swap back to the previous one, reinstall its config and restart, then fail the push.
+revert() {  # $1 = why
+  if [ -n "$PREV" ]; then
+    echo "$1; reverting to the previous release ${PREV##*/}" >&2
+    install_release "$PREV" || echo "the revert itself failed; fix by hand: ln -sfn $PREV /srv/dtd/current" >&2
+    echo "reverted from $SHA to ${PREV##*/}; the push failed" >&2
+  else
+    echo "$1, and there is no previous release to revert to" >&2
+  fi
+  exit 1
+}
+# Any step after the swap can fail (config install, daemon-reload, enable, reload, restart): `current` has moved by
+# then, so a failure takes the revert, not a bare exit.
+if ! install_release "$REL"; then
+  revert "installing release $SHA failed"
+fi
 
 # The box must now serve exactly this code, bundle and facts.
 matches() {
@@ -168,8 +185,7 @@ PY
 }
 # Pin the host to the box's own address for the poll: the operator's DNS cache can lag new records for up to the
 # zone's negative TTL (an NXDOMAIN seen before the records existed), while TLS, Caddy and the service are still
-# checked through the public HTTPS path.
-. deploy/hostport.sh
+# checked through the public HTTPS path. host_port comes from deploy/hostport.sh, sourced at the top.
 BOX_IP="$(ssh "$DTD_HOST" "hostname -I" | tr -s ' \t' '\n\n' | grep -m1 '\.' || true)"
 PIN=()
 if [ -n "$BOX_IP" ]; then
@@ -184,14 +200,7 @@ for _ in $(seq 60); do
   sleep 2
 done
 if [ -z "$live" ]; then
-  if [ -n "$PREV" ]; then
-    echo "release $SHA never reported healthy; reverting to the previous release ${PREV##*/}" >&2
-    install_release "$PREV" || echo "the revert itself failed; fix by hand: ln -sfn $PREV /srv/dtd/current" >&2
-    echo "reverted from $SHA to ${PREV##*/}; the push failed" >&2
-  else
-    echo "release $SHA never reported healthy and there is no previous release to revert to" >&2
-  fi
-  exit 1
+  revert "release $SHA never reported healthy"
 fi
 
 # Confirmation: the running service reports the calibrated answer settings too (checked before the swap on the new

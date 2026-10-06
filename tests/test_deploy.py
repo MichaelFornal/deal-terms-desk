@@ -85,6 +85,67 @@ def test_push_validates_before_the_swap_and_can_revert():
     assert "readlink /srv/dtd/current" in text
 
 
+def install_block() -> str:
+    """push.sh from reading the previous release to the end of the guarded install of the new one."""
+    text = Path("deploy/push.sh").read_text()
+    guard = text.index('if ! install_release "$REL"; then')
+    return text[text.index('PREV="$(ssh'):text.index("\nfi\n", guard) + len("\nfi\n")]
+
+
+def run_install(tmp_path, prev: str, fail_on: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """Run that block under a fake ssh: `readlink` prints `prev` (empty: there is none, and it fails), and any remote
+    command containing `fail_on` fails. -> (the run, every remote command in order)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    log = tmp_path / "ssh.log"
+    fake = (f"set -euo pipefail\nDTD_HOST=box SHA=new REL=/srv/dtd/releases/new\n"
+            f"ssh() {{\n  printf '%s\\0' \"$2\" >> '{log}'\n"
+            f"  case \"$2\" in\n    readlink*) [ -n '{prev}' ] && echo '{prev}' || return 1 ;;\n"
+            f"    *'{fail_on}'*) return 1 ;;\n  esac\n}}\n")
+    got = subprocess.run(["bash", "-c", fake + install_block() + "echo installed\n"], capture_output=True, text=True)
+    return got, [c for c in log.read_text().split("\0") if c] if log.exists() else []
+
+
+def test_a_failed_install_reverts_to_the_previous_release(tmp_path):
+    """Any step of the install (swap, config, daemon-reload, enable, reload, restart) can fail after `current` moved:
+    the previous release is swapped back, reinstalled and restarted, and the push fails naming both."""
+    text = Path("deploy/push.sh").read_text()
+    assert 'if ! install_release "$REL"; then' in text and text.count('install_release "$REL"') == 1
+    got, calls = run_install(tmp_path, "/srv/dtd/releases/old", fail_on="/srv/dtd/releases/new")
+    assert got.returncode == 1 and "installed" not in got.stdout
+    assert len(calls) == 3 and calls[0].startswith("readlink") and "'/srv/dtd/releases/new'" in calls[1]
+    revert = calls[2]
+    assert "ln -sfn '/srv/dtd/releases/old' /srv/dtd/current.next" in revert
+    assert "install -m 644 '/srv/dtd/releases/old/deploy/dtd.service'" in revert
+    assert "systemctl reload caddy" in revert and "systemctl restart dtd" in revert
+    assert "reverting to the previous release old" in got.stderr and "reverted from new to old" in got.stderr
+
+    got, calls = run_install(tmp_path / "none", "", fail_on="/srv/dtd/releases/new")
+    assert got.returncode == 1 and len(calls) == 2  # nothing to revert to: no second install
+    assert "installing release new failed" in got.stderr and "no previous release to revert to" in got.stderr
+
+    got, calls = run_install(tmp_path / "both", "/srv/dtd/releases/old", fail_on="/srv/dtd/releases/")
+    assert got.returncode == 1 and "the revert itself failed" in got.stderr
+
+    got, calls = run_install(tmp_path / "ok", "/srv/dtd/releases/old", fail_on="never")
+    assert got.returncode == 0 and got.stdout == "installed\n" and len(calls) == 2
+
+
+def test_a_release_that_never_turns_healthy_takes_the_same_revert():
+    text = Path("deploy/push.sh").read_text()
+    poll = text.index("for _ in $(seq 60)")
+    assert text.index('revert "release $SHA never reported healthy"') > poll
+    assert text.count('install_release "$PREV"') == 1  # one revert path, in revert()
+
+
+def test_push_sources_its_helper_before_anything_ships():
+    """A missing deploy/hostport.sh fails the push at once, not after the release is live."""
+    lines = [line for line in Path("deploy/push.sh").read_text().splitlines()
+             if line.strip() and not line.lstrip().startswith("#")]
+    cd = lines.index('cd "$(git rev-parse --show-toplevel)"')
+    assert lines[cd + 1] == ". deploy/hostport.sh"
+    assert sum(line.strip() == ". deploy/hostport.sh" for line in lines) == 1
+
+
 def test_push_warms_every_time_and_checks_the_result():
     text = Path("deploy/push.sh").read_text()
     assert "dtd warm --examples" in text and "TEMPLATE_SHA" not in text and '"$OLD"' not in text
