@@ -23,7 +23,11 @@ def env_values(path: Path) -> dict[str, bytes]:
     for line in path.read_text(encoding="utf-8").splitlines():
         name, sep, value = line.partition("=")
         name = name.strip().removeprefix("export ").strip()
-        value = value.strip().strip('"').strip("'")
+        value = value.strip()
+        if value[:1] in "\"'" and value[-1:] == value[:1] and len(value) > 1:
+            value = value[1:-1]  # quoted: keep everything inside, '#' included
+        else:
+            value = re.split(r"\s#", value, maxsplit=1)[0].rstrip()  # unquoted: drop a trailing comment
         if sep and name in SECRETS and len(value) >= MIN_SECRET:
             out[name] = value.encode()
     return out
@@ -83,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     secrets = env_values(env)
     missing = [s for s in SECRETS if s not in secrets]
     if missing:
-        print(f"not in .env: {', '.join(missing)}; their values are not searched for", file=sys.stderr)
+        print(f"not in .env or too short to search: {', '.join(missing)}; their values are not searched for", file=sys.stderr)
     problems = audit(repo, env)
     for p in problems:
         print(p)

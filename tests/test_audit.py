@@ -77,4 +77,10 @@ def test_private_and_big_files_must_not_be_tracked(tmp_path):
 def test_secrets_missing_from_env_are_named(tmp_path, capsys):
     repo, _ = make_repo(tmp_path)
     assert audit.main(["--repo", str(repo), "--env", str(env_file(tmp_path, f"SEC_CONTACT={FAKE_CONTACT}\n"))]) == 0
-    assert "not in .env: ANTHROPIC_API_KEY, HCLOUD_TOKEN" in capsys.readouterr().err
+    assert "not in .env or too short to search: ANTHROPIC_API_KEY, HCLOUD_TOKEN" in capsys.readouterr().err
+
+
+def test_env_values_drops_an_unquoted_comment_but_not_a_quoted_one(tmp_path):
+    env = env_file(tmp_path, f"SEC_CONTACT={FAKE_CONTACT} # mine\nANTHROPIC_API_KEY=\"{FAKE_KEY} # not a comment\"\n")
+    assert audit.env_values(env) == {"SEC_CONTACT": FAKE_CONTACT.encode(),
+                                     "ANTHROPIC_API_KEY": (FAKE_KEY + " # not a comment").encode()}
