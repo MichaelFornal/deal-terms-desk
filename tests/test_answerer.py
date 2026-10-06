@@ -276,3 +276,55 @@ def test_recover_choice_unit():
     amb = ('"A" b', "A b")
     assert _recover_choice('"choice": "A" b', amb) is None
     assert _recover_choice('"choice": "A" b', ('"A" b',)) == '"choice": ' + json.dumps('"A" b')
+
+
+def _spy_r6n(ladder):
+    seen, real = [], ladder.run
+
+    def run(rung, query, contract_id=None, k=10, rewritten=None):
+        if rung == "R6n":
+            seen.append((query, contract_id))
+        return real(rung, query, contract_id, k, rewritten)
+    ladder.run = run
+    return seen
+
+
+@pytest.mark.parametrize("question,picked", [("What is the Acme Software outside date?", None),
+                                             ("What is the Acme Software outside date?", "edgar_0001"),
+                                             ("Acme Software outside date", "contract_1")])
+def test_the_answerer_and_r7n_search_the_same_words_in_the_same_deal(deals_ladder, question, picked):
+    seen = _spy_r6n(deals_ladder)
+    deals_ladder.run("R7n", question, picked, k=5)
+    via_ladder = list(seen)
+    seen.clear()
+    Answerer(deals_ladder, fake_claude(""), "m").prepare(question, picked)
+    assert seen == via_ladder and len(seen) == 1
+
+
+def test_the_answer_path_comes_from_settings_and_only_r7n_is_accepted(ladder, monkeypatch):
+    import answer.answerer as A
+    assert Answerer(ladder, fake_claude(""), "m").answer_path == "R7n"
+    with pytest.raises(ValueError, match="'R6n'"):
+        Answerer(ladder, fake_claude(""), "m", answer_path="R6n")
+    monkeypatch.setattr(A, "load_answer_path", lambda: "R4")
+    with pytest.raises(ValueError, match="'R4'"):
+        Answerer(ladder, fake_claude(""), "m")
+
+
+# prompt_sha from the M4 code (main a92fcfd, before this task) on these fixtures: the refactor must not move them.
+GOLDEN = [
+    ("deals", "What is the Acme Software outside date?", None, "5419b0b3f91d", ("edgar_0001",)),
+    ("deals", "termination fee", "edgar_0001", "c814656a0121", ()),
+    ("deals", "What is the Acme Software outside date?", "edgar_0001", "5419b0b3f91d", ()),
+    ("deals", "Acme Software outside date", "contract_1", "2a2f69169918", ()),
+    ("maud", "termination fee", "big", "d9e95ed716b4", ()),
+    ("maud", "Who pays the walk-away payment?", "big", "2f0d4bff5bdf", ()),
+    ("maud", "closing", "tiny", "c06935ff3a20", ()),
+]
+
+
+@pytest.mark.parametrize("which,question,picked,sha,candidates", GOLDEN)
+def test_prompts_are_byte_identical_to_m4s(request, which, question, picked, sha, candidates):
+    lad = request.getfixturevalue("deals_ladder" if which == "deals" else "ladder")
+    p = Answerer(lad, fake_claude(""), "m").prepare(question, picked)
+    assert isinstance(p, Prepared) and p.prompt_sha == sha and p.candidates == candidates

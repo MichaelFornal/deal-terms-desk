@@ -26,12 +26,13 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "INDEX", tmp_path / "index" / "maud.db")
     monkeypatch.setattr(cli, "OUT", tmp_path / "out")
     monkeypatch.setattr(cli, "FACTS", tmp_path / "facts.json")
+    # Every report path, present and future, lands under tmp_path (docs/mN/REPORT.md keeps its shape), so no
+    # test can overwrite a committed report. REPORT itself keeps its older flat location below.
+    for name in [n for n in dir(cli) if n.startswith("REPORT")]:
+        monkeypatch.setattr(cli, name, tmp_path / getattr(cli, name))
     monkeypatch.setattr(cli, "REPORT", tmp_path / "docs" / "REPORT.md")
     monkeypatch.setattr(cli, "CSV_NAMES", ("MAUD_dev.csv",))
     monkeypatch.setattr(cli, "DATA", tmp_path / "data")
-    monkeypatch.setattr(cli, "REPORT_M0", tmp_path / "docs" / "m0" / "REPORT.md")
-    monkeypatch.setattr(cli, "REPORT_M2", tmp_path / "docs" / "m2" / "REPORT.md")
-    monkeypatch.setattr(cli, "REPORT_M3", tmp_path / "docs" / "m3" / "REPORT.md")
     from tests.fakes import FakeEmbedder, FakeReranker
     monkeypatch.setattr(cli, "INDEX_FIXED", tmp_path / "index" / "maud_fixed.db")
     monkeypatch.setattr(cli, "CACHE", tmp_path / "cache")
@@ -807,3 +808,64 @@ def test_m4_judge_loops_over_the_answer_models_not_the_judge(tmp_path, monkeypat
     monkeypatch.setattr(cli, "load_answers", fake_load)
     assert cli._m4_judge(Namespace(workers=1)) == 0
     assert paths == [f"answers_tmachine_{cli.HAIKU}.jsonl", f"answers_tmachine_{cli.SONNET}.jsonl"]
+
+
+def test_the_data_fixture_redirects_every_report_path(data):
+    for name in [n for n in dir(cli) if n.startswith("REPORT")]:
+        assert Path(getattr(cli, name)).is_relative_to(data), name
+
+
+def test_facts_check_fails_on_stored_facts_no_longer_built(data, capsys):
+    cli.entry(["build"]); cli.entry(["eval"]); cli.entry(["facts"])
+    stored = json.loads((data / "facts.json").read_text())
+    stored["m9_leftover"] = 1
+    (data / "facts.json").write_text(json.dumps(stored))
+    capsys.readouterr()
+    assert cli.entry(["facts", "--check"]) == 1
+    assert "facts no longer built: m9_leftover" in capsys.readouterr().err
+
+
+def test_facts_are_written_atomically(data, monkeypatch):
+    cli.entry(["build"]); cli.entry(["eval"]); cli.entry(["facts"])
+    path = data / "facts.json"
+    path.write_text('{"kept": 1}')
+    real = Path.replace
+
+    def fail_on_facts(self, target):
+        if Path(target).name == "facts.json":
+            raise OSError("disk full")
+        return real(self, target)
+    monkeypatch.setattr(Path, "replace", fail_on_facts)
+    with pytest.raises(OSError, match="disk full"):
+        cli.entry(["facts"])
+    assert path.read_text() == '{"kept": 1}' and not (data / "facts.json.tmp").exists()
+
+
+def test_m5_parity_refuses_without_m4_inputs(data, capsys):
+    assert cli.entry(["m5", "parity"]) == 2
+    assert "dtd m4 sets" in capsys.readouterr().err
+
+
+def test_bundle_builds_the_live_file_and_skips_an_unchanged_rerun(data, monkeypatch, capsys):
+    _m3_setup(data, monkeypatch)
+    assert cli.entry(["embed", "--deals"]) == 0
+    (data / "settings.json").write_text(json.dumps({"settings": {}, "answer_path": "R7n"}))
+    (data / "lexicon.json").write_text(json.dumps({"entries": {}}))
+    capsys.readouterr()
+    assert cli.entry(["bundle"]) == 0
+    first = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert first["rebuilt"] and (data / "data" / "live" / "live.db").exists()
+    assert (data / "data" / "live" / "bundle.json").exists()
+    assert cli.entry(["bundle"]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == first | {"rebuilt": False}
+
+
+def test_bundle_before_embed_deals_names_the_command(data, capsys):
+    assert cli.entry(["bundle"]) == 2
+    assert "dtd embed --deals" in capsys.readouterr().err
+    assert not (data / "index" / "deals.db").exists()  # the check did not create an empty index
+
+
+def test_m5_recall_refuses_without_a_current_bundle(data, capsys):
+    assert cli.entry(["m5", "recall"]) == 2
+    assert "dtd bundle" in capsys.readouterr().err

@@ -176,7 +176,8 @@ Headline retrieval numbers come from T-human.
 
 ## 6. Live service
 
-- One Python service (FastAPI) on one 1 GB always-on machine. SQLite holds FTS5, `sqlite-vec`
+- One Python service (FastAPI) on one always-on 4 GB machine (Hetzner; was 1 GB, changed
+  2026-10-05, see the M5 note in §9). SQLite holds FTS5, `sqlite-vec`
   and metadata in a single file built offline and shipped to the server. The embedding model and
   reranker load in-process.
 - Endpoints: `/search` (no model call), `/ask` (model call), `/health`.
@@ -185,7 +186,8 @@ Headline retrieval numbers come from T-human.
     total reaches the cap, `/ask` serves cache hits only and the UI says so
   - an answer cache keyed by normalised question plus deal
   - a per-IP rate limit, a question length cap, an output token cap
-- Budget split assumed until M5 measures it: about $5 hosting, about $5 model calls.
+- Budget split: hosting at its published price; the model cap is the remainder of the $10, with a
+  daily ceiling under it. M5 measures cost per answer and the site prints the split from facts.
 - The site is static pages plus calls to the service.
 
 ## 7. Numbers contract
@@ -217,7 +219,7 @@ M1 and M2 touch only MAUD, so they do not wait on the SEC.
 | M2 | R2–R6 and the chunking comparison on T-human; failure classification; latency and tokens per rung | The ladder table for T-human |
 | M3 | Tech deals fetched and ingested (identity, amendments), R7, T-machine built, tier agreement | The ladder table for T-machine and the tau |
 | M4 | Answering, the citation gate, abstention and citation-accuracy evals, the fee cross-check if M0 allowed it | Answer-quality tables for both tiers |
-| M5 | The service, cost controls, deployment to `deals.forn.al`, the four pages. Model and price confirmed; index size checked against 1 GB | A visitor can ask a question and get a cited answer; the cap trips in a test |
+| M5 | The service, cost controls, deployment to `deals.forn.al`, the four pages. Model and price confirmed; index size and memory checked on the server | A visitor can ask a question and get a cited answer; the cap trips in a test |
 | M6 | Michael's README and launch post; final facts check | Public |
 
 **M0 outcome (2026-10-02, recorded in `docs/m0/REPORT.md`):** the gate failed on its family
@@ -234,15 +236,42 @@ leaves out the R4 reranker, which lowered recall in M2 and M3 (R7 without it, me
 names no deal, or names several, gets a "which agreement?" state instead of an answer. T-human answers are
 scored by having the model pick one of MAUD's answer options.
 
+**M5 decisions (2026-10-05, recorded in `docs/superpowers/specs/2026-10-05-m5-live-design.md`):**
+- The live model is Haiku 4.5, the model the M4 answer numbers describe.
+- The host is a Hetzner 4 GB machine within the hosting budget, which retires the §10 memory risk.
+- The site is static HTML rendered in Python from `facts.json`, served with the API from that one box.
+- The repo goes to a private GitHub repo first and becomes public at M6.
+- Commit metadata was rewritten so it never carries the SEC contact.
+- The model budget has a daily ceiling, and calibration spend uses a separate Console workspace from
+  the live service.
+- 2026-10-06: the host is a Hetzner CX23 (x86, 4 GB) in Falkenstein, billed in USD, replacing the CAX11.
+- 2026-10-06: the live answerer uses Haiku's extended thinking, as the M4 evaluation runs did.
+- 2026-10-06: one API key serves calibration and the live service (Michael's choice), so the Console
+  spend limit covers both; the separate-workspace bullet above no longer holds.
+
+**M5 outcome (2026-10-06, numbers in `facts.json` as `m5_*`, report in `docs/m5/REPORT.md`):** the desk is live at
+`deals.forn.al`. It runs the measured path: re-preparing M4's answer items through the live code reproduced
+every prompt (`m5_prompt_parity_*`), and R7n over the shipped index matched the evaluation index
+(`m5_bundle_parity_*`). An API calibration first ran without extended thinking and fell below the command-line
+evaluation runs on MAUD's questions, which stopped the deploy. With thinking on, the sample passed the stop rule
+(`m5_calibration_stop_rule`): the same MAUD accuracy as the command-line runs on its human-keyed half, and state
+agreement above the threshold (`m5_calibration_*`). A sample that size detects only large differences. The cap
+trips on the real box (`m5_cap_trip_*`) and in the test suite. A SIGKILL of the service during fresh answers left
+only reservations booked at worst case, which settled after the stale window without spend ever going down
+(`docs/m5/kill-test.log`). The server's searches returned the same top passages as the development machine's for
+nearly every sampled question (`m5_server_embed_parity`, `m5_server_embed_parity_n`); query embeddings are
+computed on each machine. The model budget is `m5_model_cap_usd` a month after hosting (`m5_hosting_usd_month`),
+about `m5_answers_per_month` new answers.
+
 ## 10. Risks and stated limits (these appear on the Method page)
 
 - **The tech half may be thin or low on startup pull.** These are public-company acquisitions;
   small private exits rarely file the agreement. Fallback: index whatever tech deals exist,
   lead the demo with the most recognisable, and describe the corpus as "public acquisition
   agreements" without the startup framing.
-- **1 GB may not hold the index and both models.** Estimated about 300,000 passages from one
-  agreement's length; unmeasured. Options in order: a smaller embedding dimension or quantised
-  vectors; a lighter reranker; a 2 GB machine, which would take most of the budget.
+- **Server memory (resolved 2026-10-05).** The 1 GB risk no longer applies: the live host has
+  4 GB within the hosting budget, and the live path loads no reranker. M5 records the measured
+  memory use.
 - **The SEC block may recur.** Hence the access rules in §2.2.
 - **T-machine labels are model-built.** Two-pass agreement and the tier-agreement check are
   evidence, not proof. The site says which numbers are which.

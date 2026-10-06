@@ -1,0 +1,10 @@
+<h1>Search the agreements</h1>
+<p class="lede">The same retrieval as Ask, with no model call: ranked passages with each stage's rank and score. Search never spends model budget.</p>
+<form id="search-form" class="box">
+<label for="q">Search</label>
+<input id="q" name="q" required placeholder="termination fee paid by the company">
+<label for="deal">Agreement (optional)</label>
+<select id="deal" name="deal"><option value="">All agreements, or the company named in the search</option></select>
+<button type="submit">Search</button>
+</form>
+<section id="results" class="results" aria-live="polite"></section>

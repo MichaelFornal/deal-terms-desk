@@ -4,7 +4,7 @@ Generated from `facts.json` by `dtd report`; do not edit by hand. Numbers marked
 
 ## Corpus
 
-Of the 319 tech deals M0 found, 318 agreements were ingested. Left out because the document's own title is not a merger agreement: 1. The deals index holds 406 agreements (88 from MAUD) and 87540 passages, 67502 of them from the tech agreements, in 504971264 bytes. 12 agreements are both in MAUD and among the tech deals; the index keeps one copy of each, the tech one, so a question about one of them is not split between two copies.
+Of the 319 tech deals M0 found, 318 agreements were ingested. Left out because the document's own title is not a merger agreement: 1. The deals index holds 406 agreements (88 from MAUD) and 87540 passages, not counting table-of-contents passages, 67502 of them from the tech agreements, in 504971264 bytes. 12 agreements are both in MAUD and among the tech deals; the index keeps one copy of each, the tech one, so a question about one of them is not split between two copies.
 
 31 amendments are linked to their deals. 10 name the sections they change in the explicit form ("Section … is hereby amended") and mark 248 passages as superseded; an answer drawn from one of them shows the amended text beside it. The other 21 are recorded but not linked to sections, because nothing in them says which section they change in a form a program can trust. 9257 passages refer to a disclosure letter or schedule, which is never filed.
 

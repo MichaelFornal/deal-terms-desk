@@ -9,7 +9,8 @@ from answer.gate import check, normalise
 from answer.prompt import render
 from pipeline.m0 import _json_object
 from retrieval.result import CONTEXT_K
-from retrieval.scope import strip_alias
+from retrieval.ladder import RETRIEVAL_FOR, load_answer_path
+from retrieval.scope import scope_question
 
 INPUT_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 MODEL_STATES = ("answered", "not_stated", "unfiled_schedule")
@@ -126,26 +127,25 @@ class Prepared:
 
 
 class Answerer:
-    """The answer path: R6n inside a picked deal, or R7n's resolve-and-strip when the question names one."""
+    """The answer path named in settings (`answer_path`; only R7n): the question is scoped to one deal, picked or
+    resolved from the name it gives, with the deal's own name dropped; then R6n retrieves inside that deal."""
 
-    def __init__(self, ladder, runner, model: str):
-        self.ladder, self.runner, self.model = ladder, runner, model
+    def __init__(self, ladder, runner, model: str, answer_path: str | None = None):
+        path = answer_path if answer_path is not None else load_answer_path()
+        if path not in RETRIEVAL_FOR:
+            raise ValueError(f"answer path {path!r} is not supported; expected one of {sorted(RETRIEVAL_FOR)}")
+        self.ladder, self.runner, self.model, self.answer_path = ladder, runner, model, path
 
     def prepare(self, question: str, contract_id: str | None = None, choices: tuple[str, ...] = ()) -> Prepared | Answer:
         t0 = time.perf_counter()
-        q, candidates = question, ()
-        if contract_id is None:
-            scope = self.ladder.resolver.resolve(question) if self.ladder.resolver else None
-            if scope is None or scope.contract_id is None:
-                return Answer("which_deal", candidates=scope.candidates if scope else (),
-                              retrieval_ms=(time.perf_counter() - t0) * 1000.0)
-            contract_id, q, candidates = scope.contract_id, strip_alias(question, scope.alias), scope.candidates
-        elif self.ladder.resolver is not None:
-            # A picked deal: its own name says nothing about which clause to find, as on the resolved path.
-            rows = self.ladder.conn.execute("SELECT alias FROM aliases WHERE contract_id = ?", (contract_id,))
-            for (alias,) in sorted(rows, key=lambda r: -len(r[0])):
-                q = strip_alias(q, alias)
-        got = self.ladder.run("R6n", q, contract_id, CONTEXT_K)
+        if contract_id is None and self.ladder.resolver is None:
+            return Answer("which_deal", retrieval_ms=(time.perf_counter() - t0) * 1000.0)
+        scope, q = scope_question(self.ladder.resolver, question, contract_id)
+        if scope.contract_id is None:
+            return Answer("which_deal", candidates=scope.candidates,
+                          retrieval_ms=(time.perf_counter() - t0) * 1000.0)
+        contract_id, candidates = scope.contract_id, scope.candidates
+        got = self.ladder.run(RETRIEVAL_FOR[self.answer_path], q, contract_id, CONTEXT_K)
         ms = (time.perf_counter() - t0) * 1000.0
         if not got.hits:
             return Answer("not_stated", contract_id=contract_id, retrieval_ms=ms)

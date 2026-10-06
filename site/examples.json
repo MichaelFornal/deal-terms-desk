@@ -1,0 +1,8 @@
+[
+  {"family": "equity_awards", "question": "What happens to employee stock options in the LinkedIn deal?"},
+  {"family": "equity_awards", "question": "How are unvested restricted stock units treated when Red Hat is acquired?"},
+  {"family": "termination_fee", "question": "How big is the break-up fee in the Activision Blizzard agreement, and when is it owed?"},
+  {"family": "termination_fee", "question": "What termination fee does the Mandiant agreement set?"},
+  {"family": "employee_benefits", "question": "Will Cerner employees keep their pay and benefits after the merger?"},
+  {"family": "employee_benefits", "question": "What does the HashiCorp agreement promise employees about salaries and benefits?"}
+]

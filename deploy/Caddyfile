@@ -1,0 +1,37 @@
+# deals.forn.al: static pages from the current release, /api/* to the one uvicorn worker on localhost.
+# Caddy keeps no access log unless a site `log` directive asks for one; there is none on purpose.
+# Its own runtime log (the default logger, into the journal) still records proxy errors, such as the 502s while
+# dtd restarts. Those entries carry the request, so the filter deletes the visitor's address, the URL (which holds
+# the search query) and the headers, and keeps the error itself.
+{
+	log default {
+		format filter {
+			request>remote_ip delete
+			request>client_ip delete
+			request>uri delete
+			request>headers delete
+		}
+	}
+}
+
+deals.forn.al {
+	encode zstd gzip
+	header {
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	handle /api/* {
+		# The app parses the JSON body before its own length check, so the cap lives here.
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		root * /srv/dtd/current/site/dist
+		file_server
+	}
+}

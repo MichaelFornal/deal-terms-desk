@@ -72,3 +72,9 @@ def test_committed_m3_report_is_rendered_from_committed_facts():
     if "m3_t_bare_r1_report_recall_at_5" not in f:
         pytest.skip("committed facts predate the fix-wave rerun (no bare-question facts yet)")
     assert render_m3(f) == report.read_text(encoding="utf-8")
+
+
+def test_the_passage_count_says_it_leaves_out_tables_of_contents():
+    """M5's live index counts every passage; M3's count leaves out table-of-contents passages and says so."""
+    corpus = render_m3(Every()).split("## Corpus", 1)[1].split("\n## ", 1)[0]
+    assert "7777.0 passages, not counting table-of-contents passages," in corpus

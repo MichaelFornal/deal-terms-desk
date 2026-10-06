@@ -13,3 +13,7 @@ jobs:
         run: uv sync --frozen
       - name: Tests
         run: uv run pytest -q
+      - name: Facts check
+        run: |
+          uv run pytest -q tests/test_report_m0.py tests/test_report_m2.py tests/test_report_m3.py tests/test_report_m4.py tests/test_facts.py tests/test_labels.py tests/test_site.py
+          uv run dtd site

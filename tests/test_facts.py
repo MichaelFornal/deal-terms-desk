@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -150,7 +151,7 @@ def test_committed_facts_file_has_exactly_the_named_queries():
     path = ROOT / "facts.json"
     if path.exists():
         keys = set(json.loads(path.read_text()))
-        assert {k for k in keys if not k.startswith(("m2_", "m0_", "m3_", "m4_"))} == set(QUERIES)
+        assert {k for k in keys if not k.startswith(("m2_", "m0_", "m3_", "m4_", "m5_"))} == set(QUERIES)
         m2 = {k for k in keys if k.startswith("m2_")}
         if m2:
             assert {"m2_r1_report_recall_at_5", "m2_r6_report_recall_at_5"} <= m2
@@ -164,3 +165,20 @@ def test_committed_report_is_rendered_from_committed_facts():
     facts, report = ROOT / "facts.json", ROOT / "docs" / "m1" / "REPORT.md"
     if facts.exists() and report.exists():
         assert render(json.loads(facts.read_text(encoding="utf-8"))) == report.read_text(encoding="utf-8")
+
+
+class _Every(dict):
+    """Any fact renders as a sentinel number, so the template is checked, not the data."""
+    def __missing__(self, key):
+        return 7777.0
+
+
+# Identifiers and the pinned CI level, not figures (the CI level is pinned by
+# test_bootstrap_quantiles_match_the_reports_95_percent; same allowlist as tests/test_report_m2.py).
+M1_ALLOWED = re.compile(r"BM25|recall@\d+|MRR@\d+|nDCG@\d+|\bR\d\b|\bM\d\b|p50|p95|95%")
+
+
+def test_every_digit_in_the_m1_report_comes_from_facts():
+    text = render(_Every()).replace("7777.0", "")
+    stray = [line for line in text.splitlines() if re.search(r"\d", M1_ALLOWED.sub("", line))]
+    assert stray == []

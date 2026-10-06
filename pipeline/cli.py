@@ -1,18 +1,24 @@
 import argparse
+import hashlib
 import json
 import sqlite3
 import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from answer.answerer import Answerer
+from answer.answerer import Answerer, Prepared
+from answer.api_runner import make_api_runner
 from evals.answer_score import score as score_answers
 from evals.answer_judge import judge_all, refute_all
 from evals.answer_sets import abstain_items, read_items, thuman_items, tmachine_items, write_items
 from evals.bootstrap import split_of
+from evals.calibrate import calibration_sample, ledger_path, run_calibration
+from evals.calibrate import summarise as summarise_calibration
 from evals.compare import load_items
 from evals.disputes import DISPUTE_MODEL, PROMPT as DISPUTE_PROMPT, judge, sample_misses, summarise
 from evals.failures import classify
+from evals.live_parity import prompt_parity, r7n_parity
+from evals.measure import measure, reference_hits
 from evals.llm_rewrite import rewrite_all
 from evals.maud_labels import load_rows
 from evals.run_answers import answer_all, load_answers
@@ -26,17 +32,24 @@ from facts.m0 import build_m0
 from facts.m2 import build_m2, is_unstable
 from facts.m3 import build_m3, present_m3
 from facts.m4 import build_m4, present_m4
+from facts.m5 import build_m5, present_m5
 from facts.m2 import present as m2_present
 from facts.report import render
 from facts.report_m0 import render_m0
 from facts.report_m2 import render_m2
 from facts.report_m3 import render_m3
 from facts.report_m4 import render_m4
+from facts.report_m5 import render_m5
+from facts.site import render_site
 from pipeline import m0
+from service.app import build_desk
+from service.config import from_env
+from service.warm import warm
+from pipeline.bundle import MANIFEST, build_bundle, bundle_is_current
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
 from pipeline.claude import run_claude
-from pipeline.env import sec_contact
+from pipeline.env import anthropic_key, sec_contact
 from pipeline.fetch_maud import fetch_all
 from pipeline.normalise import load_contract
 from pipeline.paths import CACHE, DATA, CSV_NAMES, DEALS_INDEX, EDGAR, INDEX, INDEX_FIXED, OUT, RAW
@@ -47,17 +60,25 @@ from retrieval.deals import add_deals, maud_duplicates
 from retrieval.index import build_index
 from retrieval.ladder import ANSWER_RUNGS, RUNGS, SETTINGS_PATH, Ladder, load_settings
 from retrieval.lexicon import LEXICON_PATH, load_lexicon
+from retrieval.live import build_live_ladder
 from retrieval.models import Embedder, Reranker
 from retrieval.rerank_cache import CachedReranker
 from retrieval.scope import Resolver
+from service.prices import load_prices
 
 FACTS = Path("facts.json")
+ENV_FILE = Path(".env")
+PRICES = Path("service/prices.json")
+HOSTING = Path("deploy/hosting.json")
 REPORT = Path("docs/m1/REPORT.md")
 EXTERNAL = Path("facts/external.json")
+EXAMPLES = Path("site/examples.json")
+SITE_DIST = Path("site/dist")
 REPORT_M2 = Path("docs/m2/REPORT.md")
 REPORT_M0 = Path("docs/m0/REPORT.md")
 REPORT_M3 = Path("docs/m3/REPORT.md")
 REPORT_M4 = Path("docs/m4/REPORT.md")
+REPORT_M5 = Path("docs/m5/REPORT.md")
 M0_STAGES = ("search", "candidates", "fetch", "deals", "sample", "press", "measure")
 NEEDS_SEC = {"search", "candidates", "fetch", "deals", "press"}
 REWRITES = "llm_rewrites.jsonl"
@@ -112,6 +133,33 @@ def _build_deals() -> int:
     summary |= {"maud_duplicates": len(pairs), "maud_duplicate_pairs": pairs}
     (DATA / "m3").mkdir(parents=True, exist_ok=True)
     _write_atomic(DATA / "m3" / "deals_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps(summary))
+    return 0
+
+
+def _live_db() -> Path:
+    return DATA / "live" / "live.db"
+
+
+def _cmd_bundle(args) -> int:
+    if not DEALS_INDEX.exists() or not _has_vectors(DEALS_INDEX):
+        print("deals index missing or has no vectors; run `dtd build --deals` then `dtd embed --deals` first",
+              file=sys.stderr)
+        return 2
+    if not (EDGAR / "deals.jsonl").exists():
+        print(f"{EDGAR / 'deals.jsonl'} missing; run `dtd m3 corpus` first", file=sys.stderr)
+        return 2
+    if not (SETTINGS_PATH.exists() and LEXICON_PATH.exists()):
+        print("retrieval settings or lexicon missing; run `dtd tune` and `dtd lexicon` first", file=sys.stderr)
+        return 2
+    contracts, amendment_texts = _deals_texts()
+    try:
+        summary = build_bundle(DEALS_INDEX, _live_db(), texts=contracts, amendment_texts=amendment_texts,
+                               deals_jsonl=EDGAR / "deals.jsonl", settings_path=SETTINGS_PATH,
+                               lexicon_path=LEXICON_PATH)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     print(json.dumps(summary))
     return 0
 
@@ -334,6 +382,8 @@ def _all_facts() -> dict:
     facts = build_facts(INDEX, OUT / "r1.json", _csv_paths())
     if m2_present(OUT):
         facts |= build_m2(OUT, INDEX, INDEX_FIXED, SETTINGS_PATH, LEXICON_PATH, EXTERNAL)
+    if present_m5(DATA / "m5"):
+        facts |= build_m5(DATA / "m5", DATA / "live", _out_m4(), OUT / "m5", PRICES, HOSTING)
     if present_m3(OUT / "m3"):
         facts |= build_m3(OUT / "m3", OUT, DATA / "m3", EDGAR, DEALS_INDEX)
     if present_m4(_out_m4()):
@@ -360,12 +410,17 @@ def _cmd_facts(args) -> int:
         return 2
     if args.check:
         stored = json.loads(FACTS.read_text(encoding="utf-8")) if FACTS.exists() else {}
-        stale = sorted(n for n in fresh if n not in UNSTABLE and not is_unstable(n) and stored.get(n) != fresh[n])
+
+        def stable(n: str) -> bool:
+            return n not in UNSTABLE and not is_unstable(n)
+        stale = sorted(n for n in fresh if stable(n) and stored.get(n) != fresh[n])
+        gone = sorted(n for n in stored if n not in fresh and stable(n))
         if stale:
             print("stale facts: " + ", ".join(stale), file=sys.stderr)
-            return 1
-        return 0
-    FACTS.write_text(json.dumps(fresh, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if gone:
+            print("facts no longer built: " + ", ".join(gone), file=sys.stderr)
+        return 1 if stale or gone else 0
+    _write_atomic(FACTS, json.dumps(fresh, indent=2, sort_keys=True) + "\n")
     return 0
 
 
@@ -693,9 +748,195 @@ def _cmd_report(args) -> int:
     if "m4_thuman_haiku_report_accuracy" in facts:
         REPORT_M4.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M4.write_text(render_m4(facts), encoding="utf-8")
+    if "m5_bundle_sha" in facts:
+        REPORT_M5.parent.mkdir(parents=True, exist_ok=True)
+        REPORT_M5.write_text(render_m5(facts), encoding="utf-8")
     if "m0_gate_pass" in facts:
         REPORT_M0.parent.mkdir(parents=True, exist_ok=True)
         REPORT_M0.write_text(render_m0(facts), encoding="utf-8")
+    return 0
+
+
+def _out_m5() -> Path:
+    return OUT / "m5"
+
+
+def _data_m5() -> Path:
+    return DATA / "m5"
+
+
+def _no_model_call(prompt, model):
+    raise RuntimeError("this stage only prepares prompts; it never calls a model")
+
+
+def _m5_parity(args) -> int:
+    """Re-prepare every M4 answer item with the ladder M4 used and compare each prompt's hash with the ledgered
+    one, so the live answer path is provably the measured one. Exit 1 if any differ."""
+    sets = ("thuman", "tmachine", "abstain")
+    needed = ([INDEX, DEALS_INDEX] + [_data_m4() / f"{s}_items.jsonl" for s in sets]
+              + [_data_m4() / f"answers_{s}_{HAIKU}.jsonl" for s in sets])
+    missing = [str(p) for p in needed if not p.exists()]
+    if missing:
+        print("missing: " + ", ".join(missing) + "; run M3, `dtd m4 sets` and `dtd m4 answer` first",
+              file=sys.stderr)
+        return 2
+    out, deals = {}, None
+    for s in sets:
+        items = read_items(_data_m4() / f"{s}_items.jsonl")
+        records = load_answers(_data_m4() / f"answers_{s}_{HAIKU}.jsonl", HAIKU, items)
+        if s == "thuman":  # as `dtd m4 answer`: T-human on maud.db, the other sets on deals.db
+            ladder = _ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))})
+        else:
+            deals = deals or _deals_ladder(*_deals_texts())
+            ladder = deals
+        out[s] = prompt_parity(items, Answerer(ladder, _no_model_call, HAIKU), records)
+        print(json.dumps({s: {"checked": out[s]["checked"], "same": out[s]["same"]}}), file=sys.stderr, flush=True)
+    _out_m5().mkdir(parents=True, exist_ok=True)
+    _write_atomic(_out_m5() / "parity.json", json.dumps(out, indent=2, sort_keys=True))
+    print(json.dumps({s: {"checked": v["checked"], "same": v["same"]} for s, v in out.items()}))
+    return 1 if any(v["differ"] for v in out.values()) else 0
+
+
+PARITY_N = 200  # questions sampled for R7n bundle-vs-deals.db parity
+
+
+def _m5_recall(args) -> int:
+    """T-human R6n recall over the live bundle's MAUD agreements (the evals ran on maud.db; this measures the index
+    visitors get), and R7n parity between the bundle and deals.db on a stable sample of M4's questions."""
+    live = _live_db()
+    if not bundle_is_current(live):
+        print(f"{live} missing or not matching its manifest; run `dtd bundle` first", file=sys.stderr)
+        return 2
+    sets = [_data_m4() / f"{s}_items.jsonl" for s in ("tmachine", "abstain")]
+    if not (INDEX.exists() and _csv_paths() and LEXICON_PATH.exists() and all(p.exists() for p in sets)):
+        print("need maud.db, the label CSVs, the lexicon and M4's item sets; run M2 and `dtd m4 sets` first",
+              file=sys.stderr)
+        return 2
+    embedder, _ = _models()
+    settings = load_settings(SETTINGS_PATH)
+    ladder = build_live_ladder(live, embedder, load_lexicon(LEXICON_PATH), settings)
+    sha = json.loads(live.with_name(MANIFEST).read_text(encoding="utf-8"))["sha256"]
+    maud_ids = {r[0] for r in ladder.conn.execute("SELECT contract_id FROM deals WHERE source = 'maud'")}
+    ctx = load_context(INDEX, _csv_paths(), RAW / "contracts")
+    ctx = with_passages(replace(ctx, items=[i for i in ctx.items if i.contract_id in maud_ids]), live)
+    evaluate(ctx, "bundle-R6n", lambda q, c, k: ladder.run("R6n", q, c, k), _out_m5(),
+             count_tokens=embedder.count_tokens, extra={"settings": asdict(settings), "bundle_sha256": sha})
+    items = [i for p in sets for i in read_items(p)]
+    sample = sorted(items, key=lambda i: hashlib.sha1(i.item_id.encode()).hexdigest())[:PARITY_N]
+    par = r7n_parity([(i.question, i.contract_id) for i in sample], ladder, _deals_ladder(*_deals_texts()))
+    _write_atomic(_out_m5() / "bundle_parity.json",
+                  json.dumps(par | {"bundle_sha256": sha}, indent=2, sort_keys=True))
+    print(json.dumps({"bundle_r6n": str(_out_m5() / "bundle_r6n.json"),
+                      "parity": {"checked": par["checked"], "same": par["same"]}}))
+    return 1 if par["differ"] else 0
+
+
+def _api_client(key: str):
+    import anthropic
+    return anthropic.Anthropic(api_key=key, max_retries=0, timeout=90.0)
+
+
+def _calibration_runner(args, key: str):
+    """The calibration runner: the live settings, so the sample measures what visitors get."""
+    return make_api_runner(args.max_tokens, client=_api_client(key), thinking_budget=args.thinking_budget or None)
+
+
+def _m5_calibrate(args) -> int:
+    """Tune-split items through the API (the dtd-dev key), compared with M4's CLI answers to the same items."""
+    try:
+        key = anthropic_key(ENV_FILE)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    sets = {s: _data_m4() / f"{s}_items.jsonl" for s in ("thuman", "tmachine")}
+    cli_ledgers = {s: _data_m4() / f"answers_{s}_{HAIKU}.jsonl" for s in sets}
+    needed = [*sets.values(), *cli_ledgers.values(), PRICES, INDEX, DEALS_INDEX]
+    missing = [str(p) for p in needed if not p.exists()]
+    if missing:
+        print("calibration inputs missing: " + ", ".join(missing) + "; run M4 (`dtd m4 sets`, `dtd m4 answer`) "
+              "first", file=sys.stderr)
+        return 2
+    sample = calibration_sample(read_items(sets["thuman"]) + read_items(sets["tmachine"]), args.n)
+    th = [i for i in sample if i.set == "thuman"]
+    tm = [i for i in sample if i.set == "tmachine"]
+    try:
+        runner = _calibration_runner(args, key)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    th_ans = Answerer(_ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))}),
+                      runner, HAIKU)  # the ladders `dtd m4 answer` used, so prompts match M4's
+    tm_ans = Answerer(_deals_ladder(*_deals_texts()), runner, HAIKU)
+    ledger = ledger_path(_data_m5(), HAIKU, args.max_tokens, args.thinking_budget)
+    try:
+        run = run_calibration([(th, th_ans), (tm, tm_ans)], ledger, workers=args.workers, max_new=args.max_new)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 2
+    api = load_answers(ledger, HAIKU, sample)
+    cli_recs = load_answers(cli_ledgers["thuman"], HAIKU, th) | load_answers(cli_ledgers["tmachine"], HAIKU, tm)
+    chars = {}
+    for items, ans in ((th, th_ans), (tm, tm_ans)):
+        for i in items:
+            p = ans.prepare(i.question, i.contract_id, i.choices)
+            if isinstance(p, Prepared):
+                chars[i.item_id] = len(p.prompt)
+    summary = summarise_calibration(sample, api, cli_recs, chars, load_prices(PRICES), args.max_tokens,
+                                   args.thinking_budget)
+    summary |= {"model": HAIKU, "max_tokens": args.max_tokens, "ledger": ledger.name, "run": run}
+    _data_m5().mkdir(parents=True, exist_ok=True)
+    _write_atomic(_data_m5() / "calibration.json", json.dumps(summary, indent=2, sort_keys=True))
+    print(json.dumps({k: summary[k] for k in ("n", "paired", "errors", "truncated", "cost_usd_total", "stop_rule")}))
+    return 0
+
+
+def _m5_measure(args) -> int:
+    """Run from the development machine against the live URL: the reference searches run here, over the same
+    bundle the box serves, so the parity compares the two machines' query embeddings."""
+    if not args.base:
+        print("--base is required, e.g. https://deals.forn.al", file=sys.stderr)
+        return 2
+    items = [i for i in read_items(_data_m4() / "tmachine_items.jsonl") if i.split == "tune"]
+    picked = sorted(items, key=lambda i: hashlib.sha1(i.item_id.encode()).hexdigest())
+    questions = [i.question for i in picked[:args.search_n]]
+    fresh = [i.question for i in picked[args.search_n:args.search_n + args.fresh]]
+    cached = [e["question"] for e in json.loads(EXAMPLES.read_text(encoding="utf-8"))]
+    ladder = build_live_ladder(_live_db(), Embedder(), load_lexicon(LEXICON_PATH), load_settings(SETTINGS_PATH))
+    got = measure(args.base, questions, fresh, reference_hits(ladder, questions), cached=cached)
+    out = _data_m5() / "server.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_atomic(out, json.dumps(got, indent=2, sort_keys=True))
+    print(json.dumps({"search": got.get("search"), "rss_mb": got.get("rss_mb")}))
+    return 0
+
+
+M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall, "calibrate": _m5_calibrate, "measure": _m5_measure}
+
+
+def _cmd_m5(args) -> int:
+    return M5_STAGES[args.stage](args)
+
+
+def _cmd_warm(args) -> int:
+    examples = json.loads(Path(args.examples).read_text(encoding="utf-8"))
+    config = from_env()
+    # warming is the operator's own call: it must not run out of the visitors' hourly fresh-call allowance
+    desk = build_desk(replace(config, fresh_per_hour=max(config.fresh_per_hour, len(examples))))
+    print(json.dumps(warm(desk, examples)))
+    return 0
+
+
+def _cmd_site(args) -> int:
+    if not FACTS.exists():
+        print("facts.json missing; run `dtd facts` first", file=sys.stderr)
+        return 2
+    try:
+        written = render_site(json.loads(FACTS.read_text(encoding="utf-8")), SITE_DIST,
+                              json.loads(EXAMPLES.read_text(encoding="utf-8")), strict=args.strict)
+    except KeyError as e:
+        print(f"a fact the site prints is missing: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps({"written": [str(p) for p in written]}))
     return 0
 
 
@@ -724,6 +965,13 @@ def entry(argv: list[str] | None = None) -> int:
     facts.set_defaults(fn=_cmd_facts)
     sub.add_parser("failures").set_defaults(fn=_cmd_failures)
     sub.add_parser("report").set_defaults(fn=_cmd_report)
+    warm_p = sub.add_parser("warm")
+    warm_p.add_argument("--examples", default=str(EXAMPLES))
+    warm_p.set_defaults(fn=_cmd_warm)
+    site_p = sub.add_parser("site")
+    site_p.add_argument("--strict", action="store_true", help="fail on any missing fact, M5 ones included (M6)")
+    site_p.set_defaults(fn=_cmd_site)
+    sub.add_parser("bundle").set_defaults(fn=_cmd_bundle)
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))
     m0p.set_defaults(fn=_cmd_m0)
@@ -740,6 +988,17 @@ def entry(argv: list[str] | None = None) -> int:
     m4p.add_argument("--workers", type=int, default=4)
     m4p.add_argument("--max-new", type=int, default=None)
     m4p.set_defaults(fn=_cmd_m4)
+    m5p = sub.add_parser("m5")
+    m5p.add_argument("stage", choices=tuple(M5_STAGES))
+    m5p.add_argument("--n", type=int, default=40)
+    m5p.add_argument("--max-tokens", type=int, default=6144)
+    m5p.add_argument("--thinking-budget", type=int, default=4096, help="extended-thinking tokens; 0 is off")
+    m5p.add_argument("--workers", type=int, default=3)
+    m5p.add_argument("--max-new", type=int, default=None)
+    m5p.add_argument("--base", default=None)
+    m5p.add_argument("--search-n", type=int, default=50)
+    m5p.add_argument("--fresh", type=int, default=3)
+    m5p.set_defaults(fn=_cmd_m5)
     args = parser.parse_args(argv)
     return args.fn(args)
 

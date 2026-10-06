@@ -8,12 +8,24 @@ from retrieval.dense import search_dense
 from retrieval.hybrid import rrf
 from retrieval.lexicon import rewrite
 from retrieval.result import CONTEXT_K, Retrieved
-from retrieval.scope import strip_alias
+from retrieval.scope import scope_question
 
 RUNGS = ("R1", "R2", "R3", "R4", "R5", "R6")
 DEAL_RUNGS = RUNGS + ("R7",)
 ANSWER_RUNGS = ("R6n", "R7n")  # R6 and R7 without the reranker, which lowered recall in M2 and M3: the answer path
+# The answer path settings.json names -> the rung run inside the deal once the Answerer has scoped the question.
+RETRIEVAL_FOR = {"R7n": "R6n"}
 SETTINGS_PATH = Path(__file__).with_name("settings.json")
+
+
+def _stages(hits, legs) -> dict:
+    """Where each returned hit stood in each leg before fusion: 1-based rank and the leg's own score (BM25: -bm25,
+    higher is better; dense: 1 - cosine distance). None where the leg did not return the passage."""
+    pos = [{h.passage_id: (rank, h.score) for rank, h in enumerate(leg, start=1)} for leg in legs]
+    return {h.passage_id: {name: ({"rank": p[h.passage_id][0], "score": p[h.passage_id][1]}
+                                  if h.passage_id in p else None)
+                           for name, p in zip(("bm25", "dense"), pos)}
+            for h in hits}
 
 
 def load_answer_path(path: Path = SETTINGS_PATH) -> str:
@@ -82,10 +94,9 @@ class Ladder:
             if self.resolver is None:
                 raise ValueError(f"{rung} needs a resolver over the deals index")
             t0 = time.perf_counter()
-            scope = self.resolver.resolve(query)
+            # A picked deal is kept; otherwise the resolver finds one. Either way the deal's own name is dropped.
+            scope, q = scope_question(self.resolver, query, contract_id)
             resolve_ms = (time.perf_counter() - t0) * 1000.0
-            # Inside one agreement the company's name is everywhere, so it only misleads the search: drop it.
-            q = strip_alias(query, scope.alias) if scope.contract_id else query
             got = self.run("R6" if rung == "R7" else "R6n", q, scope.contract_id, k, rewritten)
             return replace(got, scope=scope, ms=got.ms + resolve_ms)
         rerank = rung != "R6n"
@@ -94,6 +105,7 @@ class Ladder:
             raise ValueError("R5 and R6 need the lexicon; run `dtd lexicon` first")
         t0 = time.perf_counter()
         adjust = 0.0
+        legs = None
         q = query if n < 5 else (rewritten if rewritten is not None else rewrite(query, self.lexicon))
         table = "passages_x_fts" if n == 6 else "passages_fts"
         if n == 1:
@@ -115,4 +127,5 @@ class Ladder:
                 hits = ([replace(head[i], score=scores[i]) for i in order] + fused[len(head):])[:k]
         ms = (time.perf_counter() - t0) * 1000.0 + adjust
         amended = tuple(dict.fromkeys(a[0] for h in hits[:CONTEXT_K] for a in self._amendments(h)))
-        return Retrieved(hits, ms, [self._shown(h, n == 6) for h in hits[:CONTEXT_K]], amended)
+        return Retrieved(hits, ms, [self._shown(h, n == 6) for h in hits[:CONTEXT_K]], amended,
+                         stages=_stages(hits, legs) if legs else {})

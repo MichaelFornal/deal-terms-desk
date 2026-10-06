@@ -146,13 +146,13 @@ def test_r7_needs_a_resolver(ladder):
         ladder.run("R7", "termination fee")
 
 
-def _spy_r6(ladder):
+def _spy_r6(ladder, rung="R6"):
     seen, real = [], ladder.run
 
-    def run(rung, query, contract_id=None, k=10, rewritten=None):
-        if rung == "R6":
+    def run(rung_, query, contract_id=None, k=10, rewritten=None):
+        if rung_ == rung:
             seen.append((query, contract_id))
-        return real(rung, query, contract_id, k, rewritten)
+        return real(rung_, query, contract_id, k, rewritten)
     ladder.run = run
     return seen
 
@@ -228,3 +228,46 @@ def test_r7n_scopes_strips_and_skips_the_reranker(deals_ladder):
 
 def test_answer_path_is_r7n():
     assert load_answer_path() == "R7n"
+
+
+def test_r7n_keeps_a_picked_deal_and_drops_only_its_own_names(deals_ladder):
+    seen = _spy_r6(deals_ladder, "R6n")
+    got = deals_ladder.run("R7n", "Acme Software outside date", "contract_1", k=5)
+    assert got.scope == Scope("contract_1", None, ())
+    assert got.hits and all(h.contract_id == "contract_1" for h in got.hits)
+    assert seen == [("Acme Software outside date", "contract_1")]
+    seen.clear()
+    deals_ladder.run("R7n", "What is the Acme Software outside date?", "edgar_0001", k=5)
+    assert seen == [("What is the outside date", "edgar_0001")]
+
+
+def test_hybrid_rungs_record_each_legs_rank_and_score(ladder):
+    from retrieval import bm25
+    got = ladder.run("R3", "counsel", "big", k=5)
+    assert set(got.stages) == {h.passage_id for h in got.hits}
+    lex = bm25.search(ladder.conn, "counsel", "big", 10)  # R3's BM25 leg at depth 10
+    top = lex[0]
+    assert got.stages[top.passage_id]["bm25"] == {"rank": 1, "score": top.score}
+    assert got.stages[top.passage_id]["dense"]["rank"] >= 1
+    dense_only = [s for pid, s in got.stages.items() if pid not in {h.passage_id for h in lex}]
+    assert dense_only and all(s["bm25"] is None and s["dense"] is not None for s in dense_only)
+
+
+def test_stages_leave_the_fused_order_untouched(ladder):
+    from retrieval import bm25
+    from retrieval.hybrid import rrf
+    from retrieval.lexicon import rewrite
+    q = "termination fee amount in cash"
+    got = ladder.run("R6n", q, "big", k=5)
+    rq, depth = rewrite(q, ladder.lexicon), max(5, ladder.settings.depth)
+    legs = [bm25.search(ladder.conn, rq, "big", depth, table="passages_x_fts"), ladder._dense(rq, "big", depth)]
+    assert got.hits == rrf(legs, ladder.settings.rrf_k0, 2 * depth)[:5]
+
+
+def test_single_leg_rungs_have_no_stages_and_r7n_and_rerank_keep_them(ladder, deals_ladder):
+    assert ladder.run("R1", "termination fee", "big", k=5).stages == {}
+    assert ladder.run("R2", "termination fee", "big", k=5).stages == {}
+    reranked = ladder.run("R4", "termination fee", "big", k=5)
+    assert set(reranked.stages) == {h.passage_id for h in reranked.hits}
+    got = deals_ladder.run("R7n", "What is the Acme Software outside date?", k=5)
+    assert got.hits and set(got.stages) == {h.passage_id for h in got.hits}
