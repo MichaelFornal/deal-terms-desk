@@ -314,6 +314,7 @@ def test_health_reports_the_running_code_bundle_and_facts(tmp_path):
     assert h["bundle_sha"] == hashlib.sha256(desk.config.bundle.read_bytes()).hexdigest()
     assert h["facts_sha"] == hashlib.sha256(desk.config.facts_path.read_bytes()).hexdigest()
     assert h["template_sha"] == TEMPLATE_SHA and h["budget"] == "ok" and h["rss_mb"] > 0
+    assert h["thinking_budget"] == desk.config.thinking_budget and h["max_tokens"] == desk.config.max_tokens
     assert isinstance(h["bundle_meta"], dict) and "spent" not in h  # spend amounts are never public
 
 

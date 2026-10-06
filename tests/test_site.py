@@ -233,8 +233,8 @@ def test_method_counts_the_live_index_from_the_bundle(tmp_path):
 
 
 def test_method_says_the_live_model_thinks_and_how_much(tmp_path):
-    sentence = ("The live model answers with extended thinking, up to {} tokens of it per answer, "
-                "as the evaluation runs did.")
+    sentence = ("The live model answers with extended thinking, as the evaluation runs did, "
+                "with up to {} tokens of thinking per answer.")
     render_site({**facts(), "m5_thinking_budget_tokens": 1234}, tmp_path / "a", EXAMPLES)
     assert sentence.format(1234) in visible((tmp_path / "a" / "method.html").read_text())
     f = {k: v for k, v in facts().items() if k != "m5_thinking_budget_tokens"}

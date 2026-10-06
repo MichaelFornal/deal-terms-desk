@@ -132,7 +132,8 @@ PY
 }
 live=""
 for _ in $(seq 60); do
-  if matches "$(curl -fsS --max-time 10 "$BASE/api/health" || echo '{}')"; then live=1; break; fi
+  HEALTH="$(curl -fsS --max-time 10 "$BASE/api/health" || echo '{}')"
+  if matches "$HEALTH"; then live=1; break; fi
   sleep 2
 done
 if [ -z "$live" ]; then
@@ -143,6 +144,22 @@ if [ -z "$live" ]; then
   else
     echo "release $SHA never reported healthy and there is no previous release to revert to" >&2
   fi
+  exit 1
+fi
+
+# The thinking budget the box runs must be the one the site publishes (facts.json m5_thinking_budget_tokens). The
+# release is already healthy, so a mismatch fails the push without a revert: fix /etc/dtd/env or rerun calibration.
+if ! uv run python - "$HEALTH" <<'PY'
+import json, sys
+want = json.load(open("facts.json")).get("m5_thinking_budget_tokens")
+got = json.loads(sys.argv[1]).get("thinking_budget")
+if want is not None and got != want:
+    print(f"the box runs with thinking budget {got!r} but facts.json m5_thinking_budget_tokens={want}", file=sys.stderr)
+    sys.exit(1)
+PY
+then
+  echo "thinking budget mismatch: set DTD_THINKING_BUDGET in /etc/dtd/env to the published budget, or rerun" \
+    "calibration and dtd facts; the release is healthy and stays live" >&2
   exit 1
 fi
 

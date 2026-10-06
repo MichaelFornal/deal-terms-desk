@@ -59,7 +59,7 @@ M6 (README and launch post by Michael, final facts check, public) is a separate 
 ### API runner (`answer/api_runner.py`)
 - **`run_api(prompt, model, *, max_tokens, client=None)`** keeps the `run_claude` contract (`{"result", "usage"}`) plus `stop_reason`.
   - Usage nulls become 0.
-  - Haiku extended thinking (budget from config; decided 2026-10-06 after calibration showed the no-thinking API path scoring below the CLI evaluation runs), `max_retries=1`, timeout about 30 s.
+  - Haiku extended thinking (budget from config; decided 2026-10-06 after calibration showed the no-thinking API path scoring below the CLI evaluation runs), `max_retries=0`, 90 s timeout.
 - **Typed failures:** rate_limited, overloaded, timeout, connection, bad_request, billing, refusal.
   - A truncated reply is a parse error, never an answer.
   - Every failure after a billed response carries its usage.

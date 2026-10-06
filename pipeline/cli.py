@@ -859,7 +859,11 @@ def _m5_calibrate(args) -> int:
     sample = calibration_sample(read_items(sets["thuman"]) + read_items(sets["tmachine"]), args.n)
     th = [i for i in sample if i.set == "thuman"]
     tm = [i for i in sample if i.set == "tmachine"]
-    runner = _calibration_runner(args, key)
+    try:
+        runner = _calibration_runner(args, key)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
     th_ans = Answerer(_ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))}),
                       runner, HAIKU)  # the ladders `dtd m4 answer` used, so prompts match M4's
     tm_ans = Answerer(_deals_ladder(*_deals_texts()), runner, HAIKU)
@@ -879,8 +883,7 @@ def _m5_calibrate(args) -> int:
                 chars[i.item_id] = len(p.prompt)
     summary = summarise_calibration(sample, api, cli_recs, chars, load_prices(PRICES), args.max_tokens,
                                    args.thinking_budget)
-    summary |= {"model": HAIKU, "max_tokens": args.max_tokens, "thinking_budget": args.thinking_budget,
-                "ledger": ledger.name, "run": run}
+    summary |= {"model": HAIKU, "max_tokens": args.max_tokens, "ledger": ledger.name, "run": run}
     _data_m5().mkdir(parents=True, exist_ok=True)
     _write_atomic(_data_m5() / "calibration.json", json.dumps(summary, indent=2, sort_keys=True))
     print(json.dumps({k: summary[k] for k in ("n", "paired", "errors", "truncated", "cost_usd_total", "stop_rule")}))

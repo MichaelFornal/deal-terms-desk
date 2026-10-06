@@ -176,4 +176,5 @@ class Desk:
     def health(self) -> dict:
         return {"ok": True, "git_sha": self.config.git_sha, "bundle_sha": self._bundle_sha,
                 "facts_sha": self._facts_sha, "template_sha": TEMPLATE_SHA, "model": self.config.model,
+                "thinking_budget": self.config.thinking_budget, "max_tokens": self.config.max_tokens,
                 "budget": self._budget(), "rss_mb": _rss_mb(), "bundle_meta": self._meta}

@@ -41,7 +41,7 @@ Live-path retrieval on the development machine, p50 / p95 ms: R6n {_pair(f, 'm5_
 
 ## API calibration
 
-{_v(f, 'm5_calibration_n')} tune-split questions were answered through the API with the live settings and compared with M4's command-line answers to the same questions. Stop rule: {_v(f, 'm5_calibration_stop_rule')}. The live model answers with extended thinking, up to {_v(f, 'm5_thinking_budget_tokens')} tokens of it per answer, as the evaluation runs did.
+{_v(f, 'm5_calibration_n')} tune-split questions were answered through the API with the live settings and compared with M4's command-line answers to the same questions. Stop rule: {_v(f, 'm5_calibration_stop_rule')}. The live model answers with extended thinking, as the evaluation runs did, with up to {_v(f, 'm5_thinking_budget_tokens')} tokens of thinking per answer.
 
 | Measure | API | Command-line tool |
 |---|---|---|

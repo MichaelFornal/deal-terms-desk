@@ -138,6 +138,13 @@ def test_a_thinking_budget_is_sent_on_every_call_and_only_text_reaches_the_parse
     assert all("temperature" not in c and c["max_tokens"] == 6144 for c in client.calls)
 
 
+def test_the_default_timeout_leaves_room_for_thinking(monkeypatch):
+    built = []
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kw: built.append(kw) or FakeClient(message()))
+    make_api_runner(64)("p", HAIKU)
+    assert built == [{"max_retries": 0, "timeout": 90.0}]
+
+
 def test_no_budget_sends_no_thinking_key():
     client = FakeClient(message())
     make_api_runner(1024, client=client)("p", HAIKU)

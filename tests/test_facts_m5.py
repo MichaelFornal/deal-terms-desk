@@ -113,10 +113,11 @@ def test_every_measurement_run_key_is_unstable_and_the_rest_is_stable():
         assert not is_unstable(k), k
 
 
-def test_an_older_calibration_without_thinking_emits_no_budget(tmp_path):
+def test_a_calibration_without_thinking_emits_no_budget(tmp_path):
     args = every_input(tmp_path)
     path = args[0] / "calibration.json"
     old = json.loads(path.read_text())
-    old.pop("thinking_budget")
-    path.write_text(json.dumps(old))
-    assert "m5_thinking_budget_tokens" not in build_m5(*args)
+    for budget in (0, None):  # a no-thinking run (0), and an older file with no field
+        path.write_text(json.dumps(old | {"thinking_budget": 0} if budget == 0 else
+                                   {k: v for k, v in old.items() if k != "thinking_budget"}))
+        assert "m5_thinking_budget_tokens" not in build_m5(*args)

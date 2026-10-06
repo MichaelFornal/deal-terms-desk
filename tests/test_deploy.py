@@ -264,3 +264,10 @@ def test_smoke_reports_a_dead_box_as_failures_not_a_traceback():
     assert smoke.check_health(dead, {}) == ["health: status 0"]
     assert smoke.check_deals(dead) and smoke.check_pages(dead) and smoke.check_invalid(dead)
     assert smoke.check_burst(dead, "q", tries=2) == ["burst: no 429 after 2 searches"]
+
+
+def test_push_refuses_a_box_whose_thinking_budget_differs_from_the_published_one():
+    text = Path("deploy/push.sh").read_text()
+    assert 'm5_thinking_budget_tokens' in text and '.get("thinking_budget")' in text
+    assert "thinking budget" in text and "facts.json" in text
+    assert text.index("never reported healthy") < text.index("m5_thinking_budget_tokens") < text.index("dtd warm")

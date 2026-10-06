@@ -209,3 +209,51 @@ def test_calibrate_refuses_when_m4_inputs_are_missing(tmp_path, monkeypatch, cap
     monkeypatch.setattr(cli, "make_api_runner", lambda *a, **k: pytest.fail("no runner without inputs"))
     assert cli.entry(["m5", "calibrate"]) == 2
     assert "calibration inputs missing" in capsys.readouterr().err
+
+
+def _m4_inputs(tmp_path, monkeypatch):
+    """Every file _m5_calibrate checks for, empty, so it reaches the runner without any model call."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    m4 = tmp_path / "m4"
+    m4.mkdir()
+    for name in ("thuman_items.jsonl", "tmachine_items.jsonl", f"answers_thuman_{cli.HAIKU}.jsonl",
+                 f"answers_tmachine_{cli.HAIKU}.jsonl"):
+        (m4 / name).write_text("")
+    for attr in ("PRICES", "INDEX", "DEALS_INDEX"):
+        f = tmp_path / attr
+        f.write_text("")
+        monkeypatch.setattr(cli, attr, f)
+    monkeypatch.setattr(cli, "_data_m4", lambda: m4)
+    monkeypatch.setattr(cli, "_data_m5", lambda: tmp_path / "m5")
+
+
+def test_calibrate_builds_its_runner_and_ledger_from_the_thinking_budget(tmp_path, monkeypatch):
+    _m4_inputs(tmp_path, monkeypatch)
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def runner(args, key):
+        seen["runner"] = args.thinking_budget
+        return lambda p, m: None
+
+    def ledger(root, model, max_tokens, thinking_budget=0):
+        seen["ledger"] = (max_tokens, thinking_budget)
+        raise Stop
+    monkeypatch.setattr(cli, "_calibration_runner", runner)
+    monkeypatch.setattr(cli, "ledger_path", ledger)
+    monkeypatch.setattr(cli, "_ladder", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_deals_ladder", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_deals_texts", lambda: ((), ()))
+    with pytest.raises(Stop):
+        cli.entry(["m5", "calibrate", "--thinking-budget", "2048", "--max-tokens", "3000"])
+    assert seen == {"runner": 2048, "ledger": (3000, 2048)}
+
+
+def test_a_bad_thinking_budget_is_an_error_message_and_exit_two(tmp_path, monkeypatch, capsys):
+    _m4_inputs(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_api_client", lambda key: object())
+    assert cli.entry(["m5", "calibrate", "--thinking-budget", "512"]) == 2
+    err = capsys.readouterr().err
+    assert "512" in err and "6144" in err and "Traceback" not in err

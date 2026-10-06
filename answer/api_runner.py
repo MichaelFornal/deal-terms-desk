@@ -42,7 +42,7 @@ def _kind(e: Exception) -> str:
     return "bad_request"
 
 
-def make_api_runner(max_tokens: int, client=None, timeout: float = 30.0, thinking_budget: int | None = None):
+def make_api_runner(max_tokens: int, client=None, timeout: float = 90.0, thinking_budget: int | None = None):
     """runner(prompt, model) -> {"result", "usage", "stop_reason"}: the `run_claude` contract over the Messages API.
     One user turn, no system prompt, at most `max_tokens` out (thinking tokens included). With `thinking_budget` every
     call asks for extended thinking of up to that many tokens (the API takes 1024 up to below `max_tokens`, and no

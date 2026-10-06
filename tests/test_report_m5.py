@@ -103,7 +103,7 @@ def test_each_label_covers_exactly_the_facts_it_names(tmp_path):
 
 
 def test_the_report_says_the_model_answers_with_extended_thinking():
-    sentence = ("The live model answers with extended thinking, up to {} tokens of it per answer, "
-                "as the evaluation runs did.")
+    sentence = ("The live model answers with extended thinking, as the evaluation runs did, "
+                "with up to {} tokens of thinking per answer.")
     assert sentence.format("<m5_thinking_budget_tokens>") in render_m5({"m5_thinking_budget_tokens": "<m5_thinking_budget_tokens>"})
     assert sentence.format("pending") in render_m5({})

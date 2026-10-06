@@ -76,3 +76,8 @@ def test_a_bad_thinking_budget_or_timeout_is_refused_by_name(env, name):
 
 def test_a_thinking_budget_of_zero_means_off():
     assert from_env({"DTD_MONTH_CAP_USD": "4.5", "DTD_THINKING_BUDGET": "0"}).thinking_budget == 0
+
+
+def test_a_non_integer_thinking_budget_is_refused_by_name():
+    with pytest.raises(ValueError, match="DTD_THINKING_BUDGET"):
+        from_env({"DTD_MONTH_CAP_USD": "4.5", "DTD_THINKING_BUDGET": "lots"})
