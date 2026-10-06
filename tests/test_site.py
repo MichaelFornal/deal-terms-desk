@@ -248,3 +248,30 @@ def test_output_tokens_say_they_include_thinking(tmp_path):
     page = visible((tmp_path / "results.html").read_text())
     rows = [line for line in page.splitlines() if "Output tokens per answer" in line]
     assert rows and all("Output tokens per answer (including thinking)" in r for r in rows)
+
+
+def without_m5_values() -> dict:
+    """The committed facts with every M5 value emptied, as a builder that lost its inputs would leave them."""
+    return {k: (None if k.startswith("m5_") else v) for k, v in facts().items()}
+
+
+def test_strict_pages_from_the_committed_facts_have_nothing_pending(tmp_path):
+    for p in render_site(facts(), tmp_path, EXAMPLES, strict=True)[:4]:
+        assert "pending" not in visible(p.read_text()), p.name
+
+
+def test_strict_refuses_a_fact_built_without_a_value(tmp_path):
+    f = without_m5_values()
+    render_site(f, tmp_path / "loose", EXAMPLES)  # loose: a fact with no value reads "pending", like a missing one
+    assert "pending" in (tmp_path / "loose" / "results.html").read_text()
+    with pytest.raises(KeyError):
+        render_site(f, tmp_path / "strict", EXAMPLES, strict=True)
+
+
+def test_dtd_site_strict_fails_on_a_fact_without_a_value(tmp_path, monkeypatch, capsys):
+    from pipeline import cli
+    (tmp_path / "facts.json").write_text(json.dumps(without_m5_values()))
+    monkeypatch.setattr(cli, "FACTS", tmp_path / "facts.json")
+    monkeypatch.setattr(cli, "SITE_DIST", tmp_path / "dist")
+    assert cli.entry(["site", "--strict"]) == 1
+    assert "a fact the site prints is missing" in capsys.readouterr().err

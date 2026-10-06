@@ -412,3 +412,11 @@ def test_host_port_derivation(base, want):
     out = subprocess.run(["bash", "-c", '. deploy/hostport.sh; host_port "$1"', "_", base],
                          check=True, capture_output=True, text=True)
     assert out.stdout.strip() == want
+
+
+def test_push_and_ci_build_the_site_strictly():
+    assert "uv run dtd site --strict" in Path("deploy/push.sh").read_text()
+    ci = Path(".github/workflows/ci.yml").read_text()
+    assert "uv run dtd site --strict" in ci
+    for t in ("tests/test_report_m5.py", "tests/test_facts_m5.py"):
+        assert t in ci, t

@@ -18,7 +18,7 @@ fi
 uv run pytest -q
 uv run dtd facts --check
 uv run dtd bundle
-uv run dtd site
+uv run dtd site --strict
 if dirty; then
   echo "refusing to deploy: the release gates changed tracked files; review and commit them first" >&2
   exit 1
