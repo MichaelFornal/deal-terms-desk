@@ -18,7 +18,7 @@ fi
 uv run pytest -q
 uv run dtd facts --check
 uv run dtd bundle
-uv run dtd site
+uv run dtd site --strict
 if dirty; then
   echo "refusing to deploy: the release gates changed tracked files; review and commit them first" >&2
   exit 1
@@ -212,10 +212,15 @@ if ! config_match "$HEALTH" "answer settings mismatch"; then
 fi
 
 # Warm the example answers on every push: a changed retriever, model or example list changes the prompt, and cached
-# examples cost nothing. Every example must come back with an answering state.
-WARM="$(ssh "$DTD_HOST" "cd /srv/dtd/current && { $LOAD_ENV; $AS_DTD .venv/bin/dtd warm --examples site/examples.json; }" | tail -n 1)"
-if ! uv run python -c 'import json, sys; got = json.loads(sys.argv[1]); sys.exit(0 if got["asked"] > 0 and set(got["states"]) <= {"answered", "not_stated", "unfiled_schedule"} else 1)' "$WARM"; then
+# examples cost nothing. `dtd warm` exits non-zero unless every example comes back with an answering state
+# (service/warm.py WARM_OK); its last line says which states came back.
+if ! WARM="$(ssh "$DTD_HOST" "cd /srv/dtd/current && { $LOAD_ENV; $AS_DTD .venv/bin/dtd warm --examples site/examples.json; }" | tail -n 1)"; then
   echo "warm failed: an example did not come back answered, not_stated or unfiled_schedule: $WARM" >&2
   exit 1
 fi
 echo "deployed $SHA"
+
+# Disk: keep the live release, two rollback targets and the bundles they link to (deploy/prune.sh, from this
+# release). PREV, the release that was live before this push, is kept as one of the two. A failed prune leaves
+# the deploy standing.
+ssh "$DTD_HOST" "bash '$REL/deploy/prune.sh' /srv/dtd '$PREV'" || echo "prune failed; the release is live; check /srv/dtd by hand" >&2

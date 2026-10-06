@@ -144,6 +144,10 @@ def test_output_tokens_say_they_include_thinking():
     assert rows and all("Output tokens per answer (including thinking)" in r for r in rows)
 
 
+def test_the_committed_report_has_nothing_pending():
+    assert "pending" not in Path("docs/m5/REPORT.md").read_text()
+
+
 def test_report_booleans_read_yes_or_no():
     f = Every(m5_calibration_estimator_ok=True, m5_cap_trip_budget_reached=True, m5_cap_trip_budget_cached=False,
               m5_cap_trip_ledger_unchanged=True)

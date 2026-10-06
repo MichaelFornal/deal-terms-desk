@@ -26,6 +26,7 @@ from evals.run_rung import Context, evaluate, load_context, with_passages
 from evals.tier import RUNG_NAMES, tier_report, tier_sample, tier_topics
 from evals.tmachine import PASSES, TOPICS, items_from_rows, label_all, scope_report
 from evals.tune import tune
+from facts.copycheck import FLAGGED, check as check_copy, render as render_copy
 from facts.build import build as build_facts
 from facts.build import UNSTABLE
 from facts.m0 import build_m0
@@ -44,7 +45,7 @@ from facts.site import render_site
 from pipeline import m0
 from service.app import build_desk
 from service.config import from_env
-from service.warm import warm
+from service.warm import warm, warm_ok
 from pipeline.bundle import MANIFEST, build_bundle, bundle_is_current
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
@@ -922,8 +923,9 @@ def _cmd_warm(args) -> int:
     config = from_env()
     # warming is the operator's own call: it must not run out of the visitors' hourly fresh-call allowance
     desk = build_desk(replace(config, fresh_per_hour=max(config.fresh_per_hour, len(examples))))
-    print(json.dumps(warm(desk, examples)))
-    return 0
+    result = warm(desk, examples)
+    print(json.dumps(result))
+    return 0 if warm_ok(result) else 1
 
 
 def _cmd_site(args) -> int:
@@ -938,6 +940,24 @@ def _cmd_site(args) -> int:
         return 1
     print(json.dumps({"written": [str(p) for p in written]}))
     return 0
+
+
+def _cmd_copycheck(args) -> int:
+    """Every number in hand-written copy (README, launch post) against facts.json. Reports only; never writes."""
+    if not FACTS.exists():
+        print("facts.json missing; run `dtd facts` first", file=sys.stderr)
+        return 2
+    missing = [f for f in args.files if not Path(f).is_file()]
+    if missing:
+        print(f"no such file: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    facts = json.loads(FACTS.read_text(encoding="utf-8"))
+    flagged = 0
+    for name in args.files:
+        found = check_copy(Path(name).read_text(encoding="utf-8"), facts)
+        print(render_copy(name, found))
+        flagged += sum(f.status in FLAGGED for f in found)
+    return 1 if flagged else 0
 
 
 def entry(argv: list[str] | None = None) -> int:
@@ -971,6 +991,9 @@ def entry(argv: list[str] | None = None) -> int:
     site_p = sub.add_parser("site")
     site_p.add_argument("--strict", action="store_true", help="fail on any missing fact, M5 ones included (M6)")
     site_p.set_defaults(fn=_cmd_site)
+    copy_p = sub.add_parser("copycheck", help="check every number in hand-written Markdown against facts.json")
+    copy_p.add_argument("files", nargs="+")
+    copy_p.set_defaults(fn=_cmd_copycheck)
     sub.add_parser("bundle").set_defaults(fn=_cmd_bundle)
     m0p = sub.add_parser("m0")
     m0p.add_argument("stage", choices=M0_STAGES + ("all", "candidate-sample"))

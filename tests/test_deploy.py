@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -149,7 +150,28 @@ def test_push_sources_its_helper_before_anything_ships():
 def test_push_warms_every_time_and_checks_the_result():
     text = Path("deploy/push.sh").read_text()
     assert "dtd warm --examples" in text and "TEMPLATE_SHA" not in text and '"$OLD"' not in text
-    assert '"unfiled_schedule"' in text and 'got["states"]' in text and "warm failed" in text
+    assert 'if ! WARM="$(ssh' in text and "warm failed" in text
+    assert 'got["states"]' not in text  # the rule lives in service/warm.py (WARM_OK), not in a copy here
+
+
+def warm_block() -> str:
+    text = Path("deploy/push.sh").read_text()
+    return text[text.index("# Warm the example answers"):text.index('echo "deployed $SHA"')]
+
+
+def run_warm(tmp_path, code: int, line: str) -> subprocess.CompletedProcess:
+    """push.sh's warm block under a fake ssh that prints `line` and exits `code`, as `dtd warm` on the box would."""
+    fake = f"set -euo pipefail\nDTD_HOST=box LOAD_ENV=: AS_DTD=\nssh() {{ echo '{line}'; return {code}; }}\n"
+    return subprocess.run(["bash", "-c", fake + warm_block() + "echo warmed\n"], capture_output=True, text=True,
+                          cwd=tmp_path)
+
+
+def test_push_fails_when_warm_does_and_shows_its_line(tmp_path):
+    ok = run_warm(tmp_path, 0, '{"asked": 6, "cached": 6, "states": {"answered": 6}}')
+    assert ok.returncode == 0 and ok.stdout.endswith("warmed\n")
+    bad = run_warm(tmp_path, 1, '{"asked": 6, "cached": 5, "states": {"answered": 5, "error": 1}}')
+    assert bad.returncode == 1 and "warmed" not in bad.stdout
+    assert "warm failed" in bad.stderr and '"error": 1' in bad.stderr
 
 
 def test_push_checks_env_file_bounds_curl_and_owns_files_on_the_box():
@@ -412,3 +434,162 @@ def test_host_port_derivation(base, want):
     out = subprocess.run(["bash", "-c", '. deploy/hostport.sh; host_port "$1"', "_", base],
                          check=True, capture_output=True, text=True)
     assert out.stdout.strip() == want
+
+
+def test_push_and_ci_build_the_site_strictly():
+    assert "uv run dtd site --strict" in Path("deploy/push.sh").read_text()
+    ci = Path(".github/workflows/ci.yml").read_text()
+    assert "uv run dtd site --strict" in ci
+    for t in ("tests/test_report_m5.py", "tests/test_facts_m5.py"):
+        assert t in ci, t
+
+
+def prune_tree(tmp_path) -> Path:
+    """Releases r1..r4 completed in that order, each linked to its own bundle, plus a partial upload and an orphan
+    bundle. `current` is r3, not the newest, as after a rollback."""
+    root = tmp_path / "srv"
+    for b in ("b0", "b1", "b2", "b3", "b9"):
+        (root / "bundles" / b).mkdir(parents=True)
+        (root / "bundles" / b / "live.db").write_text(b)
+    for i, (r, b) in enumerate((("r1", "b0"), ("r2", "b1"), ("r3", "b2"), ("r4", "b3"))):
+        rel = root / "releases" / r
+        rel.mkdir(parents=True)
+        (rel / "live.db").symlink_to(root / "bundles" / b / "live.db")
+        (rel / ".complete").touch()
+        os.utime(rel / ".complete", (1_000_000 + i, 1_000_000 + i))
+    (root / "releases" / "partial").mkdir()
+    (root / "current").symlink_to(root / "releases" / "r3")
+    return root
+
+
+def run_prune(root: Path, *prev: str | Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(Path("deploy/prune.sh").resolve()), str(root), *map(str, prev)],
+                          capture_output=True, text=True)
+
+
+def assert_pruned_like_the_plain_tree(root: Path, got: subprocess.CompletedProcess) -> None:
+    """prune_tree after a prune: r3 (live), r2 and r4 (rollbacks) and their bundles stay; the rest is gone."""
+    assert got.returncode == 0, got.stderr
+    assert sorted(p.name for p in (root / "releases").iterdir()) == ["r2", "r3", "r4"]
+    assert sorted(p.name for p in (root / "bundles").iterdir()) == ["b1", "b2", "b3"]
+    assert (root / "current").resolve() == (root / "releases" / "r3").resolve()
+    assert (root / "releases" / "r3" / "live.db").read_text() == "b2"  # the live release still reaches its bundle
+    assert sorted(got.stdout.splitlines()) == ["removed bundle b0", "removed bundle b9",
+                                               "removed release partial", "removed release r1"]
+
+
+def test_prune_keeps_the_live_release_two_rollbacks_and_their_bundles(tmp_path):
+    root = prune_tree(tmp_path)
+    assert_pruned_like_the_plain_tree(root, run_prune(root))
+    again = run_prune(root)
+    assert again.returncode == 0 and again.stdout == ""
+
+
+@pytest.mark.parametrize("linked", ["root", "releases", "bundles"])
+def test_prune_through_symlinked_directories_keeps_the_same_releases_and_bundles(tmp_path, linked):
+    """A symlinked root, releases/ or bundles/ (pointing elsewhere) prunes exactly as the plain tree does. tmp_path is
+    already canonical, so each link is made here."""
+    root = prune_tree(tmp_path)
+    called = root
+    if linked == "root":
+        called = tmp_path / "srv-link"
+        called.symlink_to(root)
+    else:
+        away = tmp_path / "away" / linked
+        away.parent.mkdir()
+        (root / linked).rename(away)
+        (root / linked).symlink_to(away)
+    assert_pruned_like_the_plain_tree(root, run_prune(called))
+
+
+def test_prune_refuses_when_current_does_not_resolve(tmp_path):
+    root = prune_tree(tmp_path)
+    (root / "current").unlink()
+    (root / "current").symlink_to(root / "releases" / "gone")
+    got = run_prune(root)
+    assert got.returncode == 1 and "refusing to prune" in got.stderr
+    assert len(list((root / "releases").iterdir())) == 5 and len(list((root / "bundles").iterdir())) == 5
+
+
+def test_prune_refuses_when_current_is_not_a_release(tmp_path):
+    root = prune_tree(tmp_path)
+    (tmp_path / "stray").mkdir()
+    (root / "current").unlink()
+    (root / "current").symlink_to(tmp_path / "stray")
+    got = run_prune(root)
+    assert got.returncode == 1 and "refusing to prune" in got.stderr and got.stdout == ""
+    assert len(list((root / "releases").iterdir())) == 5 and len(list((root / "bundles").iterdir())) == 5
+
+
+def test_prune_refuses_before_deleting_when_a_kept_release_links_outside_bundles(tmp_path):
+    root = prune_tree(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "live.db").write_text("x")
+    (root / "releases" / "r4" / "live.db").unlink()
+    (root / "releases" / "r4" / "live.db").symlink_to(tmp_path / "elsewhere" / "live.db")
+    got = run_prune(root)
+    assert got.returncode == 1 and "refusing to prune" in got.stderr and got.stdout == ""
+    assert len(list((root / "releases").iterdir())) == 5 and len(list((root / "bundles").iterdir())) == 5
+
+
+def releases_tree(tmp_path, names: str, current: str) -> Path:
+    """One release per letter of `names`, completed in that order, each linked to its own bundle b<letter>."""
+    root = tmp_path / "srv"
+    for i, r in enumerate(names):
+        (root / "bundles" / f"b{r}").mkdir(parents=True)
+        (root / "bundles" / f"b{r}" / "live.db").write_text(r)
+        rel = root / "releases" / r
+        rel.mkdir(parents=True)
+        (rel / "live.db").symlink_to(root / "bundles" / f"b{r}" / "live.db")
+        (rel / ".complete").touch()
+        os.utime(rel / ".complete", (1_000_000 + i, 1_000_000 + i))
+    (root / "current").symlink_to(root / "releases" / current)
+    return root
+
+
+def test_prune_keeps_the_release_that_was_live_before_current(tmp_path):
+    """Deploy A, B, C, D, roll back to B, push E: B was live before E but completed second, so completion order alone
+    would remove it. As the second argument it takes one of the two rollback slots."""
+    root = releases_tree(tmp_path, "ABCDE", current="E")
+    got = run_prune(root, root / "releases" / "B")
+    assert got.returncode == 0, got.stderr
+    assert sorted(p.name for p in (root / "releases").iterdir()) == ["B", "D", "E"]
+    assert sorted(p.name for p in (root / "bundles").iterdir()) == ["bB", "bD", "bE"]
+    assert sorted(got.stdout.splitlines()) == ["removed bundle bA", "removed bundle bC",
+                                               "removed release A", "removed release C"]
+
+
+@pytest.mark.parametrize("prev", ["", "outside", "missing", "current"])
+def test_prune_ignores_an_empty_or_unusable_previous_release(tmp_path, prev):
+    """push.sh passes '' when there was no previous release; a path that is not another release changes nothing."""
+    root = releases_tree(tmp_path, "ABCDE", current="E")
+    (tmp_path / "outside").mkdir()
+    arg = {"": "", "outside": tmp_path / "outside", "missing": root / "releases" / "gone",
+           "current": root / "current"}[prev]
+    got = run_prune(root, arg)
+    assert got.returncode == 0, got.stderr
+    assert sorted(p.name for p in (root / "releases").iterdir()) == ["C", "D", "E"]
+    assert (tmp_path / "outside").is_dir()
+
+
+def test_push_prunes_only_after_a_good_deploy():
+    text = Path("deploy/push.sh").read_text()
+    prune = text.index("$REL/deploy/prune.sh")  # the ssh line, not the comment above it
+    assert prune > text.index('echo "deployed $SHA"') > text.index("warm failed")
+    assert "|| echo" in text[prune:text.index("\n", prune)]  # a failed prune leaves the deploy standing
+    subprocess.run(["bash", "-n", "deploy/prune.sh"], check=True)
+
+
+@pytest.mark.parametrize("prev", ["/srv/dtd/releases/old", ""])
+def test_push_tells_prune_which_release_was_live_before(tmp_path, prev):
+    """The prune line under a fake ssh: the remote command passes PREV as prune.sh's second argument, quoted, and
+    an empty PREV (no previous release) as ''."""
+    text = Path("deploy/push.sh").read_text()
+    start = text.rindex("\n", 0, text.index("$REL/deploy/prune.sh")) + 1
+    line = text[start:text.index("\n", start)]
+    log = tmp_path / "ssh.log"
+    fake = (f"set -euo pipefail\nDTD_HOST=box REL=/srv/dtd/releases/new PREV='{prev}'\n"
+            f"ssh() {{ printf '%s' \"$2\" > '{log}'; }}\n")
+    got = subprocess.run(["bash", "-c", fake + line + "\n"], capture_output=True, text=True)
+    assert got.returncode == 0, got.stderr
+    assert log.read_text() == f"bash '/srv/dtd/releases/new/deploy/prune.sh' /srv/dtd '{prev}'"

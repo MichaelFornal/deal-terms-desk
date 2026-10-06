@@ -69,19 +69,22 @@ class Table:
 
 
 class Facts:
-    """Facts for the pages. A missing M5 fact (measured late in M5) renders as pending unless strict; any other
-    missing fact is a bug and raises KeyError."""
+    """Facts for the pages. A missing or null M5 fact (measured late in M5) renders as pending unless strict; any
+    other missing fact is a bug and raises KeyError. Strict (M6 on) refuses both, so no page can say "pending"."""
 
     def __init__(self, facts, strict: bool = False):
         self.facts, self.strict = facts, strict
 
     def get(self, key: str):
         try:
-            return self.facts[key]
+            value = self.facts[key]
         except KeyError:
             if key.startswith("m5_") and not self.strict:
                 return None
             raise
+        if value is None and self.strict:
+            raise KeyError(key)  # a fact built without a value would print "pending"
+        return value
 
 
 def cell_keys(c) -> list[str]:

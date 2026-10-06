@@ -263,6 +263,15 @@ nearly every sampled question (`m5_server_embed_parity`, `m5_server_embed_parity
 computed on each machine. The model budget is `m5_model_cap_usd` a month after hosting (`m5_hosting_usd_month`),
 about `m5_answers_per_month` new answers.
 
+**M6 decisions (2026-10-06, recorded in `docs/superpowers/plans/2026-10-06-m6-launch.md`):**
+- The code is released under the MIT License; `NOTICE.md` carries the data, model and dependency licences.
+- An external uptime check (UptimeRobot, free) watches `/api/health`.
+- The site build is strict in CI and in the deploy: a missing or empty fact fails it, so no page can say "pending".
+- `dtd copycheck` checks every number in the hand-written README and launch post against `facts.json`, and flags a
+  machine-built number printed without its label. It reports; the copy stays Michael's.
+- The first Ask example was replaced: its answer led with an unfiled-schedule note although its first claim
+  answered the question.
+
 ## 10. Risks and stated limits (these appear on the Method page)
 
 - **The tech half may be thin or low on startup pull.** These are public-company acquisitions;

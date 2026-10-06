@@ -5,3 +5,6 @@ __pycache__/
 node_modules/
 .env
 site/dist/
+.superpowers/
+.claude/
+.DS_Store
