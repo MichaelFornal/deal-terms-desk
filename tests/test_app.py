@@ -134,6 +134,7 @@ def test_build_desk_refuses_a_model_the_prices_do_not_describe(tmp_path, monkeyp
 
 def test_warm_ok_needs_an_answering_state_for_every_example():
     assert warm_ok({"asked": 2, "cached": 0, "states": {"answered": 1, "unfiled_schedule": 1}})
+    assert warm_ok({"asked": 2, "cached": 2, "states": {"not_stated": 2}})  # "not stated" is an answer too
     assert not warm_ok({"asked": 0, "cached": 0, "states": {}})
     assert not warm_ok({"asked": 2, "cached": 0, "states": {"answered": 1, "error": 1}})
     assert not warm_ok({"asked": 1, "cached": 1, "states": {"budget_cached": 1}})
