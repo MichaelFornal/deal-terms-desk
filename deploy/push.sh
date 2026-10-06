@@ -219,3 +219,7 @@ if ! WARM="$(ssh "$DTD_HOST" "cd /srv/dtd/current && { $LOAD_ENV; $AS_DTD .venv/
   exit 1
 fi
 echo "deployed $SHA"
+
+# Disk: keep the live release, two rollback targets and the bundles they link to (deploy/prune.sh, from this
+# release). A failed prune leaves the deploy standing.
+ssh "$DTD_HOST" "bash '$REL/deploy/prune.sh' /srv/dtd" || echo "prune failed; the release is live; check /srv/dtd by hand" >&2

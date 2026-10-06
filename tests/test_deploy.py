@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -441,3 +442,55 @@ def test_push_and_ci_build_the_site_strictly():
     assert "uv run dtd site --strict" in ci
     for t in ("tests/test_report_m5.py", "tests/test_facts_m5.py"):
         assert t in ci, t
+
+
+def prune_tree(tmp_path) -> Path:
+    """Releases r1..r4 completed in that order, each linked to its own bundle, plus a partial upload and an orphan
+    bundle. `current` is r3, not the newest, as after a rollback."""
+    root = tmp_path / "srv"
+    for b in ("b0", "b1", "b2", "b3", "b9"):
+        (root / "bundles" / b).mkdir(parents=True)
+        (root / "bundles" / b / "live.db").write_text(b)
+    for i, (r, b) in enumerate((("r1", "b0"), ("r2", "b1"), ("r3", "b2"), ("r4", "b3"))):
+        rel = root / "releases" / r
+        rel.mkdir(parents=True)
+        (rel / "live.db").symlink_to(root / "bundles" / b / "live.db")
+        (rel / ".complete").touch()
+        os.utime(rel / ".complete", (1_000_000 + i, 1_000_000 + i))
+    (root / "releases" / "partial").mkdir()
+    (root / "current").symlink_to(root / "releases" / "r3")
+    return root
+
+
+def run_prune(root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(Path("deploy/prune.sh").resolve()), str(root)], capture_output=True, text=True)
+
+
+def test_prune_keeps_the_live_release_two_rollbacks_and_their_bundles(tmp_path):
+    root = prune_tree(tmp_path)
+    got = run_prune(root)
+    assert got.returncode == 0, got.stderr
+    assert sorted(p.name for p in (root / "releases").iterdir()) == ["r2", "r3", "r4"]
+    assert sorted(p.name for p in (root / "bundles").iterdir()) == ["b1", "b2", "b3"]
+    assert (root / "current").resolve() == (root / "releases" / "r3").resolve()
+    assert sorted(got.stdout.splitlines()) == ["removed bundle b0", "removed bundle b9",
+                                               "removed release partial", "removed release r1"]
+    again = run_prune(root)
+    assert again.returncode == 0 and again.stdout == ""
+
+
+def test_prune_refuses_when_current_does_not_resolve(tmp_path):
+    root = prune_tree(tmp_path)
+    (root / "current").unlink()
+    (root / "current").symlink_to(root / "releases" / "gone")
+    got = run_prune(root)
+    assert got.returncode == 1 and "refusing to prune" in got.stderr
+    assert len(list((root / "releases").iterdir())) == 5 and len(list((root / "bundles").iterdir())) == 5
+
+
+def test_push_prunes_only_after_a_good_deploy():
+    text = Path("deploy/push.sh").read_text()
+    prune = text.index("$REL/deploy/prune.sh")  # the ssh line, not the comment above it
+    assert prune > text.index('echo "deployed $SHA"') > text.index("warm failed")
+    assert "|| echo" in text[prune:text.index("\n", prune)]  # a failed prune leaves the deploy standing
+    subprocess.run(["bash", "-n", "deploy/prune.sh"], check=True)
