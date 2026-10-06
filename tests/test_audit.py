@@ -84,3 +84,8 @@ def test_env_values_drops_an_unquoted_comment_but_not_a_quoted_one(tmp_path):
     env = env_file(tmp_path, f"SEC_CONTACT={FAKE_CONTACT} # mine\nANTHROPIC_API_KEY=\"{FAKE_KEY} # not a comment\"\n")
     assert audit.env_values(env) == {"SEC_CONTACT": FAKE_CONTACT.encode(),
                                      "ANTHROPIC_API_KEY": (FAKE_KEY + " # not a comment").encode()}
+
+
+def test_env_values_strips_quotes_before_a_trailing_comment(tmp_path):
+    env = env_file(tmp_path, f"SEC_CONTACT=\"{FAKE_CONTACT}\" # mine\nHCLOUD_TOKEN={FAKE_TOKEN}#tail\n")
+    assert audit.env_values(env) == {"SEC_CONTACT": FAKE_CONTACT.encode(), "HCLOUD_TOKEN": (FAKE_TOKEN + "#tail").encode()}
