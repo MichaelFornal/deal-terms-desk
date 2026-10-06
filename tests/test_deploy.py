@@ -129,9 +129,9 @@ def test_provision_locks_the_box_down():
 
 def test_provision_tries_to_reload_sshd_only_if_running():
     text = Path("deploy/provision.sh").read_text()
-    # socket-activated sshd may not have an active service, so try-reload-or-restart does nothing on socket start
+    # Ubuntu 24.04 starts sshd on demand (ssh.socket), so reload only if ssh.service is running.
     assert "systemctl try-reload-or-restart ssh" in text
-    assert "systemctl reload ssh" not in text or "try-reload-or-restart" in text  # no bare reload
+    assert "systemctl reload ssh" not in text
     assert text.index("/etc/ssh/sshd_config.d/10-dtd.conf") < text.index("systemctl try-reload-or-restart ssh")
 
 
