@@ -17,9 +17,11 @@ REFDEF = re.compile(r"^\s*\[[^\]]+\]:\s*\S+.*$")  # [7]: https://… (a link ref
 # Code spans, link targets, footnote markers, HTML tags and bare URLs carry no copy numbers.
 INLINE = re.compile(r"`[^`]*`|\]\([^)]*\)|\[\^[^\]]*\]|</?[A-Za-z][^>]*>|https?://\S+")
 ORDINAL = re.compile(r"^(\s*)\d+[.)](?=\s)")
-DATE = re.compile(r"(?<![\w.-])\d{4}-\d{2}-\d{2}(?![\w-])")
+# Letters and digits are spelled out rather than \w, which holds "_": Markdown emphasis (_60%_, __88,628__) must not
+# hide a number.
+DATE = re.compile(r"(?<![A-Za-z0-9.-])\d{4}-\d{2}-\d{2}(?![A-Za-z0-9-])")
 # A number that touches no letter, dot, hyphen or digit on either side: "M5", "R7n", "v1.5" and model ids are names.
-NUMBER = re.compile(r"(?<![\w.-])(-?)(\$?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%?)(?![\w%]|\.\d)")
+NUMBER = re.compile(r"(?<![A-Za-z0-9.-])(-?)(\$?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%?)(?![A-Za-z0-9%]|\.\d)")
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class Found:
     raw: str
     status: str
     keys: tuple[str, ...]
+    unlabelled_machine: bool = False  # plain and machine-built keys, no label nearby: a fact, counted in the summary
 
 
 def _labelled(context: str) -> bool:
@@ -109,9 +112,12 @@ def check(text: str, facts: dict) -> list[Found]:
         for _, raw, status, keys in sorted(hits):
             f = Found(i + 1, raw, status, keys)
             machine = tuple(k for k in keys if is_machine_built(k))
-            # flagged only when every match is machine-built; mixed matches stay facts (render tags the machine ones)
-            if machine and len(machine) == len(keys) and not _labelled(contexts[i]):
-                f = replace(f, status="needs machine-built label", keys=machine)
+            # flagged only when every match is machine-built; a mixed match stays a fact, and is counted when unlabelled
+            if machine and not _labelled(contexts[i]):
+                if len(machine) == len(keys):
+                    f = replace(f, status="needs machine-built label", keys=machine)
+                else:
+                    f = replace(f, unlabelled_machine=True)
             found.append(f)
     return found
 
@@ -120,9 +126,20 @@ def render(name: str, found: list[Found]) -> str:
     out = []
     for f in found:
         mixed = not all(is_machine_built(k) for k in f.keys)  # tag machine-built keys only among plain ones
-        shown = [k + (" [machine-built]" if mixed and is_machine_built(k) else "") for k in f.keys[:SHOWN]]
+        ordered = sorted(f.keys, key=lambda k: not is_machine_built(k))  # machine-built first: "+k more" hides none
+        shown = [k + (" [machine-built]" if mixed and is_machine_built(k) else "") for k in ordered[:SHOWN]]
         keys = ", ".join(shown) + (f" +{len(f.keys) - SHOWN} more" if len(f.keys) > SHOWN else "")
-        out.append(f'{name}:{f.line}  "{f.raw}"  {f.status}  {keys}'.rstrip())
+        note = "  (no machine-built label nearby)" if f.unlabelled_machine else ""
+        out.append(f'{name}:{f.line}  "{f.raw}"  {f.status}  {keys}{note}'.rstrip())
+    exact = sum(f.status == "fact" for f in found)
+    rounded = sum(f.status == "rounded" for f in found)
     flagged = sum(f.status in FLAGGED for f in found)
-    out.append(f"{name}: {len(found)} numbers, {len(found) - flagged} match a fact, {flagged} flagged")
+    unlabelled = sum(f.unlabelled_machine for f in found)
+    numbers = f"{len(found)} number" + ("" if len(found) == 1 else "s")
+    check_rounded = ": check each names the fact you mean" if rounded else ""
+    summary = f"{name}: {numbers} ({exact} exact, {rounded} rounded{check_rounded}), {flagged} flagged"
+    if unlabelled:
+        also = "number also matches" if unlabelled == 1 else "numbers also match"
+        summary += f"; {unlabelled} unlabelled {also} a machine-built fact"
+    out.append(summary)
     return "\n".join(out)

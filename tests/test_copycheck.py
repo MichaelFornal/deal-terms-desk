@@ -92,12 +92,26 @@ def test_the_report_lists_every_number_and_counts_the_flags():
     out = render("README.md", check("Budget $2.91.\n\nIt answers 17 questions.\n", FACTS))
     assert out.splitlines() == ['README.md:1  "$2.91"  fact  m5_model_cap_usd',
                                 'README.md:3  "17"  no fact',
-                                "README.md: 2 numbers, 1 match a fact, 1 flagged"]
+                                "README.md: 2 numbers (1 exact, 0 rounded), 1 flagged"]
+
+
+def test_the_summary_splits_exact_from_rounded_and_asks_for_a_check_of_each_rounded_line():
+    out = render("post.md", check("Budget $2.91.\n\nAbout 60% of them.\n", FACTS)).splitlines()
+    assert out[1] == 'post.md:3  "60%"  rounded  m4_thuman_haiku_report_accuracy'
+    assert out[-1] == "post.md: 2 numbers (1 exact, 1 rounded: check each names the fact you mean), 0 flagged"
+    one_line = render("one.md", check("Budget $2.91.", FACTS)).splitlines()[-1]
+    assert one_line == "one.md: 1 number (1 exact, 0 rounded), 0 flagged"
 
 
 def test_a_number_many_facts_hold_names_a_few_and_counts_the_rest():
     many = {f"m5_n{i}": 7 for i in range(6)}
     assert 'post.md:1  "7"  fact  m5_n0, m5_n1, m5_n2, m5_n3 +2 more' in render("post.md", check("7 of them", many))
+
+
+def test_machine_built_keys_are_listed_first_so_more_never_hides_them():
+    many = {**{f"m5_n{i}": 7 for i in range(6)}, "m3_tier_tau": 7}  # the machine-built key comes last in facts.json
+    out = render("post.md", check("The machine-built tau was 7.", many))
+    assert 'post.md:1  "7"  fact  m3_tier_tau [machine-built], m5_n0, m5_n1, m5_n2 +3 more' in out
 
 
 def test_dtd_copycheck_reports_and_never_writes(tmp_path, monkeypatch, capsys):
@@ -128,8 +142,31 @@ def test_a_number_with_a_plain_match_is_not_flagged_and_tags_the_machine_keys():
     f = one("$1 per million input tokens", facts)
     assert f.status == "fact" and f.status not in FLAGGED
     assert f.keys == ("m5_price_input_per_mtok", "m3_tier_tau")
-    assert "m5_price_input_per_mtok, m3_tier_tau [machine-built]" in render("a.md", [f])
+    assert "m3_tier_tau [machine-built], m5_price_input_per_mtok" in render("a.md", [f])
+
+
+def test_an_unlabelled_number_that_also_matches_a_machine_built_fact_is_counted_not_flagged(tmp_path, monkeypatch):
+    facts = {"m5_price_input_per_mtok": 1.0, "m3_tier_tau": 1.0, "m5_model_cap_usd": 2.91}
+    out = render("a.md", check("$1 per million input tokens, under a $2.91 budget.", facts)).splitlines()
+    assert out[0] == ('a.md:1  "$1"  fact  m3_tier_tau [machine-built], m5_price_input_per_mtok'
+                      "  (no machine-built label nearby)")
+    assert out[-1] == ("a.md: 2 numbers (2 exact, 0 rounded), 0 flagged;"
+                       " 1 unlabelled number also matches a machine-built fact")
+    labelled = render("a.md", check("$1 per million input tokens (the machine-built tau is 1 too).", facts))
+    assert "label nearby" not in labelled and "also match" not in labelled
+    two = render("a.md", check("$1 in, and 1 more.", facts)).splitlines()[-1]
+    assert two.endswith("; 2 unlabelled numbers also match a machine-built fact")
+    from pipeline import cli
+    (tmp_path / "facts.json").write_text(json.dumps(facts))
+    monkeypatch.setattr(cli, "FACTS", tmp_path / "facts.json")
+    (tmp_path / "a.md").write_text("$1 per million input tokens.\n")
+    assert cli.entry(["copycheck", str(tmp_path / "a.md")]) == 0  # reported, never a failure
 
 
 def test_a_less_than_sign_is_not_an_html_tag():
     assert [f.raw for f in check("n < 5 and m > 3", {})] == ["5", "3"]
+
+
+def test_markdown_underscore_emphasis_does_not_hide_a_number():
+    assert [f.raw for f in check("_60%_ of them, __88,628__ passages, _2026-10-05_", FACTS)] == [
+        "60%", "88,628", "2026-10-05"]  # names stay names: test_code_links_list_markers_and_names_are_not_numbers
