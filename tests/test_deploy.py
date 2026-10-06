@@ -149,7 +149,28 @@ def test_push_sources_its_helper_before_anything_ships():
 def test_push_warms_every_time_and_checks_the_result():
     text = Path("deploy/push.sh").read_text()
     assert "dtd warm --examples" in text and "TEMPLATE_SHA" not in text and '"$OLD"' not in text
-    assert '"unfiled_schedule"' in text and 'got["states"]' in text and "warm failed" in text
+    assert 'if ! WARM="$(ssh' in text and "warm failed" in text
+    assert 'got["states"]' not in text  # the rule lives in service/warm.py (WARM_OK), not in a copy here
+
+
+def warm_block() -> str:
+    text = Path("deploy/push.sh").read_text()
+    return text[text.index("# Warm the example answers"):text.index('echo "deployed $SHA"')]
+
+
+def run_warm(tmp_path, code: int, line: str) -> subprocess.CompletedProcess:
+    """push.sh's warm block under a fake ssh that prints `line` and exits `code`, as `dtd warm` on the box would."""
+    fake = f"set -euo pipefail\nDTD_HOST=box LOAD_ENV=: AS_DTD=\nssh() {{ echo '{line}'; return {code}; }}\n"
+    return subprocess.run(["bash", "-c", fake + warm_block() + "echo warmed\n"], capture_output=True, text=True,
+                          cwd=tmp_path)
+
+
+def test_push_fails_when_warm_does_and_shows_its_line(tmp_path):
+    ok = run_warm(tmp_path, 0, '{"asked": 6, "cached": 6, "states": {"answered": 6}}')
+    assert ok.returncode == 0 and ok.stdout.endswith("warmed\n")
+    bad = run_warm(tmp_path, 1, '{"asked": 6, "cached": 5, "states": {"answered": 5, "error": 1}}')
+    assert bad.returncode == 1 and "warmed" not in bad.stdout
+    assert "warm failed" in bad.stderr and '"error": 1' in bad.stderr
 
 
 def test_push_checks_env_file_bounds_curl_and_owns_files_on_the_box():

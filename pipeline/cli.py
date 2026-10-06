@@ -45,7 +45,7 @@ from facts.site import render_site
 from pipeline import m0
 from service.app import build_desk
 from service.config import from_env
-from service.warm import warm
+from service.warm import warm, warm_ok
 from pipeline.bundle import MANIFEST, build_bundle, bundle_is_current
 from pipeline.build_lexicon import build as build_lexicon
 from pipeline.chunk_fixed import fixed_chunker, fixed_size
@@ -923,8 +923,9 @@ def _cmd_warm(args) -> int:
     config = from_env()
     # warming is the operator's own call: it must not run out of the visitors' hourly fresh-call allowance
     desk = build_desk(replace(config, fresh_per_hour=max(config.fresh_per_hour, len(examples))))
-    print(json.dumps(warm(desk, examples)))
-    return 0
+    result = warm(desk, examples)
+    print(json.dumps(result))
+    return 0 if warm_ok(result) else 1
 
 
 def _cmd_site(args) -> int:

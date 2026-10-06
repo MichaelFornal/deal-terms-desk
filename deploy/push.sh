@@ -212,9 +212,9 @@ if ! config_match "$HEALTH" "answer settings mismatch"; then
 fi
 
 # Warm the example answers on every push: a changed retriever, model or example list changes the prompt, and cached
-# examples cost nothing. Every example must come back with an answering state.
-WARM="$(ssh "$DTD_HOST" "cd /srv/dtd/current && { $LOAD_ENV; $AS_DTD .venv/bin/dtd warm --examples site/examples.json; }" | tail -n 1)"
-if ! uv run python -c 'import json, sys; got = json.loads(sys.argv[1]); sys.exit(0 if got["asked"] > 0 and set(got["states"]) <= {"answered", "not_stated", "unfiled_schedule"} else 1)' "$WARM"; then
+# examples cost nothing. `dtd warm` exits non-zero unless every example comes back with an answering state
+# (service/warm.py WARM_OK); its last line says which states came back.
+if ! WARM="$(ssh "$DTD_HOST" "cd /srv/dtd/current && { $LOAD_ENV; $AS_DTD .venv/bin/dtd warm --examples site/examples.json; }" | tail -n 1)"; then
   echo "warm failed: an example did not come back answered, not_stated or unfiled_schedule: $WARM" >&2
   exit 1
 fi

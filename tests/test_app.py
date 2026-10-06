@@ -3,8 +3,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from answer.api_runner import RunnerError
 from service.app import create_app
-from service.warm import warm
+from service.warm import warm, warm_ok
 from tests.fakes import fake_claude
 from tests.test_desk import NOT_STATED, Scripted, make_desk
 
@@ -129,3 +130,21 @@ def test_build_desk_refuses_a_model_the_prices_do_not_describe(tmp_path, monkeyp
     cfg = dataclasses.replace(base, model="claude-sonnet-5-5")
     with pytest.raises(ValueError, match=r"DTD_MODEL is claude-sonnet-5-5 but .*prices\.json.* claude-haiku-4-5"):
         app.build_desk(cfg)
+
+
+def test_warm_ok_needs_an_answering_state_for_every_example():
+    assert warm_ok({"asked": 2, "cached": 0, "states": {"answered": 1, "unfiled_schedule": 1}})
+    assert not warm_ok({"asked": 0, "cached": 0, "states": {}})
+    assert not warm_ok({"asked": 2, "cached": 0, "states": {"answered": 1, "error": 1}})
+    assert not warm_ok({"asked": 1, "cached": 1, "states": {"budget_cached": 1}})
+
+
+def test_dtd_warm_exits_non_zero_when_an_example_fails(tmp_path, monkeypatch, capsys):
+    from pipeline import cli
+    desk = make_desk(tmp_path, Scripted(RunnerError("overloaded", "overloaded")))
+    monkeypatch.setattr(cli, "from_env", lambda: desk.config)
+    monkeypatch.setattr(cli, "build_desk", lambda config: desk)
+    path = tmp_path / "examples.json"
+    path.write_text(json.dumps([{"family": "termination_fee", "question": "What is the Acme Software termination fee?"}]))
+    assert cli.entry(["warm", "--examples", str(path)]) == 1
+    assert json.loads(capsys.readouterr().out)["states"] == {"error": 1}  # the line is still printed for push.sh
