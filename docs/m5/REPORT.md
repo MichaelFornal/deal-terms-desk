@@ -19,18 +19,18 @@ Live-path retrieval on the development machine, p50 / p95 ms: R6n 46.4 / 365.6; 
 
 ## API calibration
 
-40 tune-split questions were answered through the API with the live settings and compared with M4's command-line answers to the same questions. Stop rule: go. The live model answers with extended thinking, as the evaluation runs did, with up to 4096 tokens of thinking per answer.
+40 tune-split questions (39 model calls) were answered through the API with the live model settings; retrieval ran over the evaluation indexes, which the parity section above shows serve the same passages. The answers were compared with M4's command-line answers to the same questions. Stop rule: go. The live model answers with extended thinking, as the evaluation runs did, with up to 4096 tokens of thinking per answer; the evaluation runs used the command-line tool's own thinking default.
 
 | Measure | API | Command-line tool |
 |---|---|---|
 | Answer state matches the other run (machine-built) | 0.9 | — |
-| MAUD answer accuracy on the sample (human-labelled (MAUD)) | 0.6 | 0.6 |
+| MAUD answer accuracy on the sample's MAUD questions (human-labelled (MAUD)) (n 20) | 0.6 | 0.6 |
 | Claims kept by the citation gate | 0.8804 | 0.9333 |
 | Replies cut off at the output cap | 0 | — |
 | Input tokens per answer, mean / p95 | 4250.3 / 5818 | — |
-| Output tokens per answer, mean / p95 | 1325.7 / 2446 | — |
+| Output tokens per answer (including thinking), mean / p95 | 1325.7 / 2446 | — |
 
-The budget's worst-case estimate covered every calibrated call: True.
+The budget's worst-case estimate covered every calibrated call: yes.
 
 ## Cost and budget
 
@@ -46,8 +46,10 @@ Measured against the live service from the development machine. Server times are
 | Cached answer | 77.0 / 105.2 (n 6) | 413.9 / 439.8 (n 6) |
 | New answer | 17225.8 / 24998.1 (n 3) | 17554.5 / 25337.3 (n 3) |
 
-Requests that failed, or were served other than meant, during the measurement: 0. Of these, new questions the cache served: 0; cached examples answered live, and billed: 0. Each answer is timed under what served it. Peak memory of the service: 528.7 MB. The server's searches returned the same top passages as the development machine's for 50 questions, a share of 0.98 (query embeddings are computed on each machine).
+Requests that failed, or were served other than meant, during the measurement: 0. Of these, new questions the cache served: 0; cached examples answered live, and billed: 0. Each answer is timed under what served it. Peak memory of the service: 528.7 MB. The server's searches returned the same top passages as the development machine's for 49 of 50 questions (a share of 0.98); query embeddings are computed on each machine.
 
 ## The cap trips
 
-With the service restarted under a tiny cap: a new question got "budget reached": True; a cached question was still answered as "budget reached, showing a cached answer": True; the month's spend did not move: True. The same check runs in the test suite (`tests/test_desk.py`, `test_the_cap_trips`).
+With the service restarted under a tiny cap: a new question got "budget reached": yes; a cached question was still answered as "budget reached, showing a cached answer": yes; the month's spend did not move: yes. The same check runs in the test suite (`tests/test_desk.py`, `test_the_cap_trips`).
+
+The live kill test, which killed the service during new answers and read the month's spend before, after the restart and once the stale window had passed, is logged in `docs/m5/kill-test.log`.
