@@ -29,7 +29,7 @@ M6 (README and launch post by Michael, final facts check, public) is a separate 
 | GitHub | Private repo during M5 so CI runs; public at M6 after an audit |
 | History | Commit metadata never carries the SEC contact (rewritten to the GitHub noreply address on 2026-10-05, before any push) |
 | Live retrieval | R7n, with no reranker model loaded |
-| Budget | $10/month all in. Model cap = $10 − hosting, plus a daily ceiling. Two Anthropic Console workspaces: `dtd-live` (server only, spend limit just above the cap) and `dtd-dev` (calibration and smoke) |
+| Budget | $10/month all in. Model cap = $10 − hosting, plus a daily ceiling. One Anthropic API key (Michael's choice, 2026-10-06), with the Console spend limit covering calibration and the live service; this replaces the two workspaces (`dtd-live`, `dtd-dev`) first planned |
 
 ## 1. Components
 
@@ -153,7 +153,7 @@ M6 (README and launch post by Michael, final facts check, public) is a separate 
 
 ## 2. Calibration and the stop rule
 
-Calibration bills the `dtd-dev` workspace; Michael approves the estimate first (under $1 at Haiku prices).
+Calibration bills the one API key (Michael's choice, 2026-10-06), whose Console spend limit covers calibration and the live service; Michael approves the estimate first (under $1 at Haiku prices).
 - **`max_tokens`** is set from the observed p99 output plus a margin.
 - **The worst-case estimator** must be ≥ actual on every calibrated item.
 - **Stop rule:** n = 40 detects only large differences. If API-vs-CLI state agreement falls below 0.8, or T-human accuracy differs by more than 0.15, stop before deploying and bring the options to Michael:
@@ -222,7 +222,7 @@ Calibration bills the `dtd-dev` workspace; Michael approves the estimate first (
 ## Verification
 
 - `uv run pytest` is green locally and in GitHub CI from a clean clone.
-- `uv run pytest -m model` makes one real API call on `dtd-dev`.
+- `uv run pytest -m model` makes one real API call with the one API key (Michael's choice, 2026-10-06; the Console spend limit covers calibration and the live service).
 - Prompt-sha parity holds on the M4 report split, and R7n bundle parity on about 200 questions. Server embedding parity is recorded in facts.
 - `deploy/smoke.py https://deals.forn.al` passes:
   - health shas;

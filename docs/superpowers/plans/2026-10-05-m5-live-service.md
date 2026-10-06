@@ -43,6 +43,9 @@ steps is `~/.claude/plans/plan-out-every-step-soft-hearth.md`.
   - land on branch `m5`.
 - The live model is `claude-haiku-4-5-20251001`. API spend outside the service (calibration, smoke, the real-call
   test) uses the `dtd-dev` key, after Michael approves the estimate.
+
+  > **Superseded in part (2026-10-06):** one API key serves calibration, the real-call test and the live service (Michael's choice), with the Console spend limit covering calibration and the live service. Where a task below says the `dtd-dev` key or the `dtd-live` workspace, read that one key.
+
 - The M4 measured path must not move: re-preparing M4's answer items gives the same `prompt_sha` as their ledgers.
 
 ## Deviations from the spec, decided while planning
@@ -301,6 +304,9 @@ M5_STAGES = {"parity": _m5_parity, "recall": _m5_recall, "calibrate": _m5_calibr
   - the private GitHub repo;
   - the `dtd-live` Console workspace and key;
   - the Hetzner account with his SSH key, and the DNS host for `forn.al`.
+
+  > **Superseded in part (2026-10-06):** one API key serves calibration, the real-call test and the live service (Michael's choice), with the Console spend limit covering calibration and the live service. Where a task below says the `dtd-dev` key or the `dtd-live` workspace, read that one key.
+
 - The plan runs on branch `m5`, which already exists; commit `086185c` holds the spec and the PRD note. Check
   `git config user.email` is the GitHub noreply address before the first commit.
 
