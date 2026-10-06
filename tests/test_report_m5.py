@@ -31,7 +31,7 @@ def test_missing_facts_render_pending():
 
 def test_report_copy_has_no_hard_coded_digits():
     text = render_m5(Every())
-    stripped = re.sub(r"0\.5|R6n|R7n|M[0-9]|@5|\bp(?:50|95)\b|sha256", "", text)
+    stripped = re.sub(r"0\.5|R6n|R7n|M[0-9]|@5|\bp(?:50|95)\b|sha256|docs/m5/kill-test\.log", "", text)
     assert not re.search(r"\d", stripped), re.findall(r".{20}\d.{20}", stripped)[:3]
 
 
@@ -93,17 +93,74 @@ def test_each_label_covers_exactly_the_facts_it_names(tmp_path):
             in_table = row
             machine = whole or "machine-built" in line
             human = HUMAN in line or (row and HUMAN in header)
+            for key in re.findall(r"\(n <(m\d_\w+)>\)", line):  # a sample size: plain, whatever it counts
+                seen.add(key)
+                assert tier_label(key) is None, (key, line)
+            line = re.sub(r"\(n <m\d_\w+>\)", "", line)
             for key in re.findall(r"<(m\d_\w+)>", line):
                 seen.add(key)
                 want = tier_label(key)
                 assert machine == (want == MACHINE), (key, want, line)
                 assert human == (want == HUMAN), (key, want, line)
     assert {"m5_calibration_state_agreement", "m5_calibration_accuracy_api", "m5_bundle_r6n_report_recall_at_5",
-            "m5_api_tokens_in_mean", "m5_server_rss_mb", "m5_cap_trip_budget_reached"} <= seen
+            "m5_api_tokens_in_mean", "m5_server_rss_mb", "m5_cap_trip_budget_reached", "m5_calibration_thuman_n",
+            "m5_calibration_called", "m5_server_embed_parity_same"} <= seen
 
 
 def test_the_report_says_the_model_answers_with_extended_thinking():
     sentence = ("The live model answers with extended thinking, as the evaluation runs did, "
-                "with up to {} tokens of thinking per answer.")
+                "with up to {} tokens of thinking per answer; the evaluation runs used the command-line tool's own "
+                "thinking default.")
     assert sentence.format("<m5_thinking_budget_tokens>") in render_m5({"m5_thinking_budget_tokens": "<m5_thinking_budget_tokens>"})
     assert sentence.format("pending") in render_m5({})
+
+
+def _named(*keys) -> dict:
+    return {k: f"<{k}>" for k in keys}
+
+
+def test_the_accuracy_row_and_the_intro_show_their_counts():
+    text = render_m5(_named("m5_calibration_thuman_n", "m5_calibration_called", "m5_calibration_n",
+                            "m5_calibration_accuracy_api", "m5_calibration_accuracy_cli"))
+    row = next(line for line in text.splitlines() if line.startswith("| MAUD answer accuracy"))
+    assert "(n <m5_calibration_thuman_n>)" in row and "human-labelled (MAUD)" in row
+    assert row.endswith("| <m5_calibration_accuracy_api> | <m5_calibration_accuracy_cli> |")
+    assert "<m5_calibration_n> tune-split questions (<m5_calibration_called> model calls) were answered" in text
+    assert ("with the live model settings; retrieval ran over the evaluation indexes, which the parity section "
+            "above shows serve the same passages") in text
+    assert "with the live settings" not in text
+
+
+def test_the_server_parity_sentence_counts_the_matches():
+    text = render_m5(_named("m5_server_embed_parity_same", "m5_server_embed_parity_n", "m5_server_embed_parity"))
+    assert ("The server's searches returned the same top passages as the development machine's for "
+            "<m5_server_embed_parity_same> of <m5_server_embed_parity_n> questions (a share of "
+            "<m5_server_embed_parity>); query embeddings are computed on each machine.") in text
+
+
+def test_output_tokens_say_they_include_thinking():
+    text = render_m5(Every())
+    rows = [line for line in text.splitlines() if "Output tokens per answer" in line]
+    assert rows and all("Output tokens per answer (including thinking)" in r for r in rows)
+
+
+def test_report_booleans_read_yes_or_no():
+    f = Every(m5_calibration_estimator_ok=True, m5_cap_trip_budget_reached=True, m5_cap_trip_budget_cached=False,
+              m5_cap_trip_ledger_unchanged=True)
+    text = render_m5(f)
+    assert "True" not in text and "False" not in text
+    assert "covered every calibrated call: yes." in text and 'a new question got "budget reached": yes;' in text
+    assert 'showing a cached answer": no;' in text and "the month's spend did not move: yes." in text
+
+
+def test_the_report_points_to_the_committed_kill_test_log():
+    """The live kill test's log is committed verbatim from the run; it holds ledger sums, row counts, HTTP codes and
+    a clock time, never a key, an address or the host."""
+    text = render_m5({})
+    assert text.count("`docs/m5/kill-test.log`") == 1
+    line = next(s for s in text.splitlines() if "docs/m5/kill-test.log" in s)
+    assert "kill test" in line
+    log = Path("docs/m5/kill-test.log").read_text()
+    assert "== before" in log and "== after stale window + restart" in log
+    assert "sk-ant" not in log and "@" not in log and "forn.al" not in log and "ANTHROPIC" not in log
+    assert not re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", log)  # no IPv4 address

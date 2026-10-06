@@ -98,6 +98,18 @@ def test_every_section_once_its_input_exists(tmp_path):
     assert f["m5_cap_trip_budget_reached"] is True and f["m5_cap_trip_ledger_unchanged"] is True
 
 
+def test_sample_counts_are_emitted_as_plain_stable_measurements(tmp_path):
+    """The accuracy row's n (the human-keyed half of the sample), the model calls made, and how many server searches
+    matched: counts, not scores, so no tier label."""
+    f = build_m5(*every_input(tmp_path))
+    assert f["m5_calibration_thuman_n"] == 19 and f["m5_calibration_called"] == 38
+    assert f["m5_server_embed_parity_same"] == 49 and f["m5_server_embed_parity_n"] == 50
+    for k in ("m5_calibration_thuman_n", "m5_calibration_called", "m5_server_embed_parity_same"):
+        assert tier_label(k) is None, k
+    assert not is_unstable("m5_calibration_thuman_n") and not is_unstable("m5_calibration_called")
+    assert is_unstable("m5_server_embed_parity_same")  # a measurement run against the live box
+
+
 def test_wall_clock_facts_are_unstable_for_the_check():
     assert is_unstable("m5_server_rss_mb") and is_unstable("m5_server_search_latency_ms_p95")
     assert is_unstable("m5_live_r6n_latency_ms_p50") and not is_unstable("m5_bundle_bytes")
@@ -105,10 +117,12 @@ def test_wall_clock_facts_are_unstable_for_the_check():
 
 def test_every_measurement_run_key_is_unstable_and_the_rest_is_stable():
     for k in ("m5_server_search_n", "m5_server_errors", "m5_server_embed_parity", "m5_server_embed_parity_n",
+              "m5_server_embed_parity_same",
               "m5_server_fresh_served_from_cache", "m5_server_cached_answered_live",
               "m5_e2e_search_latency_ms_p95", "m5_e2e_ask_fresh_n"):
         assert is_unstable(k), k
-    for k in ("m5_bundle_sha", "m5_prompt_parity_same", "m5_calibration_n"):
+    for k in ("m5_bundle_sha", "m5_prompt_parity_same", "m5_calibration_n", "m5_calibration_thuman_n",
+              "m5_calibration_called"):
         assert not is_unstable(k), k
 
 

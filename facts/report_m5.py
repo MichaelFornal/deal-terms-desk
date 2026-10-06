@@ -3,6 +3,8 @@ PENDING = "pending"
 
 def _v(f, k) -> str:
     x = f.get(k)
+    if isinstance(x, bool):  # as the site prints them
+        return "yes" if x else "no"
     return PENDING if x is None else str(x)
 
 
@@ -41,16 +43,16 @@ Live-path retrieval on the development machine, p50 / p95 ms: R6n {_pair(f, 'm5_
 
 ## API calibration
 
-{_v(f, 'm5_calibration_n')} tune-split questions were answered through the API with the live settings and compared with M4's command-line answers to the same questions. Stop rule: {_v(f, 'm5_calibration_stop_rule')}. The live model answers with extended thinking, as the evaluation runs did, with up to {_v(f, 'm5_thinking_budget_tokens')} tokens of thinking per answer.
+{_v(f, 'm5_calibration_n')} tune-split questions ({_v(f, 'm5_calibration_called')} model calls) were answered through the API with the live model settings; retrieval ran over the evaluation indexes, which the parity section above shows serve the same passages. The answers were compared with M4's command-line answers to the same questions. Stop rule: {_v(f, 'm5_calibration_stop_rule')}. The live model answers with extended thinking, as the evaluation runs did, with up to {_v(f, 'm5_thinking_budget_tokens')} tokens of thinking per answer; the evaluation runs used the command-line tool's own thinking default.
 
 | Measure | API | Command-line tool |
 |---|---|---|
 | Answer state matches the other run (machine-built) | {_v(f, 'm5_calibration_state_agreement')} | — |
-| MAUD answer accuracy on the sample (human-labelled (MAUD)) | {_v(f, 'm5_calibration_accuracy_api')} | {_v(f, 'm5_calibration_accuracy_cli')} |
+| MAUD answer accuracy on the sample's MAUD questions (human-labelled (MAUD)) (n {_v(f, 'm5_calibration_thuman_n')}) | {_v(f, 'm5_calibration_accuracy_api')} | {_v(f, 'm5_calibration_accuracy_cli')} |
 | Claims kept by the citation gate | {_v(f, 'm5_calibration_gate_pass_api')} | {_v(f, 'm5_calibration_gate_pass_cli')} |
 | Replies cut off at the output cap | {_v(f, 'm5_calibration_truncated')} | — |
 | Input tokens per answer, mean / p95 | {_pair(f, 'm5_api_tokens_in_mean', 'm5_api_tokens_in_p95')} | — |
-| Output tokens per answer, mean / p95 | {_pair(f, 'm5_api_tokens_out_mean', 'm5_api_tokens_out_p95')} | — |
+| Output tokens per answer (including thinking), mean / p95 | {_pair(f, 'm5_api_tokens_out_mean', 'm5_api_tokens_out_p95')} | — |
 
 The budget's worst-case estimate covered every calibrated call: {_v(f, 'm5_calibration_estimator_ok')}.
 
@@ -68,9 +70,11 @@ Measured against the live service from the development machine. Server times are
 | Cached answer | {_pn(f, 'm5_server_ask_cached_latency_ms_p50', 'm5_server_ask_cached_latency_ms_p95', 'm5_server_ask_cached_n')} | {_pn(f, 'm5_e2e_ask_cached_latency_ms_p50', 'm5_e2e_ask_cached_latency_ms_p95', 'm5_e2e_ask_cached_n')} |
 | New answer | {_pn(f, 'm5_server_ask_fresh_latency_ms_p50', 'm5_server_ask_fresh_latency_ms_p95', 'm5_server_ask_fresh_n')} | {_pn(f, 'm5_e2e_ask_fresh_latency_ms_p50', 'm5_e2e_ask_fresh_latency_ms_p95', 'm5_e2e_ask_fresh_n')} |
 
-Requests that failed, or were served other than meant, during the measurement: {_v(f, 'm5_server_errors')}. Of these, new questions the cache served: {_v(f, 'm5_server_fresh_served_from_cache')}; cached examples answered live, and billed: {_v(f, 'm5_server_cached_answered_live')}. Each answer is timed under what served it. Peak memory of the service: {_v(f, 'm5_server_rss_mb')} MB. The server's searches returned the same top passages as the development machine's for {_v(f, 'm5_server_embed_parity_n')} questions, a share of {_v(f, 'm5_server_embed_parity')} (query embeddings are computed on each machine).
+Requests that failed, or were served other than meant, during the measurement: {_v(f, 'm5_server_errors')}. Of these, new questions the cache served: {_v(f, 'm5_server_fresh_served_from_cache')}; cached examples answered live, and billed: {_v(f, 'm5_server_cached_answered_live')}. Each answer is timed under what served it. Peak memory of the service: {_v(f, 'm5_server_rss_mb')} MB. The server's searches returned the same top passages as the development machine's for {_v(f, 'm5_server_embed_parity_same')} of {_v(f, 'm5_server_embed_parity_n')} questions (a share of {_v(f, 'm5_server_embed_parity')}); query embeddings are computed on each machine.
 
 ## The cap trips
 
 With the service restarted under a tiny cap: a new question got "budget reached": {_v(f, 'm5_cap_trip_budget_reached')}; a cached question was still answered as "budget reached, showing a cached answer": {_v(f, 'm5_cap_trip_budget_cached')}; the month's spend did not move: {_v(f, 'm5_cap_trip_ledger_unchanged')}. The same check runs in the test suite (`tests/test_desk.py`, `test_the_cap_trips`).
+
+The live kill test, which killed the service during new answers and read the month's spend before, after the restart and once the stale window had passed, is logged in `docs/m5/kill-test.log`.
 """

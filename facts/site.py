@@ -338,7 +338,7 @@ def results_tables() -> tuple[Table, ...]:
                Row(("Model budget per month, US dollars", K("m5_model_cap_usd"))),
                Row(("Model budget per day, US dollars", K("m5_day_cap_usd"))),
                Row(("Input tokens per answer, mean", K("m5_api_tokens_in_mean"))),
-               Row(("Output tokens per answer, mean", K("m5_api_tokens_out_mean"))),
+               Row(("Output tokens per answer (including thinking), mean", K("m5_api_tokens_out_mean"))),
                Row(("Cost per new answer, mean, US dollars", K("m5_cost_per_answer_mean"))),
                Row(("New answers the monthly budget covers", K("m5_answers_per_month"))),
                Row(("Live-path retrieval inside one agreement (R6n), development machine, ms p50",
@@ -423,7 +423,8 @@ METHOD = (
          K("m5_day_cap_usd"), ". Prices were checked on ", K("m5_price_checked"), ": ",
          K("m5_price_input_per_mtok"), " US dollars per million input tokens and ", K("m5_price_output_per_mtok"),
          " per million output tokens. The live model answers with extended thinking, as the evaluation runs did, "
-         "with up to ", K("m5_thinking_budget_tokens"), " tokens of thinking per answer. "
+         "with up to ", K("m5_thinking_budget_tokens"), " tokens of thinking per answer; the evaluation runs used "
+         "the command-line tool's own thinking default. "
          "When the budget is spent, the desk shows cached answers only and says so. "
          "Search never spends model budget."),
     )),

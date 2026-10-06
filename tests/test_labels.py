@@ -71,7 +71,8 @@ def test_m5_labels_follow_where_the_judgement_comes_from(tmp_path):
                                "m5_calibration_accuracy_cli"}
     for k in ("m5_api_tokens_in_mean", "m5_cost_per_answer_mean", "m5_model_cap_usd", "m5_server_rss_mb",
               "m5_prompt_parity_same", "m5_bundle_parity_same", "m5_server_embed_parity", "m5_calibration_n",
-              "m5_calibration_gate_pass_api", "m5_cap_trip_budget_reached", "m5_bundle_bytes"):
+              "m5_calibration_gate_pass_api", "m5_cap_trip_budget_reached", "m5_bundle_bytes",
+              "m5_calibration_thuman_n", "m5_calibration_called", "m5_server_embed_parity_same"):
         assert k in by_label[None], k
 
 

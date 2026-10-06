@@ -1,0 +1,17 @@
+== before
+0.136341|10
+settled|10
+ask: 200
+Failed to kill unit dtd.service: Failed to send signal SIGKILL to auxiliary processes: Invalid argument
+killed at 09:11:22
+ask: 502
+ask: 502
+== after kill + auto-restart (NRestarts=1)
+0.209453|12
+open|2
+settled|10
+== waiting out STALE_S (620 s)
+== after stale window + restart
+0.209453|12
+settled|12
+== cache rows: 10

@@ -60,6 +60,7 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
               "m5_calibration_state_agreement": c["state_agreement"],
               "m5_calibration_accuracy_api": c["thuman_accuracy"]["api"],
               "m5_calibration_accuracy_cli": c["thuman_accuracy"]["cli"],
+              "m5_calibration_thuman_n": c["thuman_accuracy"]["n"],  # the accuracy's n: a count, so no tier label
               "m5_calibration_gate_pass_api": c["gate_pass_rate"]["api"],
               "m5_calibration_gate_pass_cli": c["gate_pass_rate"]["cli"],
               "m5_calibration_truncated": c["truncated"], "m5_calibration_estimator_ok": c["worst_case_ok"],
@@ -83,7 +84,9 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
             f["m5_server_cached_answered_live"] = s["misrouted"]["cached_answered_live"]
         f["m5_server_rss_mb"] = s["rss_mb"]
         if "embed_parity" in s:
-            f["m5_server_embed_parity"], f["m5_server_embed_parity_n"] = s["embed_parity"]["rate"], s["embed_parity"]["n"]
+            e = s["embed_parity"]
+            f["m5_server_embed_parity"], f["m5_server_embed_parity_n"] = e["rate"], e["n"]
+            f["m5_server_embed_parity_same"] = e["same"]
 
     if (data_m5 / "cap_trip.json").exists():
         t = _json(data_m5 / "cap_trip.json")
