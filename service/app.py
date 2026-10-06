@@ -20,13 +20,18 @@ from service.prices import load_prices
 
 
 def build_desk(config: Config) -> Desk:
-    """Everything the live service holds in memory, built once at startup."""
+    """Everything the live service holds in memory, built once at startup. Refuses a model the prices file does not
+    describe: the ledger would price its calls at another model's rates and could under-reserve."""
+    prices = load_prices(config.prices_path)
+    if config.model != prices.model:
+        raise ValueError(f"DTD_MODEL is {config.model} but {config.prices_path} prices {prices.model}: the budget "
+                         "would cost its calls at the wrong rates; set DTD_MODEL to the priced model, or price the "
+                         "new one")
     embedder = Embedder(threads=2)
     embedder.embed_query("warm up")  # load the model now, not on the first visitor's question
     ladder = build_live_ladder(config.bundle, embedder, load_lexicon(LEXICON_PATH), load_settings(SETTINGS_PATH))
     config.state_dir.mkdir(parents=True, exist_ok=True)
-    budget = Budget(config.state_dir / "budget.db", config.month_cap_usd, config.day_cap_usd,
-                    load_prices(config.prices_path))
+    budget = Budget(config.state_dir / "budget.db", config.month_cap_usd, config.day_cap_usd, prices)
     runner = make_api_runner(config.max_tokens, timeout=config.api_timeout_s,
                              thinking_budget=config.thinking_budget or None)
     return Desk(ladder, runner, config, budget, AnswerCache(config.state_dir / "cache.db"),

@@ -149,3 +149,14 @@ def test_hosting_with_a_null_field_is_skipped(tmp_path):
     _write(ins[5], dict(HOSTING_FULL, price_month=None))
     f = build_m5(*ins)
     assert not any(k.startswith("m5_hosting") for k in f) and "m5_model_cap_usd" not in f
+
+
+def test_the_calibrated_output_cap_is_a_plain_stable_fact(tmp_path):
+    """push.sh refuses a release whose max_tokens differs from the one calibration ran with."""
+    args = every_input(tmp_path)
+    f = build_m5(*args)
+    assert f["m5_max_output_tokens"] == 6144
+    assert tier_label("m5_max_output_tokens") is None and not is_unstable("m5_max_output_tokens")
+    path = args[0] / "calibration.json"
+    path.write_text(json.dumps({k: v for k, v in json.loads(path.read_text()).items() if k != "max_tokens"}))
+    assert "m5_max_output_tokens" not in build_m5(*args)

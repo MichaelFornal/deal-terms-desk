@@ -16,7 +16,8 @@ def normalise_question(q: str) -> str:
 
 class AnswerCache:
     """Answers by (model, prompt hash). The prompt carries the question, the retrieved passages and the template,
-    so any change to the bundle, lexicon, settings or template misses on its own."""
+    so any change to the bundle, lexicon, settings or template misses on its own; the desk's model string also
+    carries its thinking budget and output cap."""
 
     def __init__(self, db):
         db = Path(db)

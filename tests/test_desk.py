@@ -180,6 +180,27 @@ def test_a_repeated_question_is_served_from_the_cache(tmp_path):
     assert again["claims"] == first["claims"] and again["tokens"] is None
 
 
+def test_the_cache_keys_on_the_answer_settings_too(tmp_path):
+    """An answer made with another thinking budget or output cap is never served: the cache misses and calls."""
+    import dataclasses
+    run = Scripted()
+    desk = make_desk(tmp_path, run, thinking_budget=4096, max_tokens=6144)
+    ref = ref_of(desk, "termination fee", "edgar_0001", amended)
+    answer = reply(state="answered", claims=[{"text": "t", "quote": AMEND_QUOTE, "ref": ref}])
+    run.results.append(answer)
+    assert desk.ask("termination fee", "edgar_0001")["served_from"] == "live"
+
+    def same_cache(**kw) -> Desk:
+        return Desk(desk.ladder, run, dataclasses.replace(desk.config, **kw), desk.budget, desk.cache, desk.fresh,
+                    desk.slots)
+    for kw in ({"thinking_budget": 2048}, {"thinking_budget": 0}, {"max_tokens": 4096}):
+        run.results.append(answer)
+        got = same_cache(**kw).ask("termination fee", "edgar_0001")
+        assert got["served_from"] == "live", kw
+    calls = len(run.calls)
+    assert same_cache().ask("termination fee", "edgar_0001")["served_from"] == "cache" and len(run.calls) == calls
+
+
 def test_busy_when_no_slot_or_no_fresh_call_is_left(tmp_path):
     run = Scripted(NOT_STATED)
     assert make_desk(tmp_path / "a", run, ask_slots=0).ask("termination fee", "edgar_0001")["state"] == "busy"

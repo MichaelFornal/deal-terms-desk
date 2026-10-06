@@ -73,12 +73,48 @@ if ! caps_match "$BOX_CAPS"; then
   exit 1
 fi
 
+# The answer settings a release runs must be the ones calibration measured and the site publishes: thinking budget,
+# output cap and model (facts.json m5_thinking_budget_tokens, m5_max_output_tokens, m5_price_model). Each is checked
+# when its fact exists. Used before the swap on the new release's own config, and after it on /api/health.
+config_match() {  # $1 = {"thinking_budget", "max_tokens", "model"} as JSON, $2 = what each problem is prefixed with
+  uv run python - "$1" "$2" <<'CONFIG'
+import json, sys
+facts = json.load(open("facts.json"))
+raw, prefix = sys.argv[1], sys.argv[2]
+try:
+    box = json.loads(raw.strip().splitlines()[-1])
+except (ValueError, IndexError):
+    box = None
+if not isinstance(box, dict):
+    print(f"{prefix}: could not read the release's answer settings from the box: {raw!r}", file=sys.stderr)
+    sys.exit(1)
+bad = []
+for field, key in (("thinking_budget", "m5_thinking_budget_tokens"), ("max_tokens", "m5_max_output_tokens"),
+                   ("model", "m5_price_model")):
+    want = facts.get(key)
+    if want is not None and box.get(field) != want:
+        bad.append(f"the box runs {field}={box.get(field)!r} but facts.json {key}={want!r}")
+for b in bad:
+    print(f"{prefix}: {b}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+CONFIG
+}
+
 # Code: the committed tree only, never the working tree. .complete marks a finished release. Bytecode is compiled
 # here: the release is read-only to the service (ProtectSystem=strict), so Python could never cache it later.
 if ! ssh "$DTD_HOST" test -f "$REL/.complete"; then
   ssh "$DTD_HOST" "rm -rf '$REL' && mkdir -p '$REL'"
   git archive --format=tar HEAD | ssh "$DTD_HOST" "tar -x --no-same-owner -C '$REL'"
   ssh "$DTD_HOST" "cd '$REL' && echo $SHA > GIT_SHA && UV_PYTHON_PREFERENCE=only-system UV_COMPILE_BYTECODE=1 uv sync --frozen --no-dev && touch .complete"
+fi
+
+# The new release's own config loader, run as the service runs it (its env, its user, its directory), before
+# anything live moves. A loader that fails prints nothing, and that is refused too.
+NEW_CFG="$(ssh "$DTD_HOST" "cd '$REL' && { $LOAD_ENV; $AS_DTD .venv/bin/python -c 'import json; from service.config import from_env; c = from_env(); print(json.dumps(dict(thinking_budget=c.thinking_budget, max_tokens=c.max_tokens, model=c.model)))'; }" || true)"
+if ! config_match "$NEW_CFG" "refusing to switch"; then
+  echo "  fix: set DTD_THINKING_BUDGET, DTD_MAX_TOKENS and DTD_MODEL in /etc/dtd/env to the calibrated settings, or" \
+    "rerun calibration and dtd facts; the live release is untouched" >&2
+  exit 1
 fi
 
 # Bundle: only when the box lacks this exact file. Resumable, then checked against its sha256.
@@ -158,19 +194,11 @@ if [ -z "$live" ]; then
   exit 1
 fi
 
-# The thinking budget the box runs must be the one the site publishes (facts.json m5_thinking_budget_tokens). The
-# release is already healthy, so a mismatch fails the push without a revert: fix /etc/dtd/env or rerun calibration.
-if ! uv run python - "$HEALTH" <<'PY'
-import json, sys
-want = json.load(open("facts.json")).get("m5_thinking_budget_tokens")
-got = json.loads(sys.argv[1]).get("thinking_budget")
-if want is not None and got != want:
-    print(f"the box runs with thinking budget {got!r} but facts.json m5_thinking_budget_tokens={want}", file=sys.stderr)
-    sys.exit(1)
-PY
-then
-  echo "thinking budget mismatch: set DTD_THINKING_BUDGET in /etc/dtd/env to the published budget, or rerun" \
-    "calibration and dtd facts; the release is healthy and stays live" >&2
+# Confirmation: the running service reports the calibrated answer settings too (checked before the swap on the new
+# release's config). The release is already healthy, so a mismatch fails the push without a revert.
+if ! config_match "$HEALTH" "answer settings mismatch"; then
+  echo "  fix: set DTD_THINKING_BUDGET, DTD_MAX_TOKENS and DTD_MODEL in /etc/dtd/env to the calibrated settings, or" \
+    "rerun calibration and dtd facts; the release is healthy and stays live" >&2
   exit 1
 fi
 

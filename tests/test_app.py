@@ -109,7 +109,6 @@ def test_build_desk_makes_its_runner_with_the_thinking_settings(tmp_path, monkey
     monkeypatch.setattr(app, "build_live_ladder", lambda *a, **k: None)
     monkeypatch.setattr(app, "load_lexicon", lambda *a, **k: {})
     monkeypatch.setattr(app, "load_settings", lambda *a, **k: None)
-    monkeypatch.setattr(app, "load_prices", lambda *a, **k: None)
     monkeypatch.setattr(app, "Budget", lambda *a, **k: None)
     base = make_desk(tmp_path, fake_claude(NOT_STATED)).config
     for budget, want in ((3000, 3000), (0, None)):
@@ -117,3 +116,16 @@ def test_build_desk_makes_its_runner_with_the_thinking_settings(tmp_path, monkey
         with pytest.raises(StopIteration):
             app.build_desk(cfg)
         assert seen["args"] == (6000,) and seen["kw"] == {"timeout": 77.0, "thinking_budget": want}
+
+
+def test_build_desk_refuses_a_model_the_prices_do_not_describe(tmp_path, monkeypatch):
+    """The ledger prices every call at prices.json's rates: another model would be priced as Haiku and could
+    under-reserve. Checked before anything is loaded."""
+    import dataclasses
+
+    from service import app
+    monkeypatch.setattr(app, "Embedder", lambda *a, **k: pytest.fail("loaded the embedder before the check"))
+    base = make_desk(tmp_path, fake_claude(NOT_STATED)).config
+    cfg = dataclasses.replace(base, model="claude-sonnet-5-5")
+    with pytest.raises(ValueError, match=r"DTD_MODEL is claude-sonnet-5-5 but .*prices\.json.* claude-haiku-4-5"):
+        app.build_desk(cfg)

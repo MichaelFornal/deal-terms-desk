@@ -67,6 +67,8 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
               "m5_calibration_stop_rule": c["stop_rule"]["verdict"]}
         if c.get("thinking_budget", 0) > 0:  # a plain measurement of the run's setting; none for a no-thinking or older run
             f["m5_thinking_budget_tokens"] = c["thinking_budget"]
+        if c.get("max_tokens") is not None:  # the output cap calibration ran with; push.sh holds the box to it
+            f["m5_max_output_tokens"] = c["max_tokens"]
         if "m5_model_cap_usd" in f and c["cost_per_answer_mean"]:
             f["m5_answers_per_month"] = math.floor(f["m5_model_cap_usd"] / c["cost_per_answer_mean"])
 

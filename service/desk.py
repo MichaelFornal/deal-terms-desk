@@ -46,6 +46,9 @@ class Desk:
         self.ladder, self.runner, self.config = ladder, runner, config
         self.budget, self.cache, self.fresh, self.slots = budget, cache, fresh, slots
         self.answerer = Answerer(ladder, runner, config.model)
+        # The cache's model part carries the answer settings too: an answer made with another thinking budget or
+        # output cap is never served. The prompt hash already covers the question, passages and template.
+        self._cache_model = f"{config.model}|tb{config.thinking_budget}|mt{config.max_tokens}"
         self._lock = threading.Lock()
         self._min_call = worst_case_usd(load_prices(config.prices_path), TYPICAL_PROMPT_CHARS, config.max_tokens)
         rows = ladder.conn.execute("SELECT contract_id, source, target, parent, signed FROM deals").fetchall()
@@ -105,7 +108,7 @@ class Desk:
     def _answer(self, q: str, prep) -> dict:
         if not isinstance(prep, Prepared):  # which_deal, or nothing retrieved: never a model call
             return self._payload(prep.state, q, prep)
-        hit = self.cache.get(self.config.model, prep.prompt_sha)
+        hit = self.cache.get(self._cache_model, prep.prompt_sha)
         if hit is not None:
             budget = self._budget()
             state = "budget_cached" if budget == "reached" else hit["state"]
@@ -144,7 +147,7 @@ class Desk:
             except ParseError:
                 return self._payload("error", q)
             out = self._payload(answer.state, q, answer, "live", {"in": answer.tokens_in, "out": answer.tokens_out})
-            self.cache.put(self.config.model, prep.prompt_sha, {k: v for k, v in out.items() if k not in VOLATILE})
+            self.cache.put(self._cache_model, prep.prompt_sha, {k: v for k, v in out.items() if k not in VOLATILE})
             return out
         finally:
             self.slots.release()

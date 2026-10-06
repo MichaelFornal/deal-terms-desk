@@ -276,11 +276,60 @@ def test_smoke_reports_a_dead_box_as_failures_not_a_traceback():
     assert smoke.check_burst(dead, "q", tries=2) == ["burst: no 429 after 2 searches"]
 
 
-def test_push_refuses_a_box_whose_thinking_budget_differs_from_the_published_one():
+def config_check(tmp_path, facts: dict, box: str, prefix: str = "refusing to switch") -> subprocess.CompletedProcess:
+    """Run push.sh's answer-settings comparison as push.sh does: in the repo root, with the box's settings (JSON)
+    and the message prefix as arguments."""
     text = Path("deploy/push.sh").read_text()
-    assert 'm5_thinking_budget_tokens' in text and '.get("thinking_budget")' in text
-    assert "thinking budget" in text and "facts.json" in text
-    assert text.index("never reported healthy") < text.index("m5_thinking_budget_tokens") < text.index("dtd warm")
+    code = re.search(r"<<'CONFIG'\n(.*?)\nCONFIG\n", text, re.S).group(1)
+    (tmp_path / "facts.json").write_text(json.dumps(facts))
+    return subprocess.run([sys.executable, "-", box, prefix], input=code, text=True, capture_output=True,
+                          cwd=tmp_path)
+
+
+HAIKU = "claude-haiku-4-5-20251001"
+PUBLISHED = {"m5_thinking_budget_tokens": 4096, "m5_max_output_tokens": 6144, "m5_price_model": HAIKU}
+
+
+def test_push_checks_the_new_release_config_before_the_swap(tmp_path):
+    """The new release's own config loader runs on the box, with the service's env, before `current` moves: its
+    thinking budget, output cap and model must be the calibrated ones the site publishes."""
+    text = Path("deploy/push.sh").read_text()
+    load = next(line for line in text.splitlines() if "from service.config import from_env" in line)
+    assert "cd '$REL'" in load and "$LOAD_ENV" in load and "$AS_DTD .venv/bin/python" in load
+    for field in ("thinking_budget=c.thinking_budget", "max_tokens=c.max_tokens", "model=c.model"):
+        assert field in load, field
+    swap = text.index("current.next")
+    assert text.index("uv sync --frozen") < text.index("from service.config import from_env") < swap
+    assert text.index('config_match "$NEW_CFG" "refusing to switch"') < swap
+    assert "the live release is untouched" in text[text.index('config_match "$NEW_CFG"'):swap]
+
+    ok = json.dumps({"thinking_budget": 4096, "max_tokens": 6144, "model": HAIKU})
+    assert config_check(tmp_path, PUBLISHED, ok).returncode == 0
+    got = config_check(tmp_path, PUBLISHED, json.dumps({"thinking_budget": 2048, "max_tokens": 4096,
+                                                        "model": "claude-sonnet-5-5"}))
+    assert got.returncode == 1
+    for s in ("refusing to switch: ", "thinking_budget=2048", "m5_thinking_budget_tokens=4096", "max_tokens=4096",
+              "m5_max_output_tokens=6144", "model='claude-sonnet-5-5'", f"m5_price_model='{HAIKU}'"):
+        assert s in got.stderr, s
+    got = config_check(tmp_path, PUBLISHED, json.dumps({"thinking_budget": 4096, "max_tokens": 8192, "model": HAIKU}))
+    assert got.returncode == 1 and "max_tokens=8192" in got.stderr and "thinking_budget" not in got.stderr
+    # each comparison applies only when its fact exists
+    assert config_check(tmp_path, {"m5_price_model": HAIKU},
+                        json.dumps({"thinking_budget": 0, "max_tokens": 1024, "model": HAIKU})).returncode == 0
+    # a loader that failed on the box prints nothing: refused, not passed
+    for raw in ("", "not json", "[]"):
+        got = config_check(tmp_path, PUBLISHED, raw)
+        assert got.returncode == 1 and "refusing to switch: could not read" in got.stderr, raw
+
+
+def test_push_confirms_the_settings_the_healthy_box_reports():
+    """After the release is healthy, /api/health's thinking budget, output cap and model are checked again with the
+    same comparison; a mismatch fails the push without a revert."""
+    text = Path("deploy/push.sh").read_text()
+    post = text.index('config_match "$HEALTH"')
+    assert text.index("never reported healthy") < post < text.index("dtd warm")
+    assert "the release is healthy and stays live" in text[post:text.index("dtd warm")]
+    assert text.count("<<'CONFIG'") == 1  # one comparison, used before the swap and after it
 
 
 def test_push_pins_the_health_poll_to_the_box_address():
