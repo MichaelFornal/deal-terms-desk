@@ -115,3 +115,21 @@ def test_dtd_copycheck_reports_and_never_writes(tmp_path, monkeypatch, capsys):
     assert cli.entry(["copycheck", str(tmp_path / "missing.md")]) == 2
     monkeypatch.setattr(cli, "FACTS", tmp_path / "none.json")
     assert cli.entry(["copycheck", str(clean)]) == 2
+
+
+def test_the_label_is_case_insensitive_but_the_lexicon_name_still_is_not_one():
+    assert one("## Machine-built tech deals\n\nAnswers agreed 0.8125 of the time.\n").status == "fact"
+    assert one("Machine-built answers agreed 0.8125 of the time.").status == "fact"
+    assert one("With a Machine-Built Lexicon, answers agreed 0.8125.").status == "needs machine-built label"
+
+
+def test_a_number_with_a_plain_match_is_not_flagged_and_tags_the_machine_keys():
+    facts = {"m5_price_input_per_mtok": 1.0, "m3_tier_tau": 1.0}
+    f = one("$1 per million input tokens", facts)
+    assert f.status == "fact" and f.status not in FLAGGED
+    assert f.keys == ("m5_price_input_per_mtok", "m3_tier_tau")
+    assert "m5_price_input_per_mtok, m3_tier_tau [machine-built]" in render("a.md", [f])
+
+
+def test_a_less_than_sign_is_not_an_html_tag():
+    assert [f.raw for f in check("n < 5 and m > 3", {})] == ["5", "3"]

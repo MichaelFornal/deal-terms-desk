@@ -15,7 +15,7 @@ ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"^\s*\|")
 REFDEF = re.compile(r"^\s*\[[^\]]+\]:\s*\S+.*$")  # [7]: https://… (a link reference definition)
 # Code spans, link targets, footnote markers, HTML tags and bare URLs carry no copy numbers.
-INLINE = re.compile(r"`[^`]*`|\]\([^)]*\)|\[\^[^\]]*\]|<[^>]*>|https?://\S+")
+INLINE = re.compile(r"`[^`]*`|\]\([^)]*\)|\[\^[^\]]*\]|</?[A-Za-z][^>]*>|https?://\S+")
 ORDINAL = re.compile(r"^(\s*)\d+[.)](?=\s)")
 DATE = re.compile(r"(?<![\w.-])\d{4}-\d{2}-\d{2}(?![\w-])")
 # A number that touches no letter, dot, hyphen or digit on either side: "M5", "R7n", "v1.5" and model ids are names.
@@ -31,7 +31,7 @@ class Found:
 
 
 def _labelled(context: str) -> bool:
-    return MACHINE in context.replace("machine-built lexicon", "")
+    return MACHINE in re.sub("machine-built lexicon", "", context.lower())
 
 
 def _contexts(lines: list[str], code: list[bool]) -> list[str]:
@@ -109,7 +109,8 @@ def check(text: str, facts: dict) -> list[Found]:
         for _, raw, status, keys in sorted(hits):
             f = Found(i + 1, raw, status, keys)
             machine = tuple(k for k in keys if is_machine_built(k))
-            if machine and not _labelled(contexts[i]):
+            # flagged only when every match is machine-built; mixed matches stay facts (render tags the machine ones)
+            if machine and len(machine) == len(keys) and not _labelled(contexts[i]):
                 f = replace(f, status="needs machine-built label", keys=machine)
             found.append(f)
     return found
@@ -118,7 +119,9 @@ def check(text: str, facts: dict) -> list[Found]:
 def render(name: str, found: list[Found]) -> str:
     out = []
     for f in found:
-        keys = ", ".join(f.keys[:SHOWN]) + (f" +{len(f.keys) - SHOWN} more" if len(f.keys) > SHOWN else "")
+        mixed = not all(is_machine_built(k) for k in f.keys)  # tag machine-built keys only among plain ones
+        shown = [k + (" [machine-built]" if mixed and is_machine_built(k) else "") for k in f.keys[:SHOWN]]
+        keys = ", ".join(shown) + (f" +{len(f.keys) - SHOWN} more" if len(f.keys) > SHOWN else "")
         out.append(f'{name}:{f.line}  "{f.raw}"  {f.status}  {keys}'.rstrip())
     flagged = sum(f.status in FLAGGED for f in found)
     out.append(f"{name}: {len(found)} numbers, {len(found) - flagged} match a fact, {flagged} flagged")
