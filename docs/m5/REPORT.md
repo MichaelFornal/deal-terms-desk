@@ -42,12 +42,12 @@ Measured against the live service from the development machine. Server times are
 
 | Request | Server p50 / p95 ms | End-to-end p50 / p95 ms |
 |---|---|---|
-| Search | pending / pending (n pending) | pending / pending (n pending) |
-| Cached answer | pending / pending (n pending) | pending / pending (n pending) |
-| New answer | pending / pending (n pending) | pending / pending (n pending) |
+| Search | 76.6 / 120.9 (n 50) | 516.1 / 559.5 (n 50) |
+| Cached answer | 77.0 / 105.2 (n 6) | 413.9 / 439.8 (n 6) |
+| New answer | 17225.8 / 24998.1 (n 3) | 17554.5 / 25337.3 (n 3) |
 
-Requests that failed, or were served other than meant, during the measurement: pending. Of these, new questions the cache served: pending; cached examples answered live, and billed: pending. Each answer is timed under what served it. Peak memory of the service: pending MB. The server's searches returned the same top passages as the development machine's for pending questions, a share of pending (query embeddings are computed on each machine).
+Requests that failed, or were served other than meant, during the measurement: 0. Of these, new questions the cache served: 0; cached examples answered live, and billed: 0. Each answer is timed under what served it. Peak memory of the service: 528.7 MB. The server's searches returned the same top passages as the development machine's for 50 questions, a share of 0.98 (query embeddings are computed on each machine).
 
 ## The cap trips
 
-With the service restarted under a tiny cap: a new question got "budget reached": pending; a cached question was still answered as "budget reached, showing a cached answer": pending; the month's spend did not move: pending. The same check runs in the test suite (`tests/test_desk.py`, `test_the_cap_trips`).
+With the service restarted under a tiny cap: a new question got "budget reached": True; a cached question was still answered as "budget reached, showing a cached answer": True; the month's spend did not move: True. The same check runs in the test suite (`tests/test_desk.py`, `test_the_cap_trips`).

@@ -246,6 +246,19 @@ scored by having the model pick one of MAUD's answer options.
   the live service.
 - 2026-10-06: the host is a Hetzner CX23 (x86, 4 GB) in Falkenstein, billed in USD, replacing the CAX11.
 - 2026-10-06: the live answerer uses Haiku's extended thinking, as the M4 evaluation runs did.
+- 2026-10-06: one API key serves calibration and the live service (Michael's choice), so the Console
+  spend limit covers both; the separate-workspace bullet above no longer holds.
+
+**M5 outcome (2026-10-06, numbers in `facts.json` as `m5_*`, report in `docs/m5/REPORT.md`):** the desk is live at
+`deals.forn.al`. It runs the measured path: re-preparing M4's answer items through the live code reproduced
+every prompt (`m5_prompt_parity_*`), and R7n over the shipped index matched the evaluation index
+(`m5_bundle_parity_*`). An API calibration first ran without extended thinking and fell below the command-line
+evaluation runs on MAUD's questions, which stopped the deploy. With thinking on, the API matched them
+(`m5_calibration_*`, stop rule `m5_calibration_stop_rule`). The cap trips on the real box (`m5_cap_trip_*`) and
+in the test suite. A SIGKILL of the service during fresh answers left only reservations booked at worst case,
+which settled after the stale window without spend ever going down (`data/m5/kill.log`). Query embeddings on the
+x86 server match the development machine's for most questions (`m5_server_embed_parity`). The model budget
+is `m5_model_cap_usd` a month after hosting (`m5_hosting_usd_month`), about `m5_answers_per_month` new answers.
 
 ## 10. Risks and stated limits (these appear on the Method page)
 
