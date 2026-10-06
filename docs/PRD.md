@@ -244,6 +244,8 @@ scored by having the model pick one of MAUD's answer options.
 - Commit metadata was rewritten so it never carries the SEC contact.
 - The model budget has a daily ceiling, and calibration spend uses a separate Console workspace from
   the live service.
+- 2026-10-06: the live answerer uses Haiku's extended thinking, matching the configuration the M4 evaluations
+  measured.
 
 ## 10. Risks and stated limits (these appear on the Method page)
 

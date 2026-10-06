@@ -62,6 +62,8 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
               "m5_calibration_gate_pass_cli": c["gate_pass_rate"]["cli"],
               "m5_calibration_truncated": c["truncated"], "m5_calibration_estimator_ok": c["worst_case_ok"],
               "m5_calibration_stop_rule": c["stop_rule"]["verdict"]}
+        if "thinking_budget" in c:  # a plain measurement of the run's setting; older runs had no thinking field
+            f["m5_thinking_budget_tokens"] = c["thinking_budget"]
         if "m5_model_cap_usd" in f and c["cost_per_answer_mean"]:
             f["m5_answers_per_month"] = math.floor(f["m5_model_cap_usd"] / c["cost_per_answer_mean"])
 

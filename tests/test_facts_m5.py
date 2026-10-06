@@ -2,6 +2,7 @@ import json
 import math
 from pathlib import Path
 
+from facts.labels import tier_label
 from facts.m2 import is_unstable
 from facts.m5 import build_m5, present_m5
 from service.prices import load_prices
@@ -62,7 +63,7 @@ def every_input(tmp_path, calibration: dict | None = None, server: dict | None =
         "gate_pass_rate": {"api": 0.88, "cli": 0.86}, "state_agreement": 0.9,
         "thuman_accuracy": {"api": 0.6, "cli": 0.62, "diff": -0.02, "n": 19},
         "stop_rule": {"state_agreement_min": 0.8, "accuracy_diff_max": 0.15, "verdict": "go", "reasons": []},
-        "model": "claude-haiku-4-5-20251001", "max_tokens": 1024} | (calibration or {}))
+        "model": "claude-haiku-4-5-20251001", "max_tokens": 6144, "thinking_budget": 4096} | (calibration or {}))
     span = {"n": 50, "p50": 20.0, "p95": 40.0}
     _write(data_m5 / "server.json", {
         "search": {"e2e": {"n": 50, "p50": 120.0, "p95": 200.0}, "server": span},
@@ -87,6 +88,8 @@ def test_every_section_once_its_input_exists(tmp_path):
     assert f["m5_live_r6n_latency_ms_p95"] == 300.0 and f["m5_live_t_r7n_corpus_latency_ms_p50"] == 46.4
     assert f["m5_api_tokens_in_mean"] == 4000.0 and f["m5_api_tokens_out_p99"] == 600
     assert f["m5_calibration_stop_rule"] == "go" and f["m5_calibration_accuracy_cli"] == 0.62
+    assert f["m5_thinking_budget_tokens"] == 4096 and tier_label("m5_thinking_budget_tokens") is None
+    assert not is_unstable("m5_thinking_budget_tokens")
     assert f["m5_calibration_gate_pass_api"] == 0.88 and f["m5_calibration_estimator_ok"] is True
     assert f["m5_server_search_latency_ms_p95"] == 40.0 and f["m5_e2e_search_latency_ms_p95"] == 200.0
     assert f["m5_server_search_n"] == 50 and f["m5_e2e_search_n"] == 50 and f["m5_server_ask_fresh_n"] == 50
@@ -108,3 +111,12 @@ def test_every_measurement_run_key_is_unstable_and_the_rest_is_stable():
         assert is_unstable(k), k
     for k in ("m5_bundle_sha", "m5_prompt_parity_same", "m5_calibration_n"):
         assert not is_unstable(k), k
+
+
+def test_an_older_calibration_without_thinking_emits_no_budget(tmp_path):
+    args = every_input(tmp_path)
+    path = args[0] / "calibration.json"
+    old = json.loads(path.read_text())
+    old.pop("thinking_budget")
+    path.write_text(json.dumps(old))
+    assert "m5_thinking_budget_tokens" not in build_m5(*args)

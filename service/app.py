@@ -27,7 +27,9 @@ def build_desk(config: Config) -> Desk:
     config.state_dir.mkdir(parents=True, exist_ok=True)
     budget = Budget(config.state_dir / "budget.db", config.month_cap_usd, config.day_cap_usd,
                     load_prices(config.prices_path))
-    return Desk(ladder, make_api_runner(config.max_tokens), config, budget, AnswerCache(config.state_dir / "cache.db"),
+    runner = make_api_runner(config.max_tokens, timeout=config.api_timeout_s,
+                             thinking_budget=config.thinking_budget or None)
+    return Desk(ladder, runner, config, budget, AnswerCache(config.state_dir / "cache.db"),
                 Buckets(config.fresh_per_hour, 3600.0), Slots(config.ask_slots))
 
 

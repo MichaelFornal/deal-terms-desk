@@ -54,6 +54,48 @@ def test_ledger_name_carries_the_model_and_the_output_cap(tmp_path):
     assert a != b and a.name == "calibration_m_mt1024.jsonl" and a.parent == tmp_path
 
 
+def test_ledger_name_carries_the_thinking_budget_only_when_there_is_one(tmp_path):
+    assert ledger_path(tmp_path, "m", 6144, 4096).name == "calibration_m_mt6144_tb4096.jsonl"
+    assert ledger_path(tmp_path, "m", 1024, 0) == ledger_path(tmp_path, "m", 1024)
+    assert ledger_path(tmp_path, "m", 6144, 4096) != ledger_path(tmp_path, "m", 6144, 2048)
+
+
+def test_the_summary_records_the_thinking_budget():
+    assert summarise(ITEMS, {}, {}, CHARS, P, 6144, 4096)["thinking_budget"] == 4096
+    assert summarise(ITEMS, {}, {}, CHARS, P, 1024)["thinking_budget"] == 0
+
+
+def test_calibrate_defaults_and_flags_reach_the_stage(monkeypatch):
+    seen = []
+    monkeypatch.setitem(cli.M5_STAGES, "calibrate", lambda a: seen.append(a) or 0)
+    assert cli.entry(["m5", "calibrate"]) == 0
+    assert cli.entry(["m5", "calibrate", "--thinking-budget", "0", "--max-tokens", "900"]) == 0
+    assert (seen[0].thinking_budget, seen[0].max_tokens) == (4096, 6144)
+    assert (seen[1].thinking_budget, seen[1].max_tokens) == (0, 900)
+
+
+def test_the_calibration_runner_sends_the_thinking_budget(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+
+    class Client:
+        messages = SimpleNamespace(create=lambda **kw: calls.append(kw) or SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="{}")], stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1)))
+    monkeypatch.setattr(cli, "_api_client", lambda key: Client())
+    cli._calibration_runner(SimpleNamespace(max_tokens=6144, thinking_budget=4096), "k")("p", "m")
+    cli._calibration_runner(SimpleNamespace(max_tokens=1024, thinking_budget=0), "k")("p", "m")
+    assert calls[0]["thinking"] == {"type": "enabled", "budget_tokens": 4096} and "thinking" not in calls[1]
+
+
+def test_the_calibration_client_waits_long_enough_for_thinking(monkeypatch):
+    import anthropic
+    seen = {}
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kw: seen.update(kw))
+    cli._api_client("k")
+    assert seen["timeout"] == 90.0 and seen["max_retries"] == 0
+
+
 def test_summary_counts_tokens_cost_parity_and_stops_on_disagreement():
     api = {"th1": rec(ans(choice="Yes", kept=2, tin=1000, tout=100)),
            "th2": rec(ans("not_stated", choice="Yes", kept=0, dropped=1, tin=2000, tout=200)),

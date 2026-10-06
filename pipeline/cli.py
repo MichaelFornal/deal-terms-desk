@@ -833,7 +833,12 @@ def _m5_recall(args) -> int:
 
 def _api_client(key: str):
     import anthropic
-    return anthropic.Anthropic(api_key=key, max_retries=0, timeout=30.0)
+    return anthropic.Anthropic(api_key=key, max_retries=0, timeout=90.0)
+
+
+def _calibration_runner(args, key: str):
+    """The calibration runner: the live settings, so the sample measures what visitors get."""
+    return make_api_runner(args.max_tokens, client=_api_client(key), thinking_budget=args.thinking_budget or None)
 
 
 def _m5_calibrate(args) -> int:
@@ -854,11 +859,11 @@ def _m5_calibrate(args) -> int:
     sample = calibration_sample(read_items(sets["thuman"]) + read_items(sets["tmachine"]), args.n)
     th = [i for i in sample if i.set == "thuman"]
     tm = [i for i in sample if i.set == "tmachine"]
-    runner = make_api_runner(args.max_tokens, client=_api_client(key))
+    runner = _calibration_runner(args, key)
     th_ans = Answerer(_ladder(INDEX, {p.stem: load_contract(p) for p in sorted((RAW / "contracts").glob("*.txt"))}),
                       runner, HAIKU)  # the ladders `dtd m4 answer` used, so prompts match M4's
     tm_ans = Answerer(_deals_ladder(*_deals_texts()), runner, HAIKU)
-    ledger = ledger_path(_data_m5(), HAIKU, args.max_tokens)
+    ledger = ledger_path(_data_m5(), HAIKU, args.max_tokens, args.thinking_budget)
     try:
         run = run_calibration([(th, th_ans), (tm, tm_ans)], ledger, workers=args.workers, max_new=args.max_new)
     except RuntimeError as e:
@@ -872,8 +877,10 @@ def _m5_calibrate(args) -> int:
             p = ans.prepare(i.question, i.contract_id, i.choices)
             if isinstance(p, Prepared):
                 chars[i.item_id] = len(p.prompt)
-    summary = summarise_calibration(sample, api, cli_recs, chars, load_prices(PRICES), args.max_tokens)
-    summary |= {"model": HAIKU, "max_tokens": args.max_tokens, "ledger": ledger.name, "run": run}
+    summary = summarise_calibration(sample, api, cli_recs, chars, load_prices(PRICES), args.max_tokens,
+                                   args.thinking_budget)
+    summary |= {"model": HAIKU, "max_tokens": args.max_tokens, "thinking_budget": args.thinking_budget,
+                "ledger": ledger.name, "run": run}
     _data_m5().mkdir(parents=True, exist_ok=True)
     _write_atomic(_data_m5() / "calibration.json", json.dumps(summary, indent=2, sort_keys=True))
     print(json.dumps({k: summary[k] for k in ("n", "paired", "errors", "truncated", "cost_usd_total", "stop_rule")}))
@@ -981,7 +988,8 @@ def entry(argv: list[str] | None = None) -> int:
     m5p = sub.add_parser("m5")
     m5p.add_argument("stage", choices=tuple(M5_STAGES))
     m5p.add_argument("--n", type=int, default=40)
-    m5p.add_argument("--max-tokens", type=int, default=1024)
+    m5p.add_argument("--max-tokens", type=int, default=6144)
+    m5p.add_argument("--thinking-budget", type=int, default=4096, help="extended-thinking tokens; 0 is off")
     m5p.add_argument("--workers", type=int, default=3)
     m5p.add_argument("--max-new", type=int, default=None)
     m5p.add_argument("--base", default=None)

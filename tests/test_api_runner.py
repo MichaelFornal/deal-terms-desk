@@ -125,3 +125,34 @@ def test_a_client_error_outside_the_sdk_is_a_lost_connection_with_no_usage():
         make_api_runner(64, client=FakeClient(error=error))("p", HAIKU)
     assert e.value.kind == "connection" and e.value.usage == {}
     assert "TypeError" in str(e.value) and "auth" in str(e.value)
+
+
+def test_a_thinking_budget_is_sent_on_every_call_and_only_text_reaches_the_parser():
+    msg = message()
+    msg.content = [SimpleNamespace(type="thinking", thinking="PICK (B)"), SimpleNamespace(type="text", text="{}")]
+    client = FakeClient(msg)
+    runner = make_api_runner(6144, client=client, thinking_budget=4096)
+    assert runner("p", HAIKU)["result"] == "{}"
+    runner("p", HAIKU)
+    assert [c["thinking"] for c in client.calls] == [{"type": "enabled", "budget_tokens": 4096}] * 2
+    assert all("temperature" not in c and c["max_tokens"] == 6144 for c in client.calls)
+
+
+def test_no_budget_sends_no_thinking_key():
+    client = FakeClient(message())
+    make_api_runner(1024, client=client)("p", HAIKU)
+    make_api_runner(1024, client=client, thinking_budget=None)("p", HAIKU)
+    assert all("thinking" not in c for c in client.calls)
+
+
+@pytest.mark.parametrize("budget, cap", [(512, 6144), (1023, 6144), (6144, 6144), (7000, 6144)])
+def test_a_budget_outside_the_api_range_is_refused_when_the_runner_is_made(budget, cap):
+    with pytest.raises(ValueError, match=rf"{budget}.*{cap}"):
+        make_api_runner(cap, client=FakeClient(message()), thinking_budget=budget)
+
+
+def test_a_thinking_reply_cut_off_at_the_cap_is_still_truncated():
+    with pytest.raises(RunnerError) as e:
+        make_api_runner(2048, client=FakeClient(message(stop="max_tokens", output_tokens=2048)),
+                        thinking_budget=1024)("p", HAIKU)
+    assert e.value.kind == "truncated" and e.value.usage["output_tokens"] == 2048

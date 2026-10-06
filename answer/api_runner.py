@@ -42,11 +42,16 @@ def _kind(e: Exception) -> str:
     return "bad_request"
 
 
-def make_api_runner(max_tokens: int, client=None, timeout: float = 30.0):
+def make_api_runner(max_tokens: int, client=None, timeout: float = 30.0, thinking_budget: int | None = None):
     """runner(prompt, model) -> {"result", "usage", "stop_reason"}: the `run_claude` contract over the Messages API.
-    One user turn, no system prompt, no thinking, at most `max_tokens` out. The client is built on first use
+    One user turn, no system prompt, at most `max_tokens` out (thinking tokens included). With `thinking_budget` every
+    call asks for extended thinking of up to that many tokens (the API takes 1024 up to below `max_tokens`, and no
+    temperature); only the reply's text blocks are returned, never the thinking. The client is built on first use
     (no SDK retry: one billed attempt per reservation; `timeout` seconds) unless one is given. A truncated or refused reply raises RunnerError with its
     usage; it is never returned as an answer."""
+    if thinking_budget is not None and not 1024 <= thinking_budget < max_tokens:
+        raise ValueError(f"thinking_budget {thinking_budget} must be at least 1024 and below max_tokens {max_tokens}")
+    extra = {} if thinking_budget is None else {"thinking": {"type": "enabled", "budget_tokens": thinking_budget}}
     state, lock = {"client": client}, threading.Lock()
 
     def runner(prompt: str, model: str) -> dict:
@@ -56,7 +61,7 @@ def make_api_runner(max_tokens: int, client=None, timeout: float = 30.0):
             c = state["client"]
         try:
             msg = c.messages.create(model=model, max_tokens=max_tokens,
-                                    messages=[{"role": "user", "content": prompt}])
+                                    messages=[{"role": "user", "content": prompt}], **extra)
         except anthropic.AnthropicError as e:
             raise RunnerError(_kind(e), str(e)[:300]) from None
         except Exception as e:  # noqa: BLE001 - outside the SDK's classes (a missing key is a TypeError at request

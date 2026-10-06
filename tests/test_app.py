@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from service.app import create_app
@@ -91,3 +92,28 @@ def test_dtd_warm_builds_the_service_desk(tmp_path, monkeypatch, capsys):
     assert cli.entry(["warm", "--examples", str(path)]) == 0
     assert json.loads(capsys.readouterr().out)["asked"] == 1
     assert seen["config"].fresh_per_hour >= 1
+
+
+def test_build_desk_makes_its_runner_with_the_thinking_settings(tmp_path, monkeypatch):
+    import dataclasses
+
+    from service import app
+    seen = {}
+
+    def runner_for(*args, **kw):
+        seen["args"], seen["kw"] = args, kw
+        raise StopIteration  # nothing past the runner is needed
+
+    monkeypatch.setattr(app, "make_api_runner", runner_for)
+    monkeypatch.setattr(app, "Embedder", lambda *a, **k: type("E", (), {"embed_query": lambda s, q: None})())
+    monkeypatch.setattr(app, "build_live_ladder", lambda *a, **k: None)
+    monkeypatch.setattr(app, "load_lexicon", lambda *a, **k: {})
+    monkeypatch.setattr(app, "load_settings", lambda *a, **k: None)
+    monkeypatch.setattr(app, "load_prices", lambda *a, **k: None)
+    monkeypatch.setattr(app, "Budget", lambda *a, **k: None)
+    base = make_desk(tmp_path, fake_claude(NOT_STATED)).config
+    for budget, want in ((3000, 3000), (0, None)):
+        cfg = dataclasses.replace(base, thinking_budget=budget, api_timeout_s=77.0, max_tokens=6000)
+        with pytest.raises(StopIteration):
+            app.build_desk(cfg)
+        assert seen["args"] == (6000,) and seen["kw"] == {"timeout": 77.0, "thinking_budget": want}

@@ -100,3 +100,10 @@ def test_each_label_covers_exactly_the_facts_it_names(tmp_path):
                 assert human == (want == HUMAN), (key, want, line)
     assert {"m5_calibration_state_agreement", "m5_calibration_accuracy_api", "m5_bundle_r6n_report_recall_at_5",
             "m5_api_tokens_in_mean", "m5_server_rss_mb", "m5_cap_trip_budget_reached"} <= seen
+
+
+def test_the_report_says_the_model_answers_with_extended_thinking():
+    sentence = ("The live model answers with extended thinking, up to {} tokens of it per answer, "
+                "as the evaluation runs did.")
+    assert sentence.format("<m5_thinking_budget_tokens>") in render_m5({"m5_thinking_budget_tokens": "<m5_thinking_budget_tokens>"})
+    assert sentence.format("pending") in render_m5({})

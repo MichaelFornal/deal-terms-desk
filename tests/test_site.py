@@ -230,3 +230,13 @@ def test_method_counts_the_live_index_from_the_bundle(tmp_path):
     render_site({**f, "m5_bundle_contracts": 406, "m5_bundle_passages": 88628}, tmp_path / "built", EXAMPLES)
     assert "The live index holds 406 agreements in 88628 passages" in visible(
         (tmp_path / "built" / "method.html").read_text())
+
+
+def test_method_says_the_live_model_thinks_and_how_much(tmp_path):
+    sentence = ("The live model answers with extended thinking, up to {} tokens of it per answer, "
+                "as the evaluation runs did.")
+    render_site({**facts(), "m5_thinking_budget_tokens": 1234}, tmp_path / "a", EXAMPLES)
+    assert sentence.format(1234) in visible((tmp_path / "a" / "method.html").read_text())
+    f = {k: v for k, v in facts().items() if k != "m5_thinking_budget_tokens"}
+    render_site(f, tmp_path / "b", EXAMPLES)
+    assert sentence.format("pending") in visible((tmp_path / "b" / "method.html").read_text())

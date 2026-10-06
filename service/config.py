@@ -20,6 +20,8 @@ class Config:
     fresh_per_hour: int
     ask_slots: int
     git_sha: str
+    thinking_budget: int = 4096  # tokens of extended thinking per answer; 0 is off
+    api_timeout_s: float = 90.0  # a thinking answer can take tens of seconds
 
 
 def _num(env, name: str, cast, default):
@@ -50,13 +52,22 @@ def from_env(env=os.environ) -> Config:
         raise ValueError("DTD_MONTH_CAP_USD is not set: the month's model budget in USD (the $10 cap minus "
                          "hosting, from deploy/hosting.json)")
     month = _num(env, "DTD_MONTH_CAP_USD", float, None)
+    max_tokens = _num(env, "DTD_MAX_TOKENS", int, 6144)
+    raw = (env.get("DTD_THINKING_BUDGET") or "").strip()
+    try:
+        budget = int(raw) if raw else 4096
+    except ValueError:
+        raise ValueError(f"DTD_THINKING_BUDGET must be an int, got {raw!r}") from None
+    if budget != 0 and not 1024 <= budget < max_tokens:
+        raise ValueError(f"DTD_THINKING_BUDGET must be 0 (off) or at least 1024 and below DTD_MAX_TOKENS "
+                         f"({max_tokens}), got {budget}")
     return Config(
         bundle=Path(env.get("DTD_BUNDLE") or "data/live/live.db"),
         state_dir=Path(env.get("DTD_STATE") or "data/state"),
         prices_path=Path(env.get("DTD_PRICES") or "service/prices.json"),
         facts_path=Path(env.get("DTD_FACTS") or "facts.json"),
         model=env.get("DTD_MODEL") or "claude-haiku-4-5-20251001",
-        max_tokens=_num(env, "DTD_MAX_TOKENS", int, 1024),
+        max_tokens=max_tokens,
         month_cap_usd=month,
         day_cap_usd=_num(env, "DTD_DAY_CAP_USD", float, month / 10),
         question_max_chars=_num(env, "DTD_QUESTION_MAX_CHARS", int, 500),
@@ -65,4 +76,6 @@ def from_env(env=os.environ) -> Config:
         fresh_per_hour=_num(env, "DTD_FRESH_PER_HOUR", int, 60),
         ask_slots=_num(env, "DTD_ASK_SLOTS", int, 2),
         git_sha=_git_sha(env),
+        thinking_budget=budget,
+        api_timeout_s=_num(env, "DTD_API_TIMEOUT_S", float, 90.0),
     )

@@ -12,9 +12,11 @@ ACCURACY_DIFF_MAX = 0.15  # spec §2: a larger T-human accuracy gap is a gross d
 MAX_ERROR_RATE = 0.5  # calibration measures truncations and refusals; only an outage (20 in a row) should stop it
 
 
-def ledger_path(root: Path, model: str, max_tokens: int) -> Path:
-    """One ledger per model and output cap: a rerun at a new cap is new calls, not stale hits."""
-    return Path(root) / f"calibration_{model}_mt{max_tokens}.jsonl"
+def ledger_path(root: Path, model: str, max_tokens: int, thinking_budget: int = 0) -> Path:
+    """One ledger per model, output cap and thinking budget: a rerun at a new setting is new calls, not stale hits.
+    No budget keeps the name the no-thinking run already has on disk."""
+    tb = f"_tb{thinking_budget}" if thinking_budget else ""
+    return Path(root) / f"calibration_{model}_mt{max_tokens}{tb}.jsonl"
 
 
 def calibration_sample(items, n: int) -> list:
@@ -65,7 +67,8 @@ def _right(answer: dict, item) -> bool:
     return picked is not None and normalise(picked) == normalise(item.expected)
 
 
-def summarise(items, api: dict, cli: dict, prompt_chars: dict, prices, max_tokens: int) -> dict:
+def summarise(items, api: dict, cli: dict, prompt_chars: dict, prices, max_tokens: int,
+              thinking_budget: int = 0) -> dict:
     """API calibration against the M4 CLI answers for the same items. `api` and `cli` are load_answers records by
     item id; `prompt_chars` the length of each item's prompt. A call that failed after it was sent (truncated,
     refused, unparseable) is costed at its worst case, because its usage is not in the ledger."""
@@ -99,7 +102,7 @@ def summarise(items, api: dict, cli: dict, prompt_chars: dict, prices, max_token
         reasons.append("the worst-case estimate is below an actual cost, so the budget would under-reserve")
     costs = list(cost.values())
     return {
-        "n": len(items), "called": len(called), "errors": len(failed),
+        "thinking_budget": thinking_budget, "n": len(items), "called": len(called), "errors": len(failed),
         "missing": sum(i.item_id not in api for i in items),
         "truncated": sum(e.startswith("runner: truncated") for e in errors),
         "refused": sum(e.startswith("runner: refusal") for e in errors),

@@ -422,7 +422,9 @@ METHOD = (
          "the model budget is the rest, ", K("m5_model_cap_usd"), ", with a daily ceiling of ",
          K("m5_day_cap_usd"), ". Prices were checked on ", K("m5_price_checked"), ": ",
          K("m5_price_input_per_mtok"), " US dollars per million input tokens and ", K("m5_price_output_per_mtok"),
-         " per million output tokens. When the budget is spent, the desk shows cached answers only and says so. "
+         " per million output tokens. The live model answers with extended thinking, up to ",
+         K("m5_thinking_budget_tokens"), " tokens of it per answer, as the evaluation runs did. "
+         "When the budget is spent, the desk shows cached answers only and says so. "
          "Search never spends model budget."),
     )),
     ("Stated limits", (
