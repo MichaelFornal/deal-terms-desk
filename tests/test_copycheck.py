@@ -1,0 +1,117 @@
+import json
+
+from facts.copycheck import FLAGGED, check, render
+
+FACTS = {
+    "m4_thuman_haiku_report_accuracy": 0.6039,     # human-labelled (MAUD)
+    "m4_tmachine_haiku_report_agree": 0.8125,      # machine-built (m4_tmachine_ prefix)
+    "m5_model_cap_usd": 2.91,
+    "m5_price_input_per_mtok": 1.0,
+    "m5_bundle_passages": 88628,
+    "m2_best_corpus_char_recall_at_1_pct": 12.5,   # a _pct key: already a percent
+    "m5_price_checked": "2026-10-05",
+    "m5_cap_trip_new_question_refused": True,      # a boolean must never match "1"
+}
+
+
+def one(text: str, facts: dict = FACTS):
+    found = check(text, facts)
+    assert len(found) == 1, found
+    return found[0]
+
+
+def test_an_exact_number_names_its_fact():
+    f = one("Accuracy was 0.6039 on MAUD's questions.")
+    assert (f.line, f.raw, f.status, f.keys) == (1, "0.6039", "fact", ("m4_thuman_haiku_report_accuracy",))
+
+
+def test_rounded_numbers_and_percents_match_the_fact_they_round():
+    assert one("about 0.60 of them").status == "rounded"
+    f = one("about 60% of them")
+    assert (f.raw, f.status, f.keys) == ("60%", "rounded", ("m4_thuman_haiku_report_accuracy",))
+    assert one("12.5% of characters").keys == ("m2_best_corpus_char_recall_at_1_pct",)
+
+
+def test_one_significant_digit_is_never_a_rounding():
+    assert one("roughly 0.6 of them").status == "no fact"
+
+
+def test_dollars_and_thousands_separators():
+    assert one("a $2.91 model budget").keys == ("m5_model_cap_usd",)
+    f = one("$1 per million input tokens")
+    assert (f.raw, f.keys) == ("$1", ("m5_price_input_per_mtok",))  # never the boolean fact
+    assert one("88,628 passages").keys == ("m5_bundle_passages",)
+
+
+def test_dates_match_string_facts():
+    f = one("prices checked on 2026-10-05")
+    assert (f.raw, f.status, f.keys) == ("2026-10-05", "fact", ("m5_price_checked",))
+    assert one("written on 2026-10-07").status == "no fact"
+
+
+def test_a_number_no_fact_holds_is_flagged():
+    f = one("it answers 17 questions")
+    assert f.status == "no fact" and f.status in FLAGGED and f.keys == ()
+
+
+def test_code_links_list_markers_and_names_are_not_numbers():
+    text = ("1. Run `dtd copycheck README.md` first[^2]\n"
+            "See [the report](docs/m5/REPORT.md#3) or https://deals.forn.al/v4/5.\n"
+            "M5 ships R7n with bge-small-en-v1.5 and claude-haiku-4-5-20251001 in 2.0x mode.\n"
+            "[7]: https://example.com/8\n"
+            "```\nuv run pytest -q  # 870 tests\n```\n")
+    assert check(text, FACTS) == []
+
+
+def test_machine_built_numbers_need_the_label_nearby():
+    assert one("The machine-built answers agreed 0.8125 of the time.").status == "fact"
+    f = one("Answers agreed 0.8125 of the time.")
+    assert (f.status, f.keys) == ("needs machine-built label", ("m4_tmachine_haiku_report_agree",))
+    assert f.status in FLAGGED
+    assert one("Answers agreed 81% of the time.").status == "needs machine-built label"  # rounded matches count
+    assert one("Answers agreed\n0.8125 of the time (machine-built).\n").status == "fact"  # one paragraph, two lines
+
+
+def test_a_heading_labels_its_section_only():
+    assert one("## Tech deals (machine-built)\n\nAnswers agreed 0.8125 of the time.\n").status == "fact"
+    text = "## Tech deals (machine-built)\n\nFine.\n\n## MAUD\n\nAnswers agreed 0.8125 of the time.\n"
+    assert one(text).status == "needs machine-built label"
+
+
+def test_the_lexicon_method_name_is_not_a_label():
+    assert one("With a machine-built lexicon, answers agreed 0.8125.").status == "needs machine-built label"
+
+
+def test_list_items_and_table_rows_stand_alone():
+    assert one("- machine-built: yes\n- agreed 0.8125\n").status == "needs machine-built label"
+    assert one("| tier | agree |\n|---|---|\n| machine-built | 0.8125 |\n").status == "fact"
+    assert one("| machine-built | x |\n| human | 0.8125 |\n").status == "needs machine-built label"
+
+
+def test_the_report_lists_every_number_and_counts_the_flags():
+    out = render("README.md", check("Budget $2.91.\n\nIt answers 17 questions.\n", FACTS))
+    assert out.splitlines() == ['README.md:1  "$2.91"  fact  m5_model_cap_usd',
+                                'README.md:3  "17"  no fact',
+                                "README.md: 2 numbers, 1 match a fact, 1 flagged"]
+
+
+def test_a_number_many_facts_hold_names_a_few_and_counts_the_rest():
+    many = {f"m5_n{i}": 7 for i in range(6)}
+    assert 'post.md:1  "7"  fact  m5_n0, m5_n1, m5_n2, m5_n3 +2 more' in render("post.md", check("7 of them", many))
+
+
+def test_dtd_copycheck_reports_and_never_writes(tmp_path, monkeypatch, capsys):
+    from pipeline import cli
+    (tmp_path / "facts.json").write_text(json.dumps(FACTS))
+    monkeypatch.setattr(cli, "FACTS", tmp_path / "facts.json")
+    clean, flagged = tmp_path / "README.md", tmp_path / "post.md"
+    clean.write_text("A $2.91 model budget.\n")
+    flagged.write_text("It answers 17 questions.\n")
+    before = {p: p.read_bytes() for p in (clean, flagged)}
+    assert cli.entry(["copycheck", str(clean)]) == 0
+    assert cli.entry(["copycheck", str(clean), str(flagged)]) == 1
+    assert f'{flagged}:1  "17"  no fact' in capsys.readouterr().out
+    assert {p: p.read_bytes() for p in (clean, flagged)} == before
+    assert cli.entry(["copycheck", str(tmp_path / "missing.md")]) == 2
+    monkeypatch.setattr(cli, "FACTS", tmp_path / "none.json")
+    assert cli.entry(["copycheck", str(clean)]) == 2
