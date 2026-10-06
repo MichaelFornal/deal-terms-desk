@@ -24,7 +24,7 @@ M6 (README and launch post by Michael, final facts check, public) is a separate 
 | Topic | Decision |
 |---|---|
 | Live model | `claude-haiku-4-5-20251001`, the model M4's published answer numbers describe. Sonnet 5.5 was considered (better on the tune split, close in cost per answer) and declined |
-| Host | Hetzner 4 GB shared-vCPU VPS, EU (CAX11, arm64: same architecture as the machine that built the vectors). Supersedes PRD §6's 1 GB machine and retires the §10 memory risk |
+| Host | Hetzner CX23, x86, 4 GB, Falkenstein; billed in USD ($6.49 + $0.60 IPv4 per month, read from the Hetzner API on 2026-10-06); replaces the CAX11 (the earlier EUR estimate was wrong). Supersedes PRD §6's 1 GB machine and retires the §10 memory risk |
 | Site | Static HTML rendered in Python from `facts.json` (the `facts/report_*.py` pattern), with vanilla JS for Ask and Search. Caddy serves the pages and proxies `/api/*` to uvicorn on the same box: one origin, no CORS |
 | GitHub | Private repo during M5 so CI runs; public at M6 after an audit |
 | History | Commit metadata never carries the SEC contact (rewritten to the GitHub noreply address on 2026-10-05, before any push) |
@@ -148,7 +148,7 @@ M6 (README and launch post by Michael, final facts check, public) is a separate 
   - runs `uv sync --frozen` and swaps the `current` symlink;
   - polls `/api/health` until all shas match;
   - re-warms when needed.
-- **`deploy/hosting.json`:** the published price, exchange rate and date. It sets the model cap and is updated from the first invoice.
+- **`deploy/hosting.json`:** the published price in USD (server plus IPv4, gross, no VAT) and the date it was checked; no exchange rate. It sets the model cap and is updated from the first invoice.
 - **`deploy/smoke.py`:** checks against the live URL.
 
 ## 2. Calibration and the stop rule

@@ -5,7 +5,7 @@ from facts.m2 import _ci, _json
 from service.prices import load_prices
 
 BUDGET_USD_MONTH = 10.0  # PRD §1: the hard cap, hosting plus model calls
-HOSTING_NEEDS = ("eur_month", "eur_usd", "day_cap_usd", "checked")
+HOSTING_NEEDS = ("currency", "price_month", "extras_month", "day_cap_usd", "checked")
 
 
 def present_m5(data_m5: Path) -> bool:
@@ -42,7 +42,9 @@ def build_m5(data_m5, live_dir, out_m4, out_m5, prices_path, hosting_path) -> di
     if Path(hosting_path).exists():  # deploy/hosting.json arrives with the deploy task
         h = _json(hosting_path)
         if all(h.get(k) is not None for k in HOSTING_NEEDS):
-            usd = round((h["eur_month"] + (h.get("extras_eur_month") or 0.0)) * h["eur_usd"], 2)
+            if h["currency"] != "USD":
+                raise ValueError(f"deploy/hosting.json is priced in {h['currency']}; the cost of record is USD")
+            usd = round(h["price_month"] + h["extras_month"], 2)
             f |= {"m5_hosting_usd_month": usd,
                   "m5_model_cap_usd": round(h.get("budget_usd_month", BUDGET_USD_MONTH) - usd, 2),
                   "m5_day_cap_usd": h["day_cap_usd"], "m5_hosting_checked": h["checked"]}

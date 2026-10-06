@@ -158,9 +158,11 @@ def test_push_refuses_caps_that_differ_from_the_published_ones(tmp_path):
 
 def test_hosting_record_has_every_field_the_facts_read():
     h = json.loads(Path("deploy/hosting.json").read_text())
-    assert set(h) == {"provider", "plan", "eur_month", "extras_eur_month", "eur_usd", "eur_usd_date",
-                      "eur_usd_source", "budget_usd_month", "day_cap_usd", "checked"}
-    assert h["budget_usd_month"] == 10.0 and h["eur_month"] > 0
+    assert h == {"provider": "Hetzner Cloud", "plan": "CX23", "location": "fsn1", "currency": "USD",
+                 "price_month": 6.49, "extras_month": 0.60, "extras_note": "primary IPv4 address", "vat_rate": 0.0,
+                 "budget_usd_month": 10.0, "day_cap_usd": 0.29,
+                 "source": "Hetzner Cloud API: GET /v1/server_types?name=cx23 and GET /v1/pricing "
+                           "(gross monthly prices at fsn1)", "checked": "2026-10-06"}
 
 
 def test_env_example_names_the_variables_and_holds_no_secret():

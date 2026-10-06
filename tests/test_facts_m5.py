@@ -8,9 +8,10 @@ from facts.m5 import build_m5, present_m5
 from service.prices import load_prices
 
 PRICES = Path("service/prices.json")
-HOSTING_EMPTY = {"provider": "Hetzner Cloud", "plan": "CAX11", "eur_month": 4.49, "extras_eur_month": None,
-                 "eur_usd": None, "eur_usd_date": None, "eur_usd_source": None, "budget_usd_month": 10.0,
-                 "day_cap_usd": None, "checked": None}
+HOSTING_FULL = {"provider": "Hetzner Cloud", "plan": "CX23", "location": "fsn1", "currency": "USD",
+                "price_month": 6.49, "extras_month": 0.60, "extras_note": "primary IPv4 address", "vat_rate": 0.0,
+                "budget_usd_month": 10.0, "day_cap_usd": 0.29, "source": "Hetzner Cloud API", "checked": "2026-10-06"}
+HOSTING_EMPTY = dict(HOSTING_FULL, day_cap_usd=None, checked=None)
 
 
 def _write(p: Path, obj) -> Path:
@@ -72,17 +73,15 @@ def every_input(tmp_path, calibration: dict | None = None, server: dict | None =
         "misrouted": {"fresh_served_from_cache": 1, "cached_answered_live": 2}} | (server or {}))
     _write(data_m5 / "cap_trip.json", {"budget_reached": True, "budget_cached": True, "ledger_unchanged": True,
                                        "health_budget": "reached"})
-    hosting = _write(tmp_path / "hosting.json", dict(HOSTING_EMPTY, eur_usd=1.1, eur_usd_date="2026-10-10",
-                                                     eur_usd_source="ECB reference rate", day_cap_usd=0.5,
-                                                     checked="2026-10-10"))
+    hosting = _write(tmp_path / "hosting.json", HOSTING_FULL)
     return data_m5, live, out_m4, out_m5, PRICES, hosting
 
 
 def test_every_section_once_its_input_exists(tmp_path):
     f = build_m5(*every_input(tmp_path))
-    usd = round(4.49 * 1.1, 2)
+    usd = 7.09
     assert f["m5_hosting_usd_month"] == usd and f["m5_model_cap_usd"] == round(10.0 - usd, 2)
-    assert f["m5_day_cap_usd"] == 0.5 and f["m5_answers_per_month"] == math.floor(round(10.0 - usd, 2) / 0.02)
+    assert f["m5_model_cap_usd"] == 2.91 and f["m5_day_cap_usd"] == 0.29 and f["m5_answers_per_month"] == math.floor(round(10.0 - usd, 2) / 0.02)
     assert f["m5_bundle_r6n_report_recall_at_5"] == 0.6 and f["m5_bundle_r6n_report_recall_at_5_lo"] == 0.5
     assert f["m5_prompt_parity_same"] == 10 and f["m5_prompt_parity_checked"] == 10 and f["m5_bundle_parity_checked"] == 5
     assert f["m5_live_r6n_latency_ms_p95"] == 300.0 and f["m5_live_t_r7n_corpus_latency_ms_p50"] == 46.4
@@ -121,3 +120,18 @@ def test_a_calibration_without_thinking_emits_no_budget(tmp_path):
         path.write_text(json.dumps(old | {"thinking_budget": 0} if budget == 0 else
                                    {k: v for k, v in old.items() if k != "thinking_budget"}))
         assert "m5_thinking_budget_tokens" not in build_m5(*args)
+
+
+def test_hosting_in_another_currency_raises(tmp_path):
+    import pytest
+    ins = list(every_input(tmp_path))
+    _write(ins[5], dict(HOSTING_FULL, currency="EUR"))
+    with pytest.raises(ValueError, match="EUR"):
+        build_m5(*ins)
+
+
+def test_hosting_with_a_null_field_is_skipped(tmp_path):
+    ins = list(every_input(tmp_path))
+    _write(ins[5], dict(HOSTING_FULL, price_month=None))
+    f = build_m5(*ins)
+    assert not any(k.startswith("m5_hosting") for k in f) and "m5_model_cap_usd" not in f
