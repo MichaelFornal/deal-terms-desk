@@ -221,5 +221,6 @@ fi
 echo "deployed $SHA"
 
 # Disk: keep the live release, two rollback targets and the bundles they link to (deploy/prune.sh, from this
-# release). A failed prune leaves the deploy standing.
-ssh "$DTD_HOST" "bash '$REL/deploy/prune.sh' /srv/dtd" || echo "prune failed; the release is live; check /srv/dtd by hand" >&2
+# release). PREV, the release that was live before this push, is kept as one of the two. A failed prune leaves
+# the deploy standing.
+ssh "$DTD_HOST" "bash '$REL/deploy/prune.sh' /srv/dtd '$PREV'" || echo "prune failed; the release is live; check /srv/dtd by hand" >&2
