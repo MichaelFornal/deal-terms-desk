@@ -31,7 +31,9 @@ fi
 install -d /etc/ssh/sshd_config.d
 printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' \
   > /etc/ssh/sshd_config.d/10-dtd.conf
-systemctl reload ssh
+# Ubuntu 24.04 socket-activates sshd, so ssh.service may be inactive; try-reload-or-restart reloads when active,
+# does nothing when inactive, and the socket-activated sshd reads the new drop-in on its next start.
+systemctl try-reload-or-restart ssh
 
 # Caddy from its official apt repository.
 if ! command -v caddy >/dev/null; then

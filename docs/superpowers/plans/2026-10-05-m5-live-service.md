@@ -6784,6 +6784,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 14: Provision the box and deploy
 
+> **Superseded in part (2026-10-06):** the server is a Hetzner CX23 (x86, 4 GB, Falkenstein), billed in USD and created through the Hetzner API. `deploy/hosting.json` holds the USD record (Task 13c), and the caps come from `facts/m5.py`, not the Step 1 script. Step 3's provisioning reload fix is `systemctl try-reload-or-restart ssh`.
+
 **Needs:**
 - Task 13 passed its stop rule.
 - Michael has done roadmap 0.3–0.5:

@@ -127,6 +127,14 @@ def test_provision_locks_the_box_down():
     subprocess.run(["bash", "-n", "deploy/provision.sh"], check=True)
 
 
+def test_provision_tries_to_reload_sshd_only_if_running():
+    text = Path("deploy/provision.sh").read_text()
+    # socket-activated sshd may not have an active service, so try-reload-or-restart does nothing on socket start
+    assert "systemctl try-reload-or-restart ssh" in text
+    assert "systemctl reload ssh" not in text or "try-reload-or-restart" in text  # no bare reload
+    assert text.index("/etc/ssh/sshd_config.d/10-dtd.conf") < text.index("systemctl try-reload-or-restart ssh")
+
+
 def caps_check(tmp_path, facts: dict, box: str) -> subprocess.CompletedProcess:
     """Run push.sh's cap comparison as push.sh does: in the repo root, with the box's two values as one argument."""
     text = Path("deploy/push.sh").read_text()
