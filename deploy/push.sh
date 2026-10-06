@@ -130,9 +130,20 @@ except ValueError:
 sys.exit(0 if [h.get("git_sha"), h.get("bundle_sha"), h.get("facts_sha")] == sys.argv[2:] else 1)
 PY
 }
+# Pin the host to the box's own address for the poll: the operator's DNS cache can lag new records for up to the
+# zone's negative TTL (an NXDOMAIN seen before the records existed), while TLS, Caddy and the service are still
+# checked through the public HTTPS path.
+. deploy/hostport.sh
+BOX_IP="$(ssh "$DTD_HOST" "hostname -I" | tr -s ' \t' '\n\n' | grep -m1 '\.' || true)"
+PIN=()
+if [ -n "$BOX_IP" ]; then
+  PIN=(--resolve "$(host_port "$BASE"):$BOX_IP")
+else
+  echo "warning: could not find the box's IPv4 address; polling health through the operator's DNS, which may lag new records" >&2
+fi
 live=""
 for _ in $(seq 60); do
-  HEALTH="$(curl -fsS --max-time 10 "$BASE/api/health" || echo '{}')"
+  HEALTH="$(curl -fsS --max-time 10 ${PIN[@]+"${PIN[@]}"} "$BASE/api/health" || echo '{}')"
   if matches "$HEALTH"; then live=1; break; fi
   sleep 2
 done

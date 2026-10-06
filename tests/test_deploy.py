@@ -281,3 +281,24 @@ def test_push_refuses_a_box_whose_thinking_budget_differs_from_the_published_one
     assert 'm5_thinking_budget_tokens' in text and '.get("thinking_budget")' in text
     assert "thinking budget" in text and "facts.json" in text
     assert text.index("never reported healthy") < text.index("m5_thinking_budget_tokens") < text.index("dtd warm")
+
+
+def test_push_pins_the_health_poll_to_the_box_address():
+    text = Path("deploy/push.sh").read_text()
+    pin = text.index('ssh "$DTD_HOST" "hostname -I"')
+    assert pin < text.index("for _ in $(seq 60)")
+    curl = next(line for line in text.splitlines() if "curl -fsS" in line and "/api/health" in line)
+    assert "--max-time 10" in curl and "PIN" in curl
+    assert '--resolve "$(host_port "$BASE"):$BOX_IP"' in text
+    assert "could not find the box's IPv4 address" in text and "negative TTL" in text
+
+
+@pytest.mark.parametrize("base,want", [
+    ("https://deals.forn.al", "deals.forn.al:443"),
+    ("https://deals.forn.al:8443/x", "deals.forn.al:8443"),
+    ("http://example.test", "example.test:80"),
+])
+def test_host_port_derivation(base, want):
+    out = subprocess.run(["bash", "-c", '. deploy/hostport.sh; host_port "$1"', "_", base],
+                         check=True, capture_output=True, text=True)
+    assert out.stdout.strip() == want
