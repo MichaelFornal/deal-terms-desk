@@ -12,6 +12,9 @@ const STATES = {
   error: "No answer this time. Try again, or use Search."
 };
 
+// which_deal with no candidates: no name in the question matched an agreement, so point at the picker instead.
+const NO_CANDIDATES = "Which agreement? Name the company in your question, or choose it in the Agreement list above.";
+
 function el(tag, props, children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props || {})) {
@@ -36,7 +39,8 @@ async function call(url, options) {
   return { status: res.status, body: body };
 }
 
-function stateNote(state) {
+function stateNote(state, data) {
+  if (state === "which_deal" && !(data && Array.isArray(data.candidates) && data.candidates.length)) return NO_CANDIDATES;
   return Object.hasOwn(STATES, state) ? STATES[state] : STATES.error;
 }
 
@@ -64,17 +68,17 @@ function renderAnswer(box, data) {
     box.appendChild(el("p", { class: "deal" }, [el("span", { text: "Agreement: " }), safeLink(data.deal.link, dealName(data.deal))]));
   }
   const known = Object.hasOwn(STATES, data.state);
-  const note = stateNote(data.state);
+  const note = stateNote(data.state, data);
   if (note) box.appendChild(el("p", { class: "state state-" + (known ? data.state : "error"), text: note }));
   // A cached reply under an exhausted budget carries the real outcome in cached_state: show it too.
   const outcome = data.state === "budget_cached" && data.cached_state ? data.cached_state : data.state;
   if (outcome !== data.state) {
-    const cachedNote = stateNote(outcome);
+    const cachedNote = stateNote(outcome, data);
     if (cachedNote) box.appendChild(el("p", { class: "state state-" + (Object.hasOwn(STATES, outcome) ? outcome : "error"), text: cachedNote }));
   }
-  if (outcome === "which_deal") {
+  if (outcome === "which_deal" && Array.isArray(data.candidates) && data.candidates.length) {
     const list = el("ul", { class: "candidates" });
-    for (const c of data.candidates || []) {
+    for (const c of data.candidates) {
       const pick = el("button", { type: "button", text: c.name });
       pick.addEventListener("click", () => { document.getElementById("deal").value = c.id; ask(null, c.id); });
       list.appendChild(el("li", {}, [pick]));

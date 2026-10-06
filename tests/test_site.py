@@ -275,3 +275,12 @@ def test_dtd_site_strict_fails_on_a_fact_without_a_value(tmp_path, monkeypatch, 
     monkeypatch.setattr(cli, "SITE_DIST", tmp_path / "dist")
     assert cli.entry(["site", "--strict"]) == 1
     assert "a fact the site prints is missing" in capsys.readouterr().err
+
+
+def test_app_js_points_at_the_picker_when_no_agreement_matched():
+    js = Path("site/static/app.js").read_text()
+    assert "or pick one:" in js  # candidates exist: they are listed under the question
+    assert "choose it in the Agreement list above" in js
+    assert 'outcome === "which_deal" && Array.isArray(data.candidates) && data.candidates.length' in js
+    assert "stateNote(data.state, data)" in js and "stateNote(outcome, data)" in js
+    assert '<label for="deal">Agreement' in Path("site/templates/index.html").read_text()
