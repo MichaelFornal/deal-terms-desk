@@ -207,10 +207,11 @@ async function ask(event, dealId) {
 }
 
 // Enter asks; Shift+Enter starts a new line. Keys pressed while an input method is composing (Japanese, Chinese…)
-// belong to it. requestSubmit runs the checks of the form itself, so an empty question is refused as before.
+// belong to it; Safari marks the Enter that ends a composition only by keyCode 229. requestSubmit runs the checks
+// of the form itself, so an empty question is refused as before.
 function submitOnEnter(field, form) {
   field.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); form.requestSubmit(); }
   });
 }
 
@@ -247,7 +248,7 @@ function renderSearch(box, data) {
       more.textContent = open ? SHOW_LESS : SHOW_MORE;
     });
     list.appendChild(el("li", { class: "hit" }, [
-      el("p", { class: "hit-head" }, [safeLink(h.link, h.deal ? dealName(h.deal) : "source text"), el("span", { text: " · § " + h.section_path })]),
+      el("p", { class: "hit-head" }, [safeLink(h.link, h.deal ? dealName(h.deal) : "source text"), el("span", { text: h.section_path ? " · § " + h.section_path : "" })]),
       passage,
       more,
       el("p", { class: "meta", text: "Fused score " + Number(h.score).toFixed(4) + " · " + stage("BM25", h.stages.bm25) + " · " + stage("dense", h.stages.dense) }),
@@ -255,12 +256,12 @@ function renderSearch(box, data) {
     ]));
   }
   box.appendChild(list);
-  // Measured once the passages are on the page: only a passage that runs past its eight lines gets the toggle.
+  // Measured once the passages are on the page: a passage that runs past its eight lines is cut there and gets the
+  // toggle; one that fits is left whole, so a later narrower window lengthens it rather than hiding its end.
   for (const p of list.querySelectorAll(".passage")) {
-    if (p.scrollHeight > p.clientHeight + 1) {
-      p.classList.add("clamped");
-      p.nextElementSibling.hidden = false;
-    }
+    p.classList.add("clamped");
+    if (p.scrollHeight > p.clientHeight + 1) p.nextElementSibling.hidden = false;
+    else p.classList.remove("clamped");
   }
 }
 
@@ -298,6 +299,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // An example is asked with no agreement chosen: that is how warm cached it, so it costs nothing.
     for (const button of document.querySelectorAll("button.example")) {
       button.addEventListener("click", () => {
+        if (form.querySelector("button[type=submit]").disabled) return; // leave the pending question and its picker alone
         document.getElementById("question").value = button.dataset.question;
         setDeal(null);
         ask();

@@ -11,7 +11,7 @@ from evals.tmachine import FAMILIES
 from facts.labels import MACHINE, is_machine_built, tier_label
 from facts.report_m4 import LABELS
 from facts.site import (CI, FIGURES, K, METHOD, Facts, _bar, cell_keys, render_cell, render_chart, render_figures,
-                        render_site, render_table, results_charts, results_tables)
+                        render_site, render_table, results_charts, results_tables, WIDE)
 from retrieval.scope import Resolver
 
 EXAMPLES = json.loads(Path("site/examples.json").read_text())
@@ -356,8 +356,10 @@ def test_results_tables_scroll_inside_their_own_region(tmp_path):
     render_site(facts(), tmp_path, EXAMPLES)
     page = (tmp_path / "results.html").read_text()
     for t in results_tables():
-        assert re.search(rf'<div class="scroll" role="region" tabindex="0" aria-labelledby="{t.id}-cap">\n'
-                         rf'<table id="{t.id}"( class="wide")?>\n<caption id="{t.id}-cap">', page), t.id
+        wide = len(t.head) + any(r.tier for r in t.rows) > WIDE  # the answer-key column counts
+        region = f' role="region" tabindex="0" aria-labelledby="{t.id}-cap"' if wide else ""
+        table = f'<table id="{t.id}" class="wide">' if wide else f'<table id="{t.id}">'
+        assert f'<div class="scroll"{region}>\n{table}\n<caption id="{t.id}-cap">' in page, t.id
 
 
 def test_every_page_links_the_favicon_and_it_needs_no_style(tmp_path):

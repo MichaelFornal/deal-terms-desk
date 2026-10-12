@@ -153,15 +153,16 @@ def _note(F: Facts, note: tuple) -> list[str]:
 
 
 def render_table(F: Facts, t: Table) -> str:
-    """A table inside its own scrolling region, so a wide one scrolls on a phone and the page does not. A column
-    holding facts is a numeric column: right-aligned."""
+    """A table inside its own scrolling box, so a wide one scrolls on a phone and the page does not; a wide one is
+    also a named region a keyboard can reach and scroll. A column holding facts is a numeric column: right-aligned."""
     by_row = any(r.tier for r in t.rows)
     numeric = [any(j < len(r.cells) and isinstance(r.cells[j], FACT_CELLS) for r in t.rows) for j in range(len(t.head))]
     head = [(html.escape(h) + _tag(tier), numeric[j]) for j, (h, tier) in enumerate(t.head)]
     head += [("Answer key", False)] if by_row else []
     cap = f"{t.id}-cap"
-    wide = ' class="wide"' if len(head) > WIDE else ""
-    out = [f'<div class="scroll" role="region" tabindex="0" aria-labelledby="{cap}">', f'<table id="{t.id}"{wide}>',
+    wide = len(head) > WIDE
+    region = f' role="region" tabindex="0" aria-labelledby="{cap}"' if wide else ""
+    out = [f'<div class="scroll"{region}>', f'<table id="{t.id}"' + (' class="wide"' if wide else "") + ">",
            f'<caption id="{cap}">{html.escape(t.title)}{_tag(t.tier)}</caption>',
            "<thead><tr>" + "".join(f'<th scope="col"{_cls(n)}>{h}</th>' for h, n in head) + "</tr></thead>",
            "<tbody>"]
@@ -213,8 +214,8 @@ def render_chart(F: Facts, ch: Chart) -> str:
     cap = f"{ch.id}-cap"
     out = [f'<table class="chart" id="{ch.id}">',
            f'<caption id="{cap}">{html.escape(ch.title)}{_tag(ch.tier)}</caption>',
-           '<thead class="visually-hidden"><tr><th scope="col">Rung</th><th scope="col">Bar, drawn to scale</th>'
-           '<th scope="col">recall@5</th></tr></thead>', "<tbody>"]
+           "<thead><tr>" + "".join(f'<th scope="col"><span class="visually-hidden">{h}</span></th>'
+                                   for h in ("Rung", "Bar, drawn to scale", "recall@5")) + "</tr></thead>", "<tbody>"]
     for b in ch.bars:
         out.append(f'<tr><th scope="row">{html.escape(b.label)}</th><td class="track">{_bar(F, b.key)}</td>'
                    f'<td class="n">{render_cell(F, CI(b.key))}</td></tr>')
@@ -605,7 +606,8 @@ class Figure:
 # The figures for the path the live desk runs (R6n inside one agreement, R7n across them all), and what it costs.
 FIGURES = (
     Figure(CI("m5_bundle_r6n_report_recall_at_5"),
-           ("recall@5 on MAUD's questions: the live path over the live index",), HUMAN,
+           ("recall@5 on MAUD's questions, searched inside the agreement each one is about: the live path over the "
+            "live index",), HUMAN,
            "/results.html#ladder_human"),
     Figure(CI("m4_t_r7n_corpus_report_recall_at_5"),
            ("recall@5 on the tech deals across all agreements: the live path, which scopes each question to the deal "
@@ -618,12 +620,12 @@ FIGURES = (
 
 def render_figures(F: Facts) -> str:
     items = []
-    for f in FIGURES:
+    for i, f in enumerate(FIGURES):
         value = render_cell(F, f.value)
         if value != PENDING:
             value = html.escape(f.prefix) + value
-        items.append(f'<div><a class="v" href="{html.escape(f.href)}">{value}</a><span class="k">'
-                     + "".join(render_cell(F, c) for c in f.words) + "</span>"
+        items.append(f'<div><a class="v" href="{html.escape(f.href)}" aria-describedby="figure-{i}">{value}</a>'
+                     f'<span class="k" id="figure-{i}">' + "".join(render_cell(F, c) for c in f.words) + "</span>"
                      + (f'<span class="tier">{html.escape(f.tier)}</span>' if f.tier else "") + "</div>")
     return ('<section class="figures" aria-labelledby="figures-label">'
             '<h2 class="label" id="figures-label">The live desk</h2>'
