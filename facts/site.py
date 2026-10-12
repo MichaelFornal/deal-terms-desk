@@ -1,5 +1,6 @@
+import hashlib
 import html
-import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,7 +108,7 @@ def _change(v, lo, hi) -> str:
     if v is None or lo is None or hi is None:
         return PENDING
     word = "helps" if lo > 0 else "hurts" if hi < 0 else "no measurable change"
-    return f"{_s(v)} ({_s(lo)} to {_s(hi)}; {word})"
+    return f'{_s(v)} <span class="ci">({_s(lo)} to {_s(hi)}; {word})</span>'
 
 
 def render_cell(F: Facts, c) -> str:
@@ -126,7 +127,8 @@ def render_cell(F: Facts, c) -> str:
         return f"A separate model ({_s(judge)}) judged answers against that key."
     if isinstance(c, CI):
         v = F.get(c.key)
-        return PENDING if v is None else f"{_s(v)} ({_s(F.get(c.key + '_lo'))} to {_s(F.get(c.key + '_hi'))})"
+        return PENDING if v is None else (f'{_s(v)} <span class="ci">({_s(F.get(c.key + "_lo"))} to '
+                                          f'{_s(F.get(c.key + "_hi"))})</span>')
     if isinstance(c, D):
         return _change(F.get(c.key + "_delta"), F.get(c.key + "_lo"), F.get(c.key + "_hi"))
     if isinstance(c, V):
@@ -138,18 +140,86 @@ def _tag(tier) -> str:
     return f' <span class="tier">{html.escape(tier)}</span>' if tier else ""
 
 
+FACT_CELLS = (K, CI, D, V)
+WIDE = 4  # a table with more columns than this keeps a minimum width and scrolls inside its region on a phone
+
+
+def _cls(numeric: bool) -> str:
+    return ' class="n"' if numeric else ""
+
+
+def _note(F: Facts, note: tuple) -> list[str]:
+    return ['<p class="note">' + "".join(render_cell(F, c) for c in note) + "</p>"] if note else []
+
+
 def render_table(F: Facts, t: Table) -> str:
+    """A table inside its own scrolling region, so a wide one scrolls on a phone and the page does not. A column
+    holding facts is a numeric column: right-aligned."""
     by_row = any(r.tier for r in t.rows)
-    head = [html.escape(h) + _tag(tier) for h, tier in t.head] + (["Answer key"] if by_row else [])
-    out = [f'<table id="{t.id}">', f"<caption>{html.escape(t.title)}{_tag(t.tier)}</caption>",
-           "<thead><tr>" + "".join(f'<th scope="col">{h}</th>' for h in head) + "</tr></thead>", "<tbody>"]
+    numeric = [any(j < len(r.cells) and isinstance(r.cells[j], FACT_CELLS) for r in t.rows) for j in range(len(t.head))]
+    head = [(html.escape(h) + _tag(tier), numeric[j]) for j, (h, tier) in enumerate(t.head)]
+    head += [("Answer key", False)] if by_row else []
+    cap = f"{t.id}-cap"
+    wide = ' class="wide"' if len(head) > WIDE else ""
+    out = [f'<div class="scroll" role="region" tabindex="0" aria-labelledby="{cap}">', f'<table id="{t.id}"{wide}>',
+           f'<caption id="{cap}">{html.escape(t.title)}{_tag(t.tier)}</caption>',
+           "<thead><tr>" + "".join(f'<th scope="col"{_cls(n)}>{h}</th>' for h, n in head) + "</tr></thead>",
+           "<tbody>"]
     for r in t.rows:
-        cells = [render_cell(F, c) for c in r.cells] + ([html.escape(r.tier or "")] if by_row else [])
-        out.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+        cells = [(render_cell(F, c), j < len(numeric) and numeric[j]) for j, c in enumerate(r.cells)]
+        cells += [(html.escape(r.tier or ""), False)] if by_row else []
+        out.append("<tr>" + "".join(f"<td{_cls(n)}>{c}</td>" for c, n in cells) + "</tr>")
+    out.append("</tbody></table></div>")
+    return "\n".join(out + _note(F, t.note))
+
+
+@dataclass(frozen=True)
+class Bar:
+    """One bar of a chart: a fact on a zero-to-one scale with its interval, key_lo to key_hi."""
+    label: str
+    key: str
+
+
+@dataclass(frozen=True)
+class Chart:
+    id: str
+    title: str
+    tier: str | None  # the answer key behind every fact in the chart, shown in the caption
+    bars: tuple
+    note: tuple = ()
+
+
+def _x(v) -> str | None:
+    """A fact's position on the bar, in the SVG's thousand units; None when the fact has no number yet."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return f"{max(0.0, min(1.0, float(v))) * 1000:.1f}"
+
+
+def _bar(F: Facts, key: str) -> str:
+    """forn.al's magnitude bar, drawn as SVG because the CSP allows no inline style: the bar to the value, and a line
+    under it from the interval's low end to its high end. Attributes only; the value is printed beside it."""
+    x, lo, hi = _x(F.get(key)), _x(F.get(key + "_lo")), _x(F.get(key + "_hi"))
+    marks = [f'<rect class="bar" x="0" y="0" width="{x}" height="6"/>'] if x is not None else []
+    if lo is not None and hi is not None:
+        marks.append(f'<path class="range" d="M{lo} 10H{hi}M{lo} 7V13M{hi} 7V13" fill="none" '
+                     'vector-effect="non-scaling-stroke"/>')
+    return ('<svg viewBox="0 0 1000 14" preserveAspectRatio="none" aria-hidden="true" focusable="false">'
+            + "".join(marks) + "</svg>")
+
+
+def render_chart(F: Facts, ch: Chart) -> str:
+    """A real table, so the values read as data with the bars switched off; every bar is labelled with its value."""
+    cap = f"{ch.id}-cap"
+    out = [f'<table class="chart" id="{ch.id}">',
+           f'<caption id="{cap}">{html.escape(ch.title)}{_tag(ch.tier)}</caption>',
+           '<thead class="visually-hidden"><tr><th scope="col">Rung</th><th scope="col">Bar, drawn to scale</th>'
+           '<th scope="col">recall@5</th></tr></thead>', "<tbody>"]
+    for b in ch.bars:
+        out.append(f'<tr><th scope="row">{html.escape(b.label)}</th><td class="track">{_bar(F, b.key)}</td>'
+                   f'<td class="n">{render_cell(F, CI(b.key))}</td></tr>')
     out.append("</tbody></table>")
-    if t.note:
-        out.append('<p class="note">' + "".join(render_cell(F, c) for c in t.note) + "</p>")
-    return "\n".join(out)
+    return "\n".join(out + _note(F, ch.note))
 
 
 RUNGS = ("r1", "r2", "r3", "r4", "r5", "r6")
@@ -364,7 +434,27 @@ def results_tables() -> tuple[Table, ...]:
     )
 
 
-SECTIONS = (("Retrieval", ("ladder_human", "ladder_machine", "side")),
+def results_charts() -> tuple[Chart, ...]:
+    """The two stories the ladder tables tell, drawn: the climb on MAUD's questions, and what deal scoping does to a
+    search across every agreement. Each note carries the paired change, which the bars alone cannot show."""
+    return (
+        Chart("chart_human", "recall@5 on MAUD's questions, rung by rung (report split)", HUMAN,
+              tuple(Bar(r.upper(), f"m2_{r}_report_recall_at_5") for r in RUNGS)
+              + (Bar("R6n, live path", "m4_r6n_report_recall_at_5"),),
+              ("R6 against R1, paired: ", D("m2_cmp_r6_vs_r1_recall_at_5"), ". R6n against R6, paired: ",
+               D("m4_cmp_r6n_vs_r6_recall_at_5"), ". Bars run from zero to one; the line under each is its "
+               "interval.")),
+        Chart("chart_machine", "recall@5 on the tech deals, searching every agreement at once (report split)", MACHINE,
+              (Bar("R6, no deal scoping", "m3_t_r6_corpus_report_recall_at_5"),
+               Bar("R7, re-run", "m4_t_r7_corpus_report_recall_at_5"),
+               Bar("R7n, live path", "m4_t_r7n_corpus_report_recall_at_5")),
+              ("Deal scoping against none, paired, on the first R7 run: ",
+               D("m3_cmp_t_r7_vs_t_r6_corpus_recall_at_5"), ". R7n against the re-run R7, paired: ",
+               D("m4_cmp_t_r7n_vs_t_r7_corpus_recall_at_5"), ".")),
+    )
+
+
+SECTIONS = (("Retrieval", ("chart_human", "chart_machine", "ladder_human", "ladder_machine", "side")),
             ("By question family", ("families_human", "families_machine")),
             ("Do the two answer keys agree?", ("tier_agreement", "tier_summary")),
             ("Answers", ("answers_human", "answers_machine", "abstention")),
@@ -470,21 +560,105 @@ METHOD = (
 )
 
 
+def _slug(title: str) -> str:
+    return re.sub(r"[^a-z]+", "-", title.lower()).strip("-")
+
+
+def _contents(titles) -> str:
+    return ('<nav class="contents" aria-label="On this page"><ul>'
+            + "".join(f'<li><a href="#{_slug(t)}">{html.escape(t)}</a></li>' for t in titles) + "</ul></nav>")
+
+
+def _h2(title: str) -> str:
+    return f'<h2 id="{_slug(title)}">{html.escape(title)}</h2>'
+
+
 def results_main(F: Facts) -> str:
     tables = {t.id: t for t in results_tables()}
-    parts = ["<h1>Results</h1>", f'<p class="lede">{html.escape(RESULTS_INTRO)}</p>']
+    charts = {c.id: c for c in results_charts()}
+    parts = ["<h1>Results</h1>", f'<p class="lede">{html.escape(RESULTS_INTRO)}</p>',
+             _contents(title for title, _ in SECTIONS)]
     for title, ids in SECTIONS:
-        parts.append(f"<h2>{html.escape(title)}</h2>")
-        parts += [render_table(F, tables[i]) for i in ids]
+        parts.append(_h2(title))
+        parts += [render_chart(F, charts[i]) if i in charts else render_table(F, tables[i]) for i in ids]
     return "\n".join(parts)
 
 
 def method_main(F: Facts) -> str:
-    out = ["<h1>Method</h1>"]
+    out = ["<h1>Method</h1>", _contents(title for title, _ in METHOD)]
     for title, paragraphs in METHOD:
-        out.append(f"<h2>{html.escape(title)}</h2>")
-        out += ["<p>" + "".join(render_cell(F, c) for c in p) + "</p>" for p in paragraphs]
+        out.append(_h2(title))
+        out += ['<p class="prose">' + "".join(render_cell(F, c) for c in p) + "</p>" for p in paragraphs]
     return "\n".join(out)
+
+
+@dataclass(frozen=True)
+class Figure:
+    """A headline figure on Ask: a fact at display size, the words under it, its answer key and its table."""
+    value: object  # a K or CI cell
+    words: tuple  # cells, as in a table note
+    tier: str | None
+    href: str
+    prefix: str = ""  # printed before the value, such as a currency sign
+
+
+# The figures for the path the live desk runs (R6n inside one agreement, R7n across them all), and what it costs.
+FIGURES = (
+    Figure(CI("m5_bundle_r6n_report_recall_at_5"),
+           ("recall@5 on MAUD's questions: the live path over the live index",), HUMAN,
+           "/results.html#ladder_human"),
+    Figure(CI("m4_t_r7n_corpus_report_recall_at_5"),
+           ("recall@5 on the tech deals across all agreements: the live path, which scopes each question to the deal "
+            "it names",), MACHINE, "/results.html#ladder_machine"),
+    Figure(K("m5_model_cap_usd"),
+           ("model budget a month, a hard cap, after $", K("m5_hosting_usd_month"), " a month for hosting"), None,
+           "/results.html#live", "$"),
+)
+
+
+def render_figures(F: Facts) -> str:
+    items = []
+    for f in FIGURES:
+        value = render_cell(F, f.value)
+        if value != PENDING:
+            value = html.escape(f.prefix) + value
+        items.append(f'<div><a class="v" href="{html.escape(f.href)}">{value}</a><span class="k">'
+                     + "".join(render_cell(F, c) for c in f.words) + "</span>"
+                     + (f'<span class="tier">{html.escape(f.tier)}</span>' if f.tier else "") + "</div>")
+    return ('<section class="figures" aria-labelledby="figures-label">'
+            '<h2 class="label" id="figures-label">The live desk</h2>'
+            '<div class="tick">' + "".join(items) + "</div>"
+            '<p class="more"><a href="/results.html">All results →</a></p></section>')
+
+
+def render_examples(examples: list[dict]) -> str:
+    """The example questions, grouped by lead family in FAMILY_ORDER; a family with no example is left out. Asking
+    one clears the agreement picker, because warm caches each example with no agreement chosen."""
+    families = list(FAMILY_ORDER) + [f for f in dict.fromkeys(e["family"] for e in examples) if f not in FAMILY_ORDER]
+    out = ['<section class="examples" aria-labelledby="examples-label">',
+           '<h2 class="label" id="examples-label">Try one</h2>']
+    for fam in families:
+        questions = [e["question"] for e in examples if e["family"] == fam]
+        if not questions:
+            continue
+        out.append(f'<div class="family"><h3>{html.escape(LABELS.get(fam, fam))}</h3><ul>')
+        out += [f'<li><button type="button" class="linkish example" data-question="{html.escape(q)}">'
+                f"{html.escape(q)}</button></li>" for q in questions]
+        out.append("</ul></div>")
+    out.append("</section>")
+    return "\n".join(out)
+
+
+DESCRIPTIONS = {
+    "ask": "Ask what a signed acquisition agreement says about employee stock, break-up fees, or employees' pay and "
+           "benefits after the deal, and get the clause quoted with a link to its source text.",
+    "search": "Search acquisition agreements section by section: ranked passages with each retrieval stage's rank "
+              "and score, and no model call.",
+    "results": "Every evaluation of the Deal Terms Desk: the retrieval ladder with intervals, answer quality, the "
+               "citation gate, and what the live desk costs.",
+    "method": "How the Deal Terms Desk was built: the agreements, which numbers a person checked, how an answer is "
+              "made, and the stated limits.",
+}
 
 
 def _read(name: str) -> str:
@@ -496,16 +670,28 @@ def _nav(current: str) -> str:
                    for href, page, text in NAV)
 
 
+def _version(name: str) -> str:
+    """A static file's content hash, put in its URL so a browser holding an older release's copy fetches this one."""
+    return hashlib.sha256((STATIC / name).read_bytes()).hexdigest()[:12]
+
+
 def _page(page: str, title: str, main: str) -> str:
     return (_read("base.html").replace("{{title}}", html.escape(title)).replace("{{page}}", page)
-            .replace("{{nav}}", _nav(page)).replace("{{main}}", main))
+            .replace("{{description}}", html.escape(DESCRIPTIONS[page])).replace("{{style_v}}", _version("style.css"))
+            .replace("{{app_v}}", _version("app.js")).replace("{{nav}}", _nav(page)).replace("{{main}}", main))
+
+
+def ask_main(F: Facts, examples: list[dict]) -> str:
+    return _read("index.html").replace("{{figures}}", render_figures(F)).replace("{{examples}}",
+                                                                                 render_examples(examples))
 
 
 def render_site(facts: dict, out: Path, examples: list[dict], strict: bool = False) -> list[Path]:
-    """The four pages, the static files and the example questions. Every page is built before anything is written,
-    so a missing fact leaves the previous site in place."""
+    """The four pages and the static files. Every page is built before anything is written, so a missing fact leaves
+    the previous site in place."""
     F, out = Facts(facts, strict), Path(out)
-    pages = {"index.html": ("ask", "Ask", _read("index.html")), "search.html": ("search", "Search", _read("search.html")),
+    pages = {"index.html": ("ask", "Ask", ask_main(F, examples)),
+             "search.html": ("search", "Search", _read("search.html")),
              "results.html": ("results", "Results", results_main(F)), "method.html": ("method", "Method", method_main(F))}
     out.mkdir(parents=True, exist_ok=True)
     written = []
@@ -513,5 +699,6 @@ def render_site(facts: dict, out: Path, examples: list[dict], strict: bool = Fal
         (out / name).write_text(_page(page, title, main), encoding="utf-8")
         written.append(out / name)
     shutil.copytree(STATIC, out / "static", dirs_exist_ok=True)
-    (out / "examples.json").write_text(json.dumps(examples, indent=2) + "\n", encoding="utf-8")
-    return written + [out / "examples.json"]
+    # Ask renders its examples into the page now; an examples.json left by an older build would ship unread.
+    (out / "examples.json").unlink(missing_ok=True)
+    return written

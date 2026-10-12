@@ -3,21 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>{{title}} · Deal Terms Desk</title>
-<link rel="stylesheet" href="/static/style.css">
-<script src="/static/app.js" defer></script>
+<meta name="description" content="{{description}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Deal Terms Desk">
+<meta property="og:title" content="{{title}} · Deal Terms Desk">
+<meta property="og:description" content="{{description}}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css?v={{style_v}}">
+<script src="/static/app.js?v={{app_v}}" defer></script>
 </head>
 <body data-page="{{page}}">
+<a class="skip" href="#main">Skip to content</a>
+<div class="page">
 <header class="top">
-<a class="brand" href="/">Deal Terms Desk</a>
-<nav>{{nav}}</nav>
+<a class="who" href="/">Deal Terms Desk</a>
+<nav aria-label="Pages">{{nav}}</nav>
 </header>
-<main>
+<main id="main">
 {{main}}
 </main>
-<footer>
+<footer class="foot">
 <p class="disclaimer">This is not legal advice.</p>
 <p>Every number on this site is generated from the project's measured facts. Numbers marked machine-built come from model passes, not lawyers.</p>
+<p><a href="https://github.com/MichaelFornal/deal-terms-desk">Source code</a> · <a href="https://forn.al/">forn.al</a></p>
 </footer>
+</div>
 </body>
 </html>
