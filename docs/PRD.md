@@ -272,6 +272,15 @@ about `m5_answers_per_month` new answers.
 - The first Ask example was replaced: its answer led with an unfiled-schedule note although its first claim
   answered the question.
 
+**Site remodel decisions (2026-10-12, recorded in `docs/superpowers/plans/2026-10-12-site-remodel.md`):**
+- The site follows forn.al's design system: no borders, no accent colour, mono for what a machine produced and
+  serif for people's sentences. The model's claims are mono; the quoted contract text is serif. It uses the same
+  system fonts, so the CSP is unchanged.
+- Ask stays the home page and shows a strip of headline figures from `facts.json`, each under its tier label and
+  linked to its table on Results.
+- No share links: the address bar never changes and nothing runs on page load, so no page load can spend model
+  budget.
+
 ## 10. Risks and stated limits (these appear on the Method page)
 
 - **The tech half may be thin or low on startup pull.** These are public-company acquisitions;
