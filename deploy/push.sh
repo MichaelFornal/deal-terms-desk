@@ -138,20 +138,48 @@ ssh "$DTD_HOST" "chown -R root:root '$REL' '$BUN'"
 # The embedding model, downloaded once into the service's cache, as the service user.
 ssh "$DTD_HOST" "cd '$REL' && { $LOAD_ENV; $AS_DTD .venv/bin/python -c 'from retrieval.models import Embedder; Embedder().embed_query(\"warm up\")'; }"
 
+# Several apps share this box's Caddy: /etc/caddy/Caddyfile is the base (DTD owns it) and each app installs only its own
+# /etc/caddy/sites/<app>.caddy. validate_site checks one candidate site file against the box's live config: a temp tree
+# on the box holds the base (its import path rewritten to the temp sites/), every current site file except <name>.caddy,
+# and the candidate. The first push after the split meets a base with no import line yet; it is then checked against
+# this release's own base file (the Caddyfile beside the candidate), which is what the install is about to write.
+validate_site() {  # $1 = candidate site file on the box, $2 = its name (the file it will be installed as, minus .caddy)
+  ssh "$DTD_HOST" "bash -s -- '$1' '$2'" <<'VALIDATE'
+set -u
+cand="$1"; name="$2"
+T=$(mktemp -d) || exit 1
+mkdir "$T/sites"
+live=/etc/caddy/Caddyfile
+if ! grep -q '^import /etc/caddy/sites/' "$live" 2>/dev/null; then live="$(dirname "$cand")/Caddyfile"; fi
+sed "s#^import /etc/caddy/sites/#import $T/sites/#" "$live" > "$T/Caddyfile"
+for f in /etc/caddy/sites/*.caddy; do
+  [ -e "$f" ] || continue
+  [ "$(basename "$f")" = "$name.caddy" ] || cp "$f" "$T/sites/"
+done
+cp "$cand" "$T/sites/$name.caddy"
+caddy validate --adapter caddyfile --config "$T/Caddyfile"; r=$?
+rm -rf "$T"
+exit $r
+VALIDATE
+}
+
 # Validate the new config before touching anything live: a bad Caddyfile or unit leaves the old release serving.
 # The unit is verified with its path pointed at this release, since `current` does not move yet.
-if ! ssh "$DTD_HOST" "caddy validate --adapter caddyfile --config '$REL/deploy/Caddyfile' \
-  && T=\$(mktemp -d) && sed 's#/srv/dtd/current#$REL#g' '$REL/deploy/dtd.service' > \"\$T/dtd.service\" \
+if ! validate_site "$REL/deploy/deals.caddy" deals \
+  || ! ssh "$DTD_HOST" "T=\$(mktemp -d) && sed 's#/srv/dtd/current#$REL#g' '$REL/deploy/dtd.service' > \"\$T/dtd.service\" \
   && systemd-analyze verify \"\$T/dtd.service\"; r=\$?; rm -rf \"\$T\"; exit \$r"; then
-  echo "refusing to switch: the new Caddyfile or dtd.service failed validation; the live release is untouched" >&2
+  echo "refusing to switch: the new Caddy config or dtd.service failed validation; the live release is untouched" >&2
   exit 1
 fi
 
-# Switch: atomic symlink swap, config from the release, restart. The previous release is kept for the revert.
+# Switch: atomic symlink swap, config from the release, restart. A release from before the split (no deploy/deals.caddy,
+# met on revert) leaves both Caddy files alone. The previous release is kept for the revert.
 PREV="$(ssh "$DTD_HOST" "readlink /srv/dtd/current" || true)"
 install_release() {  # $1 = release directory on the box
   ssh "$DTD_HOST" "ln -sfn '$1' /srv/dtd/current.next && mv -T /srv/dtd/current.next /srv/dtd/current \
+  && { [ ! -f '$1/deploy/deals.caddy' ] || { mkdir -p /etc/caddy/sites \
   && install -m 644 '$1/deploy/Caddyfile' /etc/caddy/Caddyfile \
+  && install -m 644 '$1/deploy/deals.caddy' /etc/caddy/sites/deals.caddy; }; } \
   && install -m 644 '$1/deploy/dtd.service' /etc/systemd/system/dtd.service \
   && systemctl daemon-reload && systemctl enable --now caddy dtd && systemctl reload caddy && systemctl restart dtd"
 }
