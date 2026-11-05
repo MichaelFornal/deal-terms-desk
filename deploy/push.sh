@@ -139,27 +139,24 @@ ssh "$DTD_HOST" "chown -R root:root '$REL' '$BUN'"
 ssh "$DTD_HOST" "cd '$REL' && { $LOAD_ENV; $AS_DTD .venv/bin/python -c 'from retrieval.models import Embedder; Embedder().embed_query(\"warm up\")'; }"
 
 # Several apps share this box's Caddy: /etc/caddy/Caddyfile is the base (DTD owns it) and each app installs only its own
-# /etc/caddy/sites/<app>.caddy. validate_site checks one candidate site file against the box's live config: a temp tree
-# on the box holds the base (its import path rewritten to the temp sites/), every current site file except <name>.caddy,
-# and the candidate. The first push after the split meets a base with no import line yet; it is then checked against
-# this release's own base file (the Caddyfile beside the candidate), which is what the install is about to write.
+# /etc/caddy/sites/<app>.caddy. validate_site checks exactly what this push is about to install: a temp tree on the box
+# holds this release's base file (the Caddyfile beside the candidate, its import path rewritten to the temp sites/),
+# every current site file except <name>.caddy, and the candidate. It never uses the box's live base, so a changed base
+# is validated too, and the first push after the split needs no special case.
 validate_site() {  # $1 = candidate site file on the box, $2 = its name (the file it will be installed as, minus .caddy)
   ssh "$DTD_HOST" "bash -s -- '$1' '$2'" <<'VALIDATE'
-set -u
+set -eu
 cand="$1"; name="$2"
-T=$(mktemp -d) || exit 1
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
 mkdir "$T/sites"
-live=/etc/caddy/Caddyfile
-if ! grep -q '^import /etc/caddy/sites/' "$live" 2>/dev/null; then live="$(dirname "$cand")/Caddyfile"; fi
-sed "s#^import /etc/caddy/sites/#import $T/sites/#" "$live" > "$T/Caddyfile"
+sed "s#^import /etc/caddy/sites/#import $T/sites/#" "$(dirname "$cand")/Caddyfile" > "$T/Caddyfile"
 for f in /etc/caddy/sites/*.caddy; do
   [ -e "$f" ] || continue
   [ "$(basename "$f")" = "$name.caddy" ] || cp "$f" "$T/sites/"
 done
 cp "$cand" "$T/sites/$name.caddy"
-caddy validate --adapter caddyfile --config "$T/Caddyfile"; r=$?
-rm -rf "$T"
-exit $r
+caddy validate --adapter caddyfile --config "$T/Caddyfile"
 VALIDATE
 }
 
@@ -178,8 +175,8 @@ PREV="$(ssh "$DTD_HOST" "readlink /srv/dtd/current" || true)"
 install_release() {  # $1 = release directory on the box
   ssh "$DTD_HOST" "ln -sfn '$1' /srv/dtd/current.next && mv -T /srv/dtd/current.next /srv/dtd/current \
   && { [ ! -f '$1/deploy/deals.caddy' ] || { mkdir -p /etc/caddy/sites \
-  && install -m 644 '$1/deploy/Caddyfile' /etc/caddy/Caddyfile \
-  && install -m 644 '$1/deploy/deals.caddy' /etc/caddy/sites/deals.caddy; }; } \
+  && install -m 644 '$1/deploy/deals.caddy' /etc/caddy/sites/deals.caddy \
+  && install -m 644 '$1/deploy/Caddyfile' /etc/caddy/Caddyfile; }; } \
   && install -m 644 '$1/deploy/dtd.service' /etc/systemd/system/dtd.service \
   && systemctl daemon-reload && systemctl enable --now caddy dtd && systemctl reload caddy && systemctl restart dtd"
 }
@@ -187,7 +184,8 @@ install_release() {  # $1 = release directory on the box
 revert() {  # $1 = why
   if [ -n "$PREV" ]; then
     echo "$1; reverting to the previous release ${PREV##*/}" >&2
-    install_release "$PREV" || echo "the revert itself failed; fix by hand: ln -sfn $PREV /srv/dtd/current" >&2
+    install_release "$PREV" || echo "the revert itself failed; fix by hand: ln -sfn $PREV /srv/dtd/current; if $PREV is from before the Caddy" \
+      "split, also restore $PREV/deploy/Caddyfile to /etc/caddy/Caddyfile and remove /etc/caddy/sites/deals.caddy" >&2
     echo "reverted from $SHA to ${PREV##*/}; the push failed" >&2
   else
     echo "$1, and there is no previous release to revert to" >&2
