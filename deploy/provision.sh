@@ -43,6 +43,8 @@ if ! command -v caddy >/dev/null; then
   apt-get update -q </dev/null
   apt-get install "${APT_OPTS[@]}" caddy </dev/null
 fi
+# One site file per app, imported by the base /etc/caddy/Caddyfile that deploy/push.sh installs.
+install -d -o root -g root -m 755 /etc/caddy/sites
 
 # uv, using the system Python (Ubuntu 24.04 ships 3.12, which the project requires).
 if ! command -v uv >/dev/null; then

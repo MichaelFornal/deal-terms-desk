@@ -19,21 +19,18 @@ spec.loader.exec_module(smoke)
 
 
 def test_caddy_sets_the_exact_csp_and_proxies_only_the_api():
-    text = Path("deploy/Caddyfile").read_text()
+    text = Path("deploy/deals.caddy").read_text()
     assert f'Content-Security-Policy "{CSP}"' in text and smoke.CSP == CSP
     assert "unsafe-inline" not in text and "unsafe-eval" not in text
     assert "handle /api/*" in text and "reverse_proxy 127.0.0.1:8000" in text
     assert "root * /srv/dtd/current/site/dist" in text
-    assert not re.search(r"^\s*log\b", site_block(text), re.M)  # no access log
+    assert not re.search(r"^\s*log\b", text, re.M)  # no access log
+    assert "deals.forn.al {" in text
 
 
 def global_block(text: str) -> re.Match:
-    """The global options block: the first block in the file, before the site address."""
+    """The global options block: the first block in the file, before anything else."""
     return re.match(r"(?:[ \t]*(?:#[^\n]*)?\n)*\{\n(.*?)\n\}\n", text, re.S)
-
-
-def site_block(text: str) -> str:
-    return text[global_block(text).end():]
 
 
 def test_caddy_error_log_keeps_no_visitor_data():
@@ -44,11 +41,18 @@ def test_caddy_error_log_keeps_no_visitor_data():
     assert re.search(r"^\tlog default \{\n\t\tformat filter \{\n", block, re.M), block
     for field in ("request>remote_ip", "request>client_ip", "request>uri", "request>headers"):
         assert re.search(rf"^\t\t\t{re.escape(field)} delete$", block, re.M), field
-    assert "deals.forn.al {" in site_block(text) and "deals.forn.al" not in block
+    assert "deals.forn.al" not in block
+
+
+def test_base_caddyfile_holds_only_the_log_filter_and_the_import():
+    text = Path("deploy/Caddyfile").read_text()
+    after = text[global_block(text).end():]
+    assert [ln for ln in after.splitlines() if ln.strip()] == ["import /etc/caddy/sites/*.caddy"]
+    assert not re.search(r"^[\w.*-]+\.[\w.-]+\s*\{", text, re.M)  # no site address
 
 
 def test_caddy_caps_the_api_request_body():
-    text = Path("deploy/Caddyfile").read_text()
+    text = Path("deploy/deals.caddy").read_text()
     block = re.search(r"handle /api/\* \{(.*?)\n\t\}", text, re.S).group(1)
     assert re.search(r"request_body\s*\{\s*max_size 16KB\s*\}", block)
     assert block.index("request_body") < block.index("reverse_proxy")
@@ -593,3 +597,125 @@ def test_push_tells_prune_which_release_was_live_before(tmp_path, prev):
     got = subprocess.run(["bash", "-c", fake + line + "\n"], capture_output=True, text=True)
     assert got.returncode == 0, got.stderr
     assert log.read_text() == f"bash '/srv/dtd/releases/new/deploy/prune.sh' /srv/dtd '{prev}'"
+
+
+SITE_PUSH = {"candidate": "deals", "box_sites": "other.caddy"}
+
+
+def validate_site_run(tmp_path, other: str | None, caddy_rc: int, block: bool = False):
+    """Run push.sh's validate_site (or, with block, the whole validation `if` before the swap, then print SWAPPED) on a
+    fake box: ssh runs the script locally with /etc/caddy pointed at tmp_path/box, and a fake caddy refuses unless the
+    import line it is handed names that Caddyfile's own temp sites dir, then records the tree. The box's live base is a
+    decoy: the tree must come from the release. -> (the run, what caddy saw or None, the box, the temp dir it saw)."""
+    box = tmp_path / "box"
+    (box / "sites").mkdir(parents=True)
+    (box / "Caddyfile").write_text(f"live.decoy {{\n}}\nimport {box}/sites/*.caddy\n")
+    (box / "sites" / "deals.caddy").write_text("deals.old {\n}\n")
+    if other:
+        (box / "sites" / "other.caddy").write_text(other)
+    rel = tmp_path / "rel" / "deploy"
+    rel.mkdir(parents=True)
+    (rel / "deals.caddy").write_text("deals.new {\n}\n")
+    # the fake ssh rewrites /etc/caddy in the script, so the release's import line names the fake box to be rewritten
+    (rel / "Caddyfile").write_text(f"{{\n}}\nrelease.base {{\n}}\nimport {box}/sites/*.caddy\n")
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    seen, tree = tmp_path / "seen.txt", tmp_path / "tree.txt"
+    (bin_ / "caddy").write_text(
+        f'#!/bin/bash\ncfg="${{@: -1}}"; d=$(dirname "$cfg"); echo "$d" > {tree}\n'
+        f'grep -qxF "import $d/sites/*.caddy" "$cfg" || {{ echo "import not rewritten to $d/sites" >&2; exit 97; }}\n'
+        f'{{ cat "$cfg"; for f in "$d"/sites/*; do echo "== $(basename $f)"; cat "$f"; done; }} > {seen}\nexit {caddy_rc}\n')
+    (bin_ / "caddy").chmod(0o755)
+    text = Path("deploy/push.sh").read_text()
+    fn = text[text.index("validate_site() {"):text.index("\n}\n", text.index("validate_site() {")) + 3]
+    if block:
+        start = text.index("if ! validate_site")
+        call = f"REL={tmp_path / 'rel'}\n" + text[start:text.index("\nfi\n", start) + 4] + "echo SWAPPED\n"
+    else:
+        call = f"validate_site {rel}/deals.caddy deals\n"
+    script = (f"set -euo pipefail\nDTD_HOST=box\nPATH={bin_}:$PATH\n"
+              f"ssh() {{ case \"$2\" in 'bash -s'*) sed 's#/etc/caddy#{box}#g' | eval \"$2\" ;; *) return 0 ;; esac; }}\n"
+              f"{fn}\n{call}")
+    got = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    return (got, seen.read_text() if seen.exists() else None, box,
+            Path(tree.read_text().strip()) if tree.exists() else None)
+
+
+def test_push_validates_the_combined_config_before_the_swap(tmp_path):
+    text = Path("deploy/push.sh").read_text()
+    assert text.index('validate_site "$REL/deploy/deals.caddy" deals') < text.index("current.next")
+    got, seen, box, tree = validate_site_run(tmp_path / "ok", "other.example {\n}\n", 0)
+    assert got.returncode == 0, got.stderr
+    # the tree holds the release's base (not the live one), the other site, and the candidate (not the live deals.caddy)
+    assert "release.base" in seen and "live.decoy" not in seen
+    assert "== other.caddy\nother.example" in seen and "== deals.caddy\ndeals.new" in seen
+    assert "deals.old" not in seen
+    # the box itself is untouched and the temp tree is gone
+    assert (box / "sites" / "deals.caddy").read_text() == "deals.old {\n}\n"
+    assert not tree.exists()
+    # a failing validate refuses: the push block exits 1 and never reaches the swap; the temp tree is gone too
+    got, _, _, tree = validate_site_run(tmp_path / "bad", "other.example {\n}\n", 1, block=True)
+    assert got.returncode == 1 and "SWAPPED" not in got.stdout and "refusing to switch" in got.stderr
+    assert not tree.exists()
+    got, _, _, tree = validate_site_run(tmp_path / "good", "other.example {\n}\n", 0, block=True)
+    assert got.returncode == 0 and "SWAPPED" in got.stdout and not tree.exists()
+
+
+def test_validation_never_uses_the_boxes_live_base_and_rewrites_the_import(tmp_path):
+    """The tree is built from the base this push installs, so a changed base is validated, and the first push after the
+    split (live base without an import line) needs no special case. The fake caddy exits 97 if the import line was
+    copied instead of rewritten."""
+    (tmp_path / "x").mkdir()
+    got, seen, box, tree = validate_site_run(tmp_path / "x", None, 0)
+    assert got.returncode == 0, got.stderr
+    assert "live.decoy" not in seen and "release.base" in seen and "== deals.caddy\ndeals.new" in seen
+    assert not tree.exists()
+    assert "grep -q '^import" not in Path("deploy/push.sh").read_text()
+
+
+def test_push_writes_no_other_site_file():
+    text = Path("deploy/push.sh").read_text()
+    targets = re.findall(r"install -m 644 \S+ (\S+)", text)
+    assert [x.rstrip(";") for x in targets if "/etc/caddy" in x] == ["/etc/caddy/sites/deals.caddy", "/etc/caddy/Caddyfile"]
+    # no site path built from a variable, and no other literal site file
+    assert not re.search(r"/etc/caddy/sites/[^\s'\"]*\$", text) and not re.search(r"/etc/caddy/\$", text)
+    assert set(re.findall(r"/etc/caddy/sites/[\w.*-]+", text)) <= {"/etc/caddy/sites/deals.caddy", "/etc/caddy/sites/*.caddy"}
+    assert "install -m 644 '$1/deploy/Caddyfile' /etc/caddy/Caddyfile" in text
+    assert "install -m 644 '$1/deploy/deals.caddy' /etc/caddy/sites/deals.caddy" in text
+    # the site file goes in before the base, so the old base ignores it and a later base+site pair was validated
+    assert text.index("/etc/caddy/sites/deals.caddy \\") < text.index("/etc/caddy/Caddyfile; }")
+    assert "restore $PREV/deploy/Caddyfile" in text and "remove /etc/caddy/sites/deals.caddy" in text
+
+
+def test_revert_to_a_pre_split_release_leaves_the_caddy_files_alone(tmp_path):
+    """install_release runs one remote command; the Caddy files are installed only inside a guard on deals.caddy."""
+    got, calls = run_install(tmp_path, "/srv/dtd/releases/old", fail_on="never")
+    assert got.returncode == 0
+    cmd = calls[1]
+    assert "install -m 644 '/srv/dtd/releases/new/deploy/dtd.service' /etc/systemd/system/dtd.service" in cmd
+    guard = "[ ! -f '/srv/dtd/releases/new/deploy/deals.caddy' ] ||"
+    assert guard in cmd and cmd.index(guard) < cmd.index("/etc/caddy/Caddyfile") < cmd.index("dtd.service")
+    assert cmd.index("/etc/caddy/sites/deals.caddy") < cmd.index("/etc/caddy/Caddyfile")
+    # run the command on a fake box with a pre-split release: no Caddy file is written, the unit still is
+    for pre in (True, False):
+        root = tmp_path / ("pre" if pre else "post")
+        rel = root / "rel" / "deploy"
+        rel.mkdir(parents=True)
+        (rel / "dtd.service").write_text("unit")
+        if not pre:
+            (rel / "Caddyfile").write_text("base")
+            (rel / "deals.caddy").write_text("site")
+        (root / "etc" / "caddy").mkdir(parents=True)
+        (root / "etc" / "caddy" / "Caddyfile").write_text("keep")
+        seg = cmd[cmd.index("{ [ ! -f"):cmd.index("; }; }") + len("; }; }")]
+        local = seg.replace("/srv/dtd/releases/new", str(root / "rel")).replace("/etc/", f"{root}/etc/")
+        run = subprocess.run(["bash", "-c", local], capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr
+        assert (root / "etc" / "caddy" / "Caddyfile").read_text() == ("keep" if pre else "base")
+        assert (root / "etc" / "caddy" / "sites" / "deals.caddy").exists() is (not pre)
+
+
+def test_provision_creates_the_sites_dir():
+    text = Path("deploy/provision.sh").read_text()
+    assert "install -d -o root -g root -m 755 /etc/caddy/sites" in text
+    assert text.index("apt-get install \"${APT_OPTS[@]}\" caddy") < text.index("/etc/caddy/sites")
